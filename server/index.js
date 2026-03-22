@@ -17,6 +17,9 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+// DB ready flag — webhook queues until DB is initialised
+let dbReady = false;
+
 // Custom body parser that handles Pine Script's invalid NaN values
 app.use((req, res, next) => {
   if (req.method !== 'POST') return next();
@@ -61,6 +64,7 @@ wss.on('connection', ws => {
 //   "bias": 2, "biasScore": 0.72, "structure": "bullish",
 //   "fvgPresent": true, "volume": 12400 }
 app.post('/webhook/pine', (req, res) => {
+  if (!dbReady) return res.status(503).json({ error: 'DB initialising, retry in 5s' });
   try {
   const data = req.body;
 
@@ -198,6 +202,20 @@ app.get('/api/market-status', (req, res) => {
   res.json(status);
 });
 
+// Manual score trigger — for testing
+app.get('/api/score-now', (req, res) => {
+  if (!dbReady) return res.json({ error: 'DB not ready' });
+  const results = scoreAllPriority();
+  const proceeds = results.filter(r => r.verdict === 'PROCEED');
+  const watches  = results.filter(r => r.verdict === 'WATCH');
+  for (const r of [...proceeds, ...watches]) {
+    const id = saveSignal(r);
+    if (id) r.id = id;
+  }
+  broadcast({ type: 'SCORES', results, ts: Date.now() });
+  res.json({ ok: true, scored: results.length, proceeds: proceeds.length, watches: watches.length, results });
+});
+
 app.get('/api/status', (req, res) => {
   res.json({
     status: 'running',
@@ -242,6 +260,7 @@ cron.schedule('*/30 * * * *', async () => {
 const PORT = process.env.PORT || 3001;
 (async () => {
   await db.init();
+  dbReady = true;
   console.log('[DB] Initialised');
   server.listen(PORT, () => {
     console.log('ATLAS//WATCHLIST ONLINE — port ' + PORT);

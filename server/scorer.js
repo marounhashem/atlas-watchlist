@@ -64,7 +64,8 @@ function calcRR(entry, sl, tp, direction) {
 }
 
 function scoreSymbol(symbol) {
-  const data = getLatestMarketData(symbol);
+  let data;
+  try { data = getLatestMarketData(symbol); } catch(e) { return null; }
   if (!data) return null;
 
   const cfg = SYMBOLS[symbol];
