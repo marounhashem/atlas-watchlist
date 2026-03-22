@@ -254,12 +254,37 @@ function setFilter(f) {
 }
 
 function renderSignals() {
-  let filtered = allSignals.filter(s=>{
-    if(activeFilter==='PROCEED') return s.verdict==='PROCEED';
-    if(activeFilter==='WATCH') return s.verdict==='WATCH';
-    if(activeFilter==='LONG') return s.direction==='LONG';
-    if(activeFilter==='SHORT') return s.direction==='SHORT';
-    return true;
+  // Collapse to one card per symbol+direction — latest signal wins, count refinements
+  const seen = {};
+  const refineCounts = {};
+  const refineTs = {};
+
+  // Sort all signals newest first to find latest per symbol+direction
+  const sorted = [...allSignals].sort((a,b)=>(b.ts||0)-(a.ts||0));
+  for (const s of sorted) {
+    if (s.outcome==='REPLACED') {
+      // Count as refinement for this symbol+direction
+      const key = s.symbol+'_'+(s.direction||'');
+      refineCounts[key] = (refineCounts[key]||0) + 1;
+      if (!refineTs[key]) refineTs[key] = s.outcome_ts || s.ts;
+      continue;
+    }
+    const key = s.symbol+'_'+(s.direction||s.verdict||'');
+    if (!seen[key]) seen[key] = s;
+  }
+
+  // Attach refinement info to each signal
+  const deduped = Object.values(seen).map(s => {
+    const key = s.symbol+'_'+(s.direction||'');
+    return { ...s, _refineCount: refineCounts[key]||0, _refineTs: refineTs[key]||null };
+  });
+
+  let filtered = deduped.filter(s=>{
+    if(activeFilter==='PROCEED') return s.verdict==='PROCEED' && s.outcome==='OPEN';
+    if(activeFilter==='WATCH')   return s.verdict==='WATCH'   && s.outcome==='OPEN';
+    if(activeFilter==='LONG')    return s.direction==='LONG'  && s.outcome==='OPEN';
+    if(activeFilter==='SHORT')   return s.direction==='SHORT' && s.outcome==='OPEN';
+    return s.outcome==='OPEN' || s.verdict==='CLOSED';
   }).sort((a,b)=>{
     const o={PROCEED:0,WATCH:1,SKIP:2,CLOSED:3};
     return (o[a.verdict]??2)-(o[b.verdict]??2)||(b.score||0)-(a.score||0);
@@ -277,7 +302,14 @@ function renderCard(sig) {
   const d=sig.direction||'—';
   const bd=sig.breakdown||{};
   const isOpen=sig.outcome==='OPEN';
-  const outcomeHtml=sig.outcome!=='OPEN'?`<span style="font-size:9px;color:${sig.outcome==='WIN'?'var(--proceed)':'var(--short)'};">${sig.outcome}${sig.pnlPct!=null?' '+(sig.pnlPct>0?'+':'')+sig.pnlPct+'%':''}</span>`:'';
+  const outcomeColor = sig.outcome==='WIN' ? 'var(--proceed)' : 'var(--short)';
+  const outcomeHtml = sig.outcome!=='OPEN'
+    ? `<span style="font-size:9px;color:${outcomeColor};">${sig.outcome}${sig.pnlPct!=null?' '+(sig.pnlPct>0?'+':'')+sig.pnlPct+'%':''}</span>`
+    : '';
+  // Refined tag
+  const refineHtml = sig._refineCount > 0
+    ? `<span style="font-size:8px;color:var(--accent);border:1px solid var(--accent);border-radius:3px;padding:1px 5px;letter-spacing:.5px;">↑ REFINED ×${sig._refineCount} · ${new Date(sig._refineTs).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>`
+    : '';
   const vcls=v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
   const scls=v==='PROCEED'?'sbP':v==='WATCH'?'sbW':'sbS';
   const showAgents = v==='PROCEED';
@@ -285,7 +317,7 @@ function renderCard(sig) {
   return `<div class="card ${v.toLowerCase()}" id="card-${sig.id||sig.symbol}">
     <div class="ctop">
       <div><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span></div>
-      <div style="display:flex;align-items:center;gap:8px;">${outcomeHtml}<span class="verdict ${vcls}">${v}</span></div>
+      <div style="display:flex;align-items:center;gap:6px;">${refineHtml}${outcomeHtml}<span class="verdict ${vcls}">${v}</span></div>
     </div>
     <div class="sbar"><div class="sbfill ${scls}" style="width:${sig.score||0}%"></div></div>
     <div class="cmid">
@@ -304,7 +336,7 @@ function renderCard(sig) {
       <div class="abtn aW" onclick="logOutcome(${sig.id||'null'},'WIN')">WIN</div>
       <div class="abtn aL" onclick="logOutcome(${sig.id||'null'},'LOSS')">LOSS</div>
       <div class="abtn aI" onclick="logOutcome(${sig.id||'null'},'IGNORED')">IGNORE</div>
-      ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',${JSON.stringify(sig).replace(/'/g,"&#39;")})">▼ ANALYSE</div>`:''}
+      ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
     </div>`:''}
     ${showAgents?`<div class="agents-panel" id="agents-${sig.id||sig.symbol}">
       <div class="agent-tabs">
@@ -321,15 +353,16 @@ function renderCard(sig) {
   </div>`;
 }
 
-function toggleAgents(cardId, sig) {
+function toggleAgents(cardId, btn) {
   const panel = document.getElementById('agents-'+cardId);
   if(!panel) return;
   const isOpen = panel.classList.contains('open');
   panel.classList.toggle('open');
-  const btn = panel.previousElementSibling?.querySelector('.aE');
   if(btn) btn.textContent = isOpen ? '▼ ANALYSE' : '▲ CLOSE';
   if(!isOpen && !agentCache[cardId]) {
     agentCache[cardId] = true;
+    // Find signal data from allSignals
+    const sig = allSignals.find(s=>(s.id||s.symbol)==cardId || s.symbol==cardId) || {};
     runAllAgents(cardId, sig);
   }
 }

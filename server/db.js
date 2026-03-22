@@ -183,11 +183,20 @@ function insertLearningLog(entry) {
   persist();
 }
 
+// Get latest signal for a symbol with specific outcome
+function getLatestOpenSignal(symbol, direction) {
+  return get(
+    "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='OPEN' ORDER BY ts DESC LIMIT 1",
+    [symbol, direction]
+  );
+}
+
 module.exports = {
   init, isReady, persist,
   upsertMarketData, getLatestMarketData,
   insertSignal, updateOutcome,
   getOpenSignals, getRecentOutcomes,
   getWeights, updateWeights,
-  insertLearningLog, getAllSignals, getLearningLog
+  insertLearningLog, getAllSignals, getLearningLog,
+  getLatestOpenSignal
 };

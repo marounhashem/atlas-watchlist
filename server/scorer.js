@@ -219,11 +219,61 @@ function scoreAllPriority() {
   });
 }
 
+function isBetterSignal(existing, candidate) {
+  // Better R:R
+  const betterRR = (candidate.rr || 0) > (existing.rr || 0);
+  // Tighter SL — closer to entry = less risk
+  const existingSlDist = Math.abs((existing.sl || 0) - (existing.entry || 0));
+  const candidateSlDist = Math.abs((candidate.sl || 0) - (candidate.entry || 0));
+  const tighterSL = candidateSlDist < existingSlDist * 0.98; // at least 2% tighter
+  // Higher TP — further from entry in trade direction
+  const existingTpDist = Math.abs((existing.tp || 0) - (existing.entry || 0));
+  const candidateTpDist = Math.abs((candidate.tp || 0) - (candidate.entry || 0));
+  const higherTP = candidateTpDist > existingTpDist * 1.02; // at least 2% further
+  return betterRR || tighterSL || higherTP;
+}
+
+function entryTouched(signal, currentPrice) {
+  if (!currentPrice || !signal.entry) return false;
+  const entry = signal.entry;
+  // Entry touched if price crossed through entry point (within 0.15% tolerance)
+  const tolerance = entry * 0.0015;
+  if (signal.direction === 'LONG')  return currentPrice <= entry + tolerance;
+  if (signal.direction === 'SHORT') return currentPrice >= entry - tolerance;
+  return false;
+}
+
 function saveSignal(scored) {
-  if (scored.verdict === 'PROCEED' || scored.verdict === 'WATCH') {
-    return insertSignal(scored);
+  if (scored.verdict !== 'PROCEED' && scored.verdict !== 'WATCH') return null;
+
+  const { getLatestOpenSignal, getLatestMarketData, updateOutcome } = require('./db');
+  const last = getLatestOpenSignal(scored.symbol, scored.direction);
+
+  if (last) {
+    // Get current price to check if entry already touched
+    const marketData = getLatestMarketData(scored.symbol);
+    const currentPrice = marketData ? marketData.close : null;
+
+    if (entryTouched(last, currentPrice)) {
+      // Entry touched — signal is active, never replace
+      console.log(`[Scorer] ${scored.symbol} entry touched — keeping original signal`);
+      return null;
+    }
+
+    // Entry not touched — check if new signal is better
+    if (isBetterSignal(last, scored)) {
+      // Replace: mark old as REPLACED, save new
+      updateOutcome(last.id, 'REPLACED', 0);
+      console.log(`[Scorer] ${scored.symbol} ${scored.direction} — replacing with better signal (RR:${last.rr}→${scored.rr} SL:${last.sl}→${scored.sl} TP:${last.tp}→${scored.tp})`);
+      return insertSignal(scored);
+    }
+
+    // Not better — skip
+    console.log(`[Scorer] ${scored.symbol} ${scored.direction} — existing signal is equal or better, skipping`);
+    return null;
   }
-  return null;
+
+  return insertSignal(scored);
 }
 
 module.exports = { scoreSymbol, scoreAllPriority, saveSignal };
