@@ -3,31 +3,30 @@
 
 const MARKET_HOURS = {
   GOLD: {
-    // CME COMEX: Sun 23:00 – Fri 22:00 UTC (daily break 22:00–23:00)
-    // Effectively 24/5 with 1h daily break
+    // Capital.com: Sun 22:00 UTC – Fri 21:00 UTC (02:00–01:00 UAE)
+    // Daily break 21:00–22:00 UTC (01:00–02:00 UAE)
     type: 'futures_metals',
     timezone: 'UTC',
-    weeklyOpen:  { day: 0, hour: 23, minute: 0 },  // Sunday 23:00 UTC
-    weeklyClose: { day: 5, hour: 22, minute: 0 },  // Friday 22:00 UTC
-    dailyBreak:  { start: { hour: 22, minute: 0 }, end: { hour: 23, minute: 0 } },
-    // No daily break on Sunday open → Monday
+    weeklyOpen:  { day: 0, hour: 22, minute: 0 },  // Sunday 22:00 UTC = 02:00 UAE Monday
+    weeklyClose: { day: 5, hour: 21, minute: 0 },  // Friday 21:00 UTC = 01:00 UAE Saturday
+    dailyBreak:  { start: { hour: 21, minute: 0 }, end: { hour: 22, minute: 0 } },
     noDailyBreakDays: [0]
   },
   SILVER: {
     type: 'futures_metals',
     timezone: 'UTC',
-    weeklyOpen:  { day: 0, hour: 23, minute: 0 },
-    weeklyClose: { day: 5, hour: 22, minute: 0 },
-    dailyBreak:  { start: { hour: 22, minute: 0 }, end: { hour: 23, minute: 0 } },
+    weeklyOpen:  { day: 0, hour: 22, minute: 0 },
+    weeklyClose: { day: 5, hour: 21, minute: 0 },
+    dailyBreak:  { start: { hour: 21, minute: 0 }, end: { hour: 22, minute: 0 } },
     noDailyBreakDays: [0]
   },
   OILWTI: {
-    // CME NYMEX WTI: Sun 23:00 – Fri 22:00 UTC (daily break 22:00–23:00)
+    // Capital.com WTI: same as metals
     type: 'futures_energy',
     timezone: 'UTC',
-    weeklyOpen:  { day: 0, hour: 23, minute: 0 },
-    weeklyClose: { day: 5, hour: 22, minute: 0 },
-    dailyBreak:  { start: { hour: 22, minute: 0 }, end: { hour: 23, minute: 0 } },
+    weeklyOpen:  { day: 0, hour: 22, minute: 0 },
+    weeklyClose: { day: 5, hour: 21, minute: 0 },
+    dailyBreak:  { start: { hour: 21, minute: 0 }, end: { hour: 22, minute: 0 } },
     noDailyBreakDays: [0]
   },
   BTCUSD: {
@@ -36,24 +35,21 @@ const MARKET_HOURS = {
     alwaysOpen: true
   },
   US500: {
-    // CME E-mini S&P: Sun 23:00 – Fri 22:00 UTC
-    // Regular: Mon–Fri 13:30–20:00 UTC (NYSE cash)
-    // Pre/post via futures: 23:00–13:30 and 20:00–22:00
-    // Capital.com offers extended hours — treat as futures schedule
+    // Capital.com US indices: Sun 22:00 UTC – Fri 21:00 UTC
     type: 'index_us',
     timezone: 'UTC',
-    weeklyOpen:  { day: 0, hour: 23, minute: 0 },
-    weeklyClose: { day: 5, hour: 22, minute: 0 },
-    dailyBreak:  { start: { hour: 22, minute: 0 }, end: { hour: 23, minute: 0 } },
+    weeklyOpen:  { day: 0, hour: 22, minute: 0 },
+    weeklyClose: { day: 5, hour: 21, minute: 0 },
+    dailyBreak:  { start: { hour: 21, minute: 0 }, end: { hour: 22, minute: 0 } },
     noDailyBreakDays: [0],
     peakWindow:  { start: { hour: 13, minute: 30 }, end: { hour: 20, minute: 0 } }
   },
   US100: {
     type: 'index_us',
     timezone: 'UTC',
-    weeklyOpen:  { day: 0, hour: 23, minute: 0 },
-    weeklyClose: { day: 5, hour: 22, minute: 0 },
-    dailyBreak:  { start: { hour: 22, minute: 0 }, end: { hour: 23, minute: 0 } },
+    weeklyOpen:  { day: 0, hour: 22, minute: 0 },
+    weeklyClose: { day: 5, hour: 21, minute: 0 },
+    dailyBreak:  { start: { hour: 21, minute: 0 }, end: { hour: 22, minute: 0 } },
     noDailyBreakDays: [0],
     peakWindow:  { start: { hour: 13, minute: 30 }, end: { hour: 20, minute: 0 } }
   },
