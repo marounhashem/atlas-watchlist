@@ -161,7 +161,7 @@ function updateOutcome(signalId, outcome, pnlPct) {
   persist();
 }
 
-function getOpenSignals()      { return all("SELECT * FROM signals WHERE outcome='OPEN' ORDER BY ts DESC"); }
+function getOpenSignals()      { return all("SELECT * FROM signals WHERE outcome IN ('OPEN','ACTIVE') ORDER BY ts DESC"); }
 function getRecentOutcomes(n)  { return all("SELECT * FROM signals WHERE outcome!='OPEN' ORDER BY ts DESC LIMIT ?", [n||80]); }
 function getWeights(symbol)    { return get("SELECT * FROM weights WHERE symbol=? ORDER BY ts DESC LIMIT 1", [symbol]); }
 function getAllSignals(n)       { return all("SELECT * FROM signals ORDER BY ts DESC LIMIT ?", [n||200]); }
@@ -192,7 +192,7 @@ function getLatestOpenSignal(symbol, direction) {
 }
 
 module.exports = {
-  init, isReady, persist,
+  init, isReady, persist, run,
   upsertMarketData, getLatestMarketData,
   insertSignal, updateOutcome,
   getOpenSignals, getRecentOutcomes,

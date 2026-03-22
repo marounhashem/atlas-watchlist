@@ -48,12 +48,18 @@
   .card.watch{border-left:3px solid var(--watch);}
   .card.skip{opacity:.4;border-left:3px solid var(--skip);}
   .card.closed{opacity:.25;border-left:3px solid var(--closed);pointer-events:none;}
+  .card.active{border-left:3px solid #ffd740;background:rgba(255,215,64,.04);}
+  .card.win{opacity:.55;border-left:3px solid var(--proceed);background:rgba(0,230,118,.04);}
+  .card.loss{opacity:.5;border-left:3px solid var(--short);background:rgba(255,82,82,.04);}
+  .card.ignored{opacity:.3;border-left:3px solid var(--border);filter:grayscale(.6);}
+  .card.replaced{opacity:.2;border-left:3px solid var(--accent);filter:grayscale(.8);}
 
   .ctop{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
   .csym{font-size:13px;font-weight:700;letter-spacing:1px;}
   .clabel{font-size:9px;color:var(--muted);margin-left:6px;}
   .verdict{font-size:9px;font-weight:700;letter-spacing:1.5px;padding:2px 8px;border-radius:3px;}
   .vP{background:rgba(0,230,118,.12);color:var(--proceed);border:1px solid rgba(0,230,118,.25);}
+  .vA{background:rgba(255,215,64,.12);color:#ffd740;border:1px solid rgba(255,215,64,.3);}
   .vW{background:rgba(255,215,64,.1);color:var(--watch);border:1px solid rgba(255,215,64,.2);}
   .vS{background:var(--surface2);color:var(--muted);border:1px solid var(--border);}
   .vC{background:#1a1a2a;color:#444466;border:1px solid #22223a;}
@@ -268,23 +274,26 @@ function setFilter(f) {
 }
 
 function renderSignals() {
-  // Collapse to one card per symbol+direction — latest signal wins, count refinements
+  // Collapse to one card per symbol+direction — latest OPEN wins, count refinements
   const seen = {};
   const refineCounts = {};
   const refineTs = {};
 
-  // Sort all signals newest first to find latest per symbol+direction
+  // Sort all signals newest first
   const sorted = [...allSignals].sort((a,b)=>(b.ts||0)-(a.ts||0));
   for (const s of sorted) {
+    const key = s.symbol+'_'+(s.direction||s.verdict||'');
     if (s.outcome==='REPLACED') {
-      // Count as refinement for this symbol+direction
-      const key = s.symbol+'_'+(s.direction||'');
-      refineCounts[key] = (refineCounts[key]||0) + 1;
-      if (!refineTs[key]) refineTs[key] = s.outcome_ts || s.ts;
+      // Count refinements but don't show as primary card
+      const rkey = s.symbol+'_'+(s.direction||'');
+      refineCounts[rkey] = (refineCounts[rkey]||0) + 1;
+      if (!refineTs[rkey]) refineTs[rkey] = s.outcome_ts || s.ts;
+      // Only use REPLACED as fallback if no OPEN exists for this key
+      if (!seen[key]) seen[key] = s;
       continue;
     }
-    const key = s.symbol+'_'+(s.direction||s.verdict||'');
-    if (!seen[key]) seen[key] = s;
+    // OPEN or WIN/LOSS always wins over REPLACED
+    if (!seen[key] || seen[key].outcome==='REPLACED') seen[key] = s;
   }
 
   // Attach refinement info to each signal
@@ -315,23 +324,37 @@ function renderCard(sig) {
 
   const d=sig.direction||'—';
   const bd=sig.breakdown||{};
-  const isOpen=sig.outcome==='OPEN';
-  const outcomeColor = sig.outcome==='WIN' ? 'var(--proceed)' : 'var(--short)';
-  const outcomeHtml = sig.outcome!=='OPEN'
-    ? `<span style="font-size:9px;color:${outcomeColor};">${sig.outcome}${sig.pnlPct!=null?' '+(sig.pnlPct>0?'+':'')+sig.pnlPct+'%':''}</span>`
+  const isOpen=sig.outcome==='OPEN'||sig.outcome==='ACTIVE';
+
+  // Outcome-based card class for dimming
+  const outcomeClass = {ACTIVE:'active',WIN:'win',LOSS:'loss',IGNORED:'ignored',REPLACED:'replaced',EXPIRED:'ignored'}[sig.outcome]||'';
+
+  // Outcome badge
+  const outcomeColor = sig.outcome==='WIN'?'var(--proceed)':sig.outcome==='LOSS'?'var(--short)':'var(--muted)';
+  const outcomeHtml = !isOpen
+    ? `<span style="font-size:9px;font-weight:700;color:${outcomeColor};letter-spacing:.5px;">${sig.outcome}${sig.pnl_pct!=null?' '+(sig.pnl_pct>0?'+':'')+sig.pnl_pct+'%':''}</span>`
     : '';
-  // Refined tag
-  const refineHtml = sig._refineCount > 0
+
+  // Refined tag — only show on open signals
+  const refineHtml = (sig._refineCount>0 && isOpen)
     ? `<span style="font-size:8px;color:var(--accent);border:1px solid var(--accent);border-radius:3px;padding:1px 5px;letter-spacing:.5px;">↑ REFINED ×${sig._refineCount} · ${new Date(sig._refineTs).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>`
     : '';
-  const vcls=v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
-  const scls=v==='PROCEED'?'sbP':v==='WATCH'?'sbW':'sbS';
+
+  // Time ago label for closed signals
+  const timeAgo = !isOpen ? (() => {
+    const mins = Math.round((Date.now()-(sig.outcome_ts||sig.ts))/60000);
+    return mins<60 ? mins+'m ago' : Math.round(mins/60)+'h ago';
+  })() : '';
+  const isActive = sig.outcome==='ACTIVE';
+  const displayV = isActive ? 'ACTIVE' : v;
+  const vcls = isActive ? 'vA' : v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
+  const scls=isActive?'sbW':v==='PROCEED'?'sbP':v==='WATCH'?'sbW':'sbS';
   const showAgents = v==='PROCEED';
 
-  return `<div class="card ${v.toLowerCase()}" id="card-${sig.id||sig.symbol}">
+  return `<div class="card ${v.toLowerCase()} ${outcomeClass}" id="card-${sig.id||sig.symbol}">
     <div class="ctop">
       <div><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span></div>
-      <div style="display:flex;align-items:center;gap:6px;">${refineHtml}${outcomeHtml}<span class="verdict ${vcls}">${v}</span></div>
+      <div style="display:flex;align-items:center;gap:6px;">${refineHtml}${outcomeHtml}${timeAgo?`<span style="font-size:8px;color:var(--muted)">${timeAgo}</span>`:''}<span class="verdict ${vcls}">${v}</span></div>
     </div>
     <div class="sbar"><div class="sbfill ${scls}" style="width:${sig.score||0}%"></div></div>
     <div class="cmid">
@@ -346,12 +369,14 @@ function renderCard(sig) {
       ${['bias','fxssi','ob','session'].map(k=>`<div class="bi"><span class="bl">${{bias:'Pine',fxssi:'FXSSI',ob:'OB',session:'Session'}[k]}</span><div class="bw"><div class="bf" style="width:${Math.round((bd[k]||0)*100)}%"></div></div></div>`).join('')}
     </div>`:''}
     ${sig.reasoning?`<div class="reason">${sig.reasoning}</div>`:''}
-    ${isOpen&&v!=='SKIP'?`<div class="card-actions">
+    <div class="card-actions">
+      ${sig.outcome==='OPEN'&&v!=='SKIP'?`
       <div class="abtn aW" onclick="logOutcome(${sig.id||'null'},'WIN')">WIN</div>
       <div class="abtn aL" onclick="logOutcome(${sig.id||'null'},'LOSS')">LOSS</div>
-      <div class="abtn aI" onclick="logOutcome(${sig.id||'null'},'IGNORED')">IGNORE</div>
+      <div class="abtn aI" onclick="logOutcome(${sig.id||'null'},'IGNORED')">IGNORE</div>`:''}
+      ${sig.outcome==='ACTIVE'?`<span style="font-size:9px;color:#ffd740;letter-spacing:.5px;">● MONITORING TP/SL</span>`:''}
       ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
-    </div>`:''}
+    </div>
     ${showAgents?`<div class="agents-panel" id="agents-${sig.id||sig.symbol}">
       <div class="agent-tabs">
         <div class="atab active" onclick="switchTab('${sig.id||sig.symbol}','research')">RESEARCH</div>

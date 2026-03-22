@@ -266,16 +266,19 @@ function saveSignal(scored) {
       return null;
     }
 
-    // Entry not touched — check if new signal is better
+    // Entry not touched — check if new signal is meaningfully better
     if (isBetterSignal(last, scored)) {
-      // Replace: mark old as REPLACED, save new
-      updateOutcome(last.id, 'REPLACED', 0);
-      console.log(`[Scorer] ${scored.symbol} ${scored.direction} — replacing with better signal (RR:${last.rr}→${scored.rr} SL:${last.sl}→${scored.sl} TP:${last.tp}→${scored.tp})`);
-      return insertSignal(scored);
+      // Save new signal first — only replace old if save succeeds
+      const newId = insertSignal(scored);
+      if (newId) {
+        updateOutcome(last.id, 'REPLACED', 0);
+        console.log(`[Scorer] ${scored.symbol} ${scored.direction} — refined (RR:${last.rr}→${scored.rr} SL:${last.sl}→${scored.sl})`);
+        return newId;
+      }
     }
 
-    // Not better — skip
-    console.log(`[Scorer] ${scored.symbol} ${scored.direction} — existing signal is equal or better, skipping`);
+    // Not better or save failed — keep existing, skip
+    console.log(`[Scorer] ${scored.symbol} ${scored.direction} — keeping existing signal`);
     return null;
   }
 
