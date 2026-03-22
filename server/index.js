@@ -280,6 +280,7 @@ app.get('/api/score-now', (req, res) => {
 app.get('/api/status', (req, res) => {
   res.json({
     status: 'running',
+    db: dbReady ? 'ready' : 'initialising',
     symbols: Object.keys(SYMBOLS).length,
     uptime: Math.round(process.uptime()),
     ts: Date.now()
