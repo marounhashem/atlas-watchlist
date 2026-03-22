@@ -142,9 +142,12 @@ app.post('/webhook/pine', (req, res) => {
     obLargeOrders: data.obLargeOrders || false
   });
 
+  // Verify the write worked
+  const { getLatestMarketData } = require('./db');
+  const check = getLatestMarketData(sym);
+  console.log('[Webhook] Write check for ' + sym + ':', check ? 'SAVED @ ' + check.close : 'FAILED - not found in DB');
   broadcast({ type: 'MARKET_UPDATE', symbol: sym, close: price, ts: Date.now() });
-  console.log('[Webhook] SAVED ' + sym + ' @ ' + price + ' bias=' + bias + ' fvg=' + fvg + ' structure=' + structure);
-  res.json({ ok: true, symbol: sym, price: price, bias: bias });
+  res.json({ ok: true, symbol: sym, price: price, bias: bias, saved: !!check });
   } catch(e) {
     console.error('[Webhook] Error processing ' + (req.body && req.body.symbol) + ':', e.message);
     res.status(200).json({ ok: true, note: 'Processed with errors: ' + e.message });
