@@ -1,0 +1,59 @@
+//@version=5
+indicator("ATLAS Watchlist Signal", overlay=true)
+
+// ── Inputs ──────────────────────────────────────────────────────────────────
+ema_len     = input.int(200, "EMA Length")
+rsi_len     = input.int(14,  "RSI Length")
+macd_fast   = input.int(12,  "MACD Fast")
+macd_slow   = input.int(26,  "MACD Slow")
+macd_sig    = input.int(9,   "MACD Signal")
+
+// ── Indicators ───────────────────────────────────────────────────────────────
+ema200      = ta.ema(close, ema_len)
+[macdLine, signalLine, histLine] = ta.macd(close, macd_fast, macd_slow, macd_sig)
+rsiVal      = ta.rsi(close, rsi_len)
+vwapVal     = ta.vwap(hlc3)
+
+// ── Bias Scoring (−3 to +3) ──────────────────────────────────────────────────
+ema_bull    = close > ema200 ? 1 : -1
+macd_bull   = histLine > 0 ? 1 : -1
+rsi_bull    = rsiVal > 50 ? 1 : -1
+bias        = ema_bull + macd_bull + rsi_bull
+
+// ── Structure: Higher Highs / Lower Lows ────────────────────────────────────
+hh          = high > ta.highest(high[1], 5)
+ll          = low  < ta.lowest(low[1],  5)
+structure   = hh ? "bullish" : ll ? "bearish" : "ranging"
+
+// ── Fair Value Gap detection ─────────────────────────────────────────────────
+fvg_bull    = low > high[2] and close[1] < low    // bullish FVG
+fvg_bear    = high < low[2] and close[1] > high   // bearish FVG
+fvg_present = fvg_bull or fvg_bear
+
+// ── Plot for webhook payload ─────────────────────────────────────────────────
+plot(ema200,   "EMA200",  color.new(color.orange, 0), 1)
+plot(rsiVal,   "RSI",     display=display.none)
+plot(bias,     "Bias",    display=display.none)
+plot(fvg_present ? 1 : 0, "FVG", display=display.none)
+
+// ── Alert condition ───────────────────────────────────────────────────────────
+// Fires on every bar close — TradingView sends to webhook
+alertcondition(true, "ATLAS Bar Close", "bar_close")
+
+// ── WEBHOOK ALERT MESSAGE (paste into TradingView alert dialog) ──────────────
+// {
+//   "symbol": "{{ticker}}",
+//   "close": {{close}},
+//   "high": {{high}},
+//   "low": {{low}},
+//   "open": {{open}},
+//   "volume": {{volume}},
+//   "ema200": {{plot("EMA200")}},
+//   "rsi": {{plot("RSI")}},
+//   "bias": {{plot("Bias")}},
+//   "fvgPresent": {{plot("FVG")}},
+//   "vwap": {{plot_3}},
+//   "macdHist": {{plot_4}},
+//   "interval": "{{interval}}",
+//   "time": "{{timenow}}"
+// }
