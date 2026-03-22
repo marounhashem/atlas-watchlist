@@ -198,7 +198,21 @@
 <script>
 const WS_URL = `${location.protocol==='https:'?'wss':'ws'}://${location.host}`;
 let allSignals=[], activeFilter='ALL', ws;
-let agentCache={};
+const agentCache = {};
+const CACHE_TTL = { research: 4*60*60*1000, predict: 5*60*1000, risk: 0 };
+
+function getCached(symbol, type) {
+  const key = symbol+'_'+type;
+  const entry = agentCache[key];
+  if (!entry) return null;
+  if (CACHE_TTL[type] === 0) return null; // risk always recalculates
+  if (Date.now() - entry.ts > CACHE_TTL[type]) return null;
+  return entry.data;
+}
+
+function setCached(symbol, type, data) {
+  agentCache[symbol+'_'+type] = { data, ts: Date.now() };
+}
 
 // Account size — persisted in localStorage-equivalent (in-memory for Railway)
 let accountSize = 10000;
@@ -359,9 +373,7 @@ function toggleAgents(cardId, btn) {
   const isOpen = panel.classList.contains('open');
   panel.classList.toggle('open');
   if(btn) btn.textContent = isOpen ? '▼ ANALYSE' : '▲ CLOSE';
-  if(!isOpen && !agentCache[cardId]) {
-    agentCache[cardId] = true;
-    // Find signal data from allSignals
+  if(!isOpen) {
     const sig = allSignals.find(s=>(s.id||s.symbol)==cardId || s.symbol==cardId) || {};
     runAllAgents(cardId, sig);
   }
@@ -392,16 +404,58 @@ async function runAgent(cardId, type, sig, acct) {
   const box = document.getElementById('agent-'+type+'-'+cardId);
   if(!box) return;
 
-  const prompts = {
-    research: `You are a trading research analyst. A signal has fired for ${sig.symbol} ${sig.direction} at ${sig.entry}.
-Current data: RSI=${sig.breakdown?.bias?Math.round(sig.breakdown.bias*100):'N/A'}%, structure=${sig.reasoning||'N/A'}.
-Search for and analyse: 1) Recent news or macro events affecting ${sig.symbol} in the last 24-48 hours 2) Any upcoming high-impact events (central bank decisions, economic data, earnings) in next 48h 3) Current market sentiment and positioning.
-Return a structured analysis: SUPPORTS signal, CONTRADICTS signal, or NEUTRAL. Keep it concise, trading-focused, bullet points only. Max 150 words.`,
+  // Check cache first
+  const cached = getCached(sig.symbol, type);
+  if(cached) {
+    if(type==='risk') renderRisk(box, cached, sig, acct);
+    else renderText(box, cached, type);
+    const label = CACHE_TTL[type] > 0
+      ? `<div style="font-size:8px;color:var(--muted);text-align:right;margin-top:4px;">cached · refreshes in ${Math.round((CACHE_TTL[type]-(Date.now()-agentCache[sig.symbol+'_'+type].ts))/60000)}m</div>`
+      : '';
+    box.innerHTML += label;
+    return;
+  }
 
-    predict: `You are a trading prediction analyst. A ${sig.direction} signal fired for ${sig.symbol} at entry ${sig.entry}, SL ${sig.sl}, TP ${sig.tp} (R:R 1:${sig.rr}).
-Signal data: score=${sig.score}%, reasoning="${sig.reasoning}", bias breakdown: ${JSON.stringify(sig.breakdown)}.
-Analyse: 1) Probability of this leg succeeding based on the confluence factors 2) Key price levels to watch 3) Most likely scenario vs alternative scenario 4) Suggested trade management (hold to TP, scale out, move SL to BE timing).
-Be specific about price levels. Max 150 words. Bullet points only.`,
+  const prompts = {
+    research: `You are a professional trading research analyst. A ${sig.direction} signal fired for ${sig.symbol} at ${sig.entry}.
+Search for recent news, macro events, and sentiment for ${sig.symbol} in the last 48 hours.
+Return ONLY this JSON (no markdown, no explanation):
+{
+  "sentiment": "BULLISH|BEARISH|NEUTRAL",
+  "score": <integer -100 to +100, negative=bearish>,
+  "confidence": <integer 0-100>,
+  "supports_signal": true|false,
+  "key_levels": {"support": <price>, "resistance": <price>},
+  "short_term_view": "<one sentence max 15 words>",
+  "supports": ["<bullet 1>", "<bullet 2>", "<bullet 3>"],
+  "contradicts": ["<bullet 1>", "<bullet 2>"],
+  "upcoming_events": ["<event within 48h>"]
+}`,
+
+    predict: `You are a professional trading prediction analyst. Analyse this trade setup:
+Symbol: ${sig.symbol} | Direction: ${sig.direction} | Entry: ${sig.entry} | SL: ${sig.sl} | TP: ${sig.tp} | R:R: 1:${sig.rr} | Score: ${sig.score}%
+Reasoning: ${sig.reasoning}
+Breakdown: Pine=${Math.round((sig.breakdown?.bias||0)*100)}% FXSSI=${Math.round((sig.breakdown?.fxssi||0)*100)}% OB=${Math.round((sig.breakdown?.ob||0)*100)}% Session=${Math.round((sig.breakdown?.session||0)*100)}%
+
+Check hard gates:
+- R:R must be >= 1.5 (current: ${sig.rr})
+- Direction must match structure
+- Entry must be logical (not middle of range)
+- SL must be on correct side of entry for ${sig.direction}
+
+Return ONLY this JSON (no markdown, no explanation):
+{
+  "true_prob": <integer 0-100>,
+  "implied_prob": <integer 0-100>,
+  "edge": <integer, true_prob minus implied_prob>,
+  "confidence": <integer 0-100>,
+  "verdict": "PROCEED|WATCH|SKIP",
+  "verdict_label": "<PROCEED|WATCH|SKIP — one sentence reason>",
+  "hard_gates": [{"gate": "<gate name>", "pass": true|false, "detail": "<brief>"}],
+  "scenario_main": "<most likely price path, specific levels>",
+  "scenario_alt": "<alternative scenario>",
+  "management": "<trade management advice>"
+}`,
 
     risk: `You are a trading risk manager. Calculate position sizing for this trade.
 Trade: ${sig.symbol} ${sig.direction} | Entry: ${sig.entry} | SL: ${sig.sl} | TP: ${sig.tp} | R:R: 1:${sig.rr}
@@ -418,26 +472,75 @@ Calculate and return ONLY this JSON structure (no explanation, no markdown):
       body:JSON.stringify({type, prompt: prompts[type], symbol: sig.symbol, accountSize: acct})
     });
     const data = await res.json();
+    setCached(sig.symbol, type, data.result);
     if(type==='risk') renderRisk(box, data.result, sig, acct);
     else renderText(box, data.result, type);
+    // Add cache label for research/predict
+    if(CACHE_TTL[type] > 0) {
+      const mins = Math.round(CACHE_TTL[type]/60000);
+      box.innerHTML += `<div style="font-size:8px;color:var(--muted);text-align:right;margin-top:4px;">live · cached for ${mins}m</div>`;
+    }
   } catch(e) {
     box.innerHTML = `<div style="color:var(--short);font-size:9px;">Agent error: ${e.message}</div>`;
   }
 }
 
+function parseJSON(raw) {
+  try { return JSON.parse((raw||'').replace(/```json|```/g,'').trim()); } catch(e) { return null; }
+}
+
+function renderResearch(box, raw) {
+  const d = parseJSON(raw);
+  if(!d) { box.innerHTML=`<div style="font-size:9px;color:var(--muted);line-height:1.7;">${raw||'No data'}</div>`; return; }
+  const sentColor = d.sentiment==='BULLISH'?'var(--proceed)':d.sentiment==='BEARISH'?'var(--short)':'var(--watch)';
+  const supportsSignal = d.supports_signal;
+  const vcls = supportsSignal ? 'av-proceed' : 'av-caution';
+  const vtext = supportsSignal ? 'SUPPORTS SIGNAL' : 'CONTRADICTS SIGNAL';
+
+  box.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px;">
+      <div class="kelly-card"><div class="kelly-label">SENTIMENT</div><div class="kelly-val" style="color:${sentColor};font-size:13px;">${d.sentiment||'—'}</div></div>
+      <div class="kelly-card"><div class="kelly-label">SCORE</div><div class="kelly-val" style="color:${sentColor}">${d.score>0?'+':''}${d.score||0}</div></div>
+      <div class="kelly-card"><div class="kelly-label">CONFIDENCE</div><div class="kelly-val">${d.confidence||0}%</div></div>
+    </div>
+    ${d.key_levels?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
+      <div class="kelly-card"><div class="kelly-label">SUPPORT</div><div class="kelly-val" style="font-size:11px;color:var(--proceed)">${d.key_levels.support||'—'}</div></div>
+      <div class="kelly-card"><div class="kelly-label">RESISTANCE</div><div class="kelly-val" style="font-size:11px;color:var(--short)">${d.key_levels.resistance||'—'}</div></div>
+    </div>`:''}
+    ${d.short_term_view?`<div style="font-size:9px;color:var(--text);margin-bottom:6px;line-height:1.5;">${d.short_term_view}</div>`:''}
+    ${(d.supports||[]).length?`<div class="agent-section-title" style="color:var(--proceed)">SUPPORTS SIGNAL</div>${d.supports.map(s=>`<div class="agent-row"><span class="agent-val-good">· ${s}</span></div>`).join('')}`:''}
+    ${(d.contradicts||[]).length?`<div class="agent-section-title" style="color:var(--short);margin-top:6px;">CONTRADICTS</div>${d.contradicts.map(s=>`<div class="agent-row"><span class="agent-val-warn">· ${s}</span></div>`).join('')}`:''}
+    ${(d.upcoming_events||[]).length?`<div class="agent-section-title" style="color:var(--watch);margin-top:6px;">UPCOMING EVENTS</div>${d.upcoming_events.map(s=>`<div class="agent-row">· ${s}</div>`).join('')}`:''}
+    <div class="agent-verdict ${vcls}" style="margin-top:8px;">${vtext}</div>`;
+}
+
+function renderPredict(box, raw) {
+  const d = parseJSON(raw);
+  if(!d) { box.innerHTML=`<div style="font-size:9px;color:var(--muted);line-height:1.7;">${raw||'No data'}</div>`; return; }
+  const vcls = d.verdict==='PROCEED'?'av-proceed':d.verdict==='WATCH'?'av-watch':'av-caution';
+  const edgeColor = (d.edge||0)>0?'var(--proceed)':(d.edge||0)<0?'var(--short)':'var(--muted)';
+  const gates = d.hard_gates||[];
+  const allPass = gates.every(g=>g.pass);
+
+  box.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:8px;">
+      <div class="kelly-card"><div class="kelly-label">TRUE PROB</div><div class="kelly-val">${d.true_prob||0}%</div></div>
+      <div class="kelly-card"><div class="kelly-label">IMPLIED PROB</div><div class="kelly-val">${d.implied_prob||0}%</div></div>
+      <div class="kelly-card"><div class="kelly-label">EDGE</div><div class="kelly-val" style="color:${edgeColor}">${(d.edge||0)>0?'+':''}${d.edge||0}%</div></div>
+      <div class="kelly-card"><div class="kelly-label">CONFIDENCE</div><div class="kelly-val">${d.confidence||0}%</div></div>
+    </div>
+    <div class="agent-verdict ${vcls}" style="margin-bottom:8px;">${d.verdict_label||d.verdict}</div>
+    ${gates.length?`<div class="agent-section-title" style="color:${allPass?'var(--proceed)':'var(--short)'};margin-bottom:4px;">HARD GATES ${allPass?'✓ ALL PASS':'⚠ FAILED'}</div>
+    ${gates.map(g=>`<div class="agent-row"><span style="color:${g.pass?'var(--proceed)':'var(--short)'}">${g.pass?'✓':'✗'} ${g.gate}</span><span style="color:var(--muted);font-size:8px;">${g.detail||''}</span></div>`).join('')}`:''}
+    ${d.scenario_main?`<div class="agent-section-title" style="color:var(--accent);margin-top:6px;">MAIN SCENARIO</div><div style="font-size:9px;color:var(--text);line-height:1.5;margin-bottom:4px;">${d.scenario_main}</div>`:''}
+    ${d.scenario_alt?`<div class="agent-section-title" style="color:var(--muted);margin-top:4px;">ALTERNATIVE</div><div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:4px;">${d.scenario_alt}</div>`:''}
+    ${d.management?`<div class="agent-section-title" style="color:var(--watch);margin-top:4px;">MANAGEMENT</div><div style="font-size:9px;color:var(--text);line-height:1.5;">${d.management}</div>`:''}`;
+}
+
 function renderText(box, text, type) {
+  if(type==='research') { renderResearch(box, text); return; }
+  if(type==='predict')  { renderPredict(box, text);  return; }
   if(!text){box.innerHTML='<div style="color:var(--muted);font-size:9px;">No response</div>';return;}
-  const color = type==='research' ? '#00bcd4' : '#c97cff';
-  const lines = text.split('\n').filter(l=>l.trim());
-  box.innerHTML = lines.map(l=>{
-    l = l.trim().replace(/^[-•*]\s*/,'');
-    const isHeader = l.endsWith(':') || l.toUpperCase()===l;
-    if(isHeader) return `<div class="agent-section-title" style="color:${color};margin-top:6px;">${l}</div>`;
-    const isGood = /support|confirm|align|bullish|bearish.*signal|proceed/i.test(l);
-    const isBad  = /contradict|risk|warn|caution|against/i.test(l);
-    const cls    = isGood?'agent-val-good':isBad?'agent-val-warn':'';
-    return `<div class="agent-row"><span class="${cls}">· ${l}</span></div>`;
-  }).join('');
 }
 
 function renderRisk(box, raw, sig, acct) {
