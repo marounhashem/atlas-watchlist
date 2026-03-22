@@ -43,42 +43,83 @@ wss.on('connection', ws => {
 //   "fvgPresent": true, "volume": 12400 }
 app.post('/webhook/pine', (req, res) => {
   const data = req.body;
-  if (!data || !data.symbol) return res.status(400).json({ error: 'Missing symbol' });
 
-  const sym = data.symbol.toUpperCase();
+  // Accept both new format and existing ATLAS//FIVE Data Bridge format
+  const rawSym = data.symbol || data.ticker || (data.source === 'ATLAS_PINE' ? data.symbol : null);
+  if (!rawSym) return res.status(400).json({ error: 'Missing symbol' });
+
+  const sym = rawSym.toUpperCase()
+    .replace('XAUUSD','GOLD')
+    .replace('XAGUSD','SILVER')
+    .replace('USOIL','OILWTI')
+    .replace('WTI','OILWTI')
+    .replace('OIL_CRUDE','OILWTI')
+    .replace('SPX500USD','US500')
+    .replace('NAS100USD','US100')
+    .replace('DE30EUR','DE40')
+    .replace('UK100GBP','UK100')
+    .replace('JP225USD','J225')
+    .replace('HK50USD','HK50')
+    .replace('CN50USD','CN50');
+
   if (!SYMBOLS[sym]) {
-    console.log(`[Webhook] Unknown symbol: ${sym}`);
+    console.log('[Webhook] Not in priority list:', sym);
     return res.status(200).json({ ok: true, note: 'Symbol not in priority list' });
   }
 
-  // Gate: don't store data when market is closed
   if (!isMarketOpen(sym)) {
-    return res.status(200).json({ ok: true, note: 'Market closed — data not stored' });
+    return res.status(200).json({ ok: true, note: 'Market closed' });
+  }
+
+  // Map ATLAS//FIVE fields → watchlist fields
+  const price   = data.price  || data.close;
+  const ema200  = data.ema200 ? (typeof data.ema200 === 'object' ? data.ema200['1d'] || data.ema200['4h'] || data.ema200['1h'] : data.ema200) : null;
+  const rsi     = data.rsi    ? (typeof data.rsi    === 'object' ? data.rsi['5m']   || data.rsi['1h']   : data.rsi)    : null;
+  const vwap    = data.vwap   ? (typeof data.vwap   === 'object' ? data.vwap.mid    || data.vwap.upper1  : data.vwap)   : null;
+
+  // Bias: use emaScore or derive from emaDir
+  let bias = data.bias || 0;
+  if (!bias && data.emaDir) {
+    const d = data.emaDir;
+    bias = (typeof d === 'object')
+      ? ((d['5m']||0) + (d['1h']||0) + (d['4h']||0))
+      : Number(d) || 0;
+  }
+
+  // FVG
+  const fvg = data.fvg
+    ? (data.fvg.bullActive || data.fvg.bearActive || false)
+    : (data.fvgPresent || false);
+
+  // Structure
+  let structure = data.structure || 'ranging';
+  if (typeof structure === 'object') {
+    structure = structure.bull ? 'bullish' : structure.bear ? 'bearish' : 'ranging';
   }
 
   upsertMarketData(sym, {
-    close: data.close,
-    high: data.high,
-    low: data.low,
-    volume: data.volume,
-    ema200: data.ema200,
-    vwap: data.vwap,
-    rsi: data.rsi,
-    macdHist: data.macdHist,
-    bias: data.bias,
-    biasScore: data.biasScore,
-    structure: data.structure,
-    fvgPresent: data.fvgPresent,
-    fxssiLongPct: data.fxssiLongPct,
-    fxssiShortPct: data.fxssiShortPct,
-    fxssiTrapped: data.fxssiTrapped,
-    obAbsorption: data.obAbsorption,
-    obImbalance: data.obImbalance,
-    obLargeOrders: data.obLargeOrders
+    close:       price,
+    high:        data.high,
+    low:         data.low,
+    volume:      data.volume,
+    ema200:      ema200,
+    vwap:        vwap,
+    rsi:         rsi,
+    macdHist:    data.macdHist || null,
+    bias:        bias,
+    biasScore:   data.biasScore || Math.abs(bias) / 3,
+    structure:   structure,
+    fvgPresent:  fvg,
+    fxssiLongPct:  data.fxssiLongPct  || null,
+    fxssiShortPct: data.fxssiShortPct || null,
+    fxssiTrapped:  data.fxssiTrapped  || null,
+    obAbsorption:  data.obAbsorption  || false,
+    obImbalance:   data.obImbalance   || 0,
+    obLargeOrders: data.obLargeOrders || false
   });
 
-  broadcast({ type: 'MARKET_UPDATE', symbol: sym, close: data.close, ts: Date.now() });
-  console.log(`[Webhook] ${sym} @ ${data.close}`);
+  broadcast({ type: 'MARKET_UPDATE', symbol: sym, close: price, ts: Date.now() });
+  console.log('[Webhook] ' + sym + ' @ ' + price + ' bias=' + bias);
   res.json({ ok: true });
 });
 
