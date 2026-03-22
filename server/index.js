@@ -245,8 +245,7 @@ app.post('/api/agent', async (req, res) => {
     const text = (data.content || [])
       .filter(b => b.type === 'text')
       .map(b => b.text)
-      .join('
-');
+      .join('\n');
 
     console.log(`[Agent] ${type} for ${symbol} — ${text.length} chars`);
     res.json({ ok: true, result: text });

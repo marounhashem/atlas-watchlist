@@ -246,11 +246,17 @@ function entryTouched(signal, currentPrice) {
 function saveSignal(scored) {
   if (scored.verdict !== 'PROCEED' && scored.verdict !== 'WATCH') return null;
 
-  const { getLatestOpenSignal, getLatestMarketData, updateOutcome } = require('./db');
-  const last = getLatestOpenSignal(scored.symbol, scored.direction);
+  let last = null;
+  try {
+    const { getLatestOpenSignal, getLatestMarketData, updateOutcome } = require('./db');
+    last = getLatestOpenSignal(scored.symbol, scored.direction);
+  } catch(e) {
+    console.error('[Scorer] dedup lookup error:', e.message);
+  }
 
   if (last) {
     // Get current price to check if entry already touched
+    const { getLatestMarketData, updateOutcome } = require('./db');
     const marketData = getLatestMarketData(scored.symbol);
     const currentPrice = marketData ? marketData.close : null;
 
