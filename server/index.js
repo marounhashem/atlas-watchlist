@@ -5,7 +5,8 @@ const WebSocket = require('ws');
 const cron = require('node-cron');
 const path = require('path');
 
-const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome } = require('./db');
+const db = require('./db');
+const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome } = db;
 const { isMarketOpen, getMarketStatus, minutesUntilOpen } = require('./marketHours');
 const { scoreAllPriority, saveSignal } = require('./scorer');
 const { checkOutcomes } = require('./outcome');
@@ -174,13 +175,11 @@ cron.schedule('*/30 * * * *', async () => {
 
 // ── Start ─────────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`
-╔══════════════════════════════════════╗
-║   ATLAS//WATCHLIST — ONLINE          ║
-║   http://localhost:${PORT}              ║
-║   Webhook: POST /webhook/pine        ║
-║   Symbols: ${Object.keys(SYMBOLS).length} priority loaded          ║
-╚══════════════════════════════════════╝
-  `);
-});
+(async () => {
+  await db.init();
+  console.log('[DB] Initialised');
+  server.listen(PORT, () => {
+    console.log('ATLAS//WATCHLIST ONLINE — port ' + PORT);
+    console.log('Symbols: ' + Object.keys(SYMBOLS).length + ' priority loaded');
+  });
+})();
