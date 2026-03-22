@@ -143,8 +143,8 @@ app.post('/webhook/pine', (req, res) => {
   });
 
   broadcast({ type: 'MARKET_UPDATE', symbol: sym, close: price, ts: Date.now() });
-  console.log('[Webhook] ' + sym + ' @ ' + price + ' bias=' + bias);
-  res.json({ ok: true });
+  console.log('[Webhook] SAVED ' + sym + ' @ ' + price + ' bias=' + bias + ' fvg=' + fvg + ' structure=' + structure);
+  res.json({ ok: true, symbol: sym, price: price, bias: bias });
   } catch(e) {
     console.error('[Webhook] Error processing ' + (req.body && req.body.symbol) + ':', e.message);
     res.status(200).json({ ok: true, note: 'Processed with errors: ' + e.message });
@@ -202,6 +202,13 @@ app.get('/api/market-status', (req, res) => {
   res.json(status);
 });
 
+// Debug: check latest market data for a symbol
+app.get('/api/data/:symbol', (req, res) => {
+  const { getLatestMarketData } = require('./db');
+  const data = getLatestMarketData(req.params.symbol.toUpperCase());
+  res.json(data || { error: 'No data found for ' + req.params.symbol });
+});
+
 // Manual score trigger — for testing
 app.get('/api/score-now', (req, res) => {
   if (!dbReady) return res.json({ error: 'DB not ready' });
@@ -251,8 +258,9 @@ cron.schedule('2,7,12,17,22,27,32,37,42,47,52,57 * * * *', () => {
   checkOutcomes(broadcast);
 });
 
-// Self-learning cycle every 30 minutes
-cron.schedule('*/30 * * * *', async () => {
+// Learning engine — checks every hour, runs only when thresholds met
+// Minimum 30 closed trades per symbol + 30 new outcomes since last cycle + 6h gap
+cron.schedule('0 * * * *', async () => {
   await runLearningCycle(broadcast);
 });
 
