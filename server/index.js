@@ -320,13 +320,16 @@ cron.schedule('0 * * * *', async () => {
 });
 
 // ── Start ─────────────────────────────────────────────────────────────────────
+// Listen FIRST so healthcheck passes, then init DB in background
 const PORT = process.env.PORT || 3001;
-(async () => {
-  await db.init();
-  dbReady = true;
-  console.log('[DB] Initialised');
-  server.listen(PORT, () => {
-    console.log('ATLAS//WATCHLIST ONLINE — port ' + PORT);
-    console.log('Symbols: ' + Object.keys(SYMBOLS).length + ' priority loaded');
+server.listen(PORT, () => {
+  console.log('ATLAS//WATCHLIST ONLINE — port ' + PORT);
+  console.log('Symbols: ' + Object.keys(SYMBOLS).length + ' priority loaded');
+  // Init DB after server is accepting connections
+  db.init().then(() => {
+    dbReady = true;
+    console.log('[DB] Initialised and ready');
+  }).catch(e => {
+    console.error('[DB] Init failed:', e.message);
   });
-})();
+});
