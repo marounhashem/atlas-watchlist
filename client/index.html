@@ -303,14 +303,26 @@ function renderSignals() {
   });
 
   let filtered = deduped.filter(s=>{
-    if(activeFilter==='PROCEED') return s.verdict==='PROCEED' && s.outcome==='OPEN';
-    if(activeFilter==='WATCH')   return s.verdict==='WATCH'   && s.outcome==='OPEN';
-    if(activeFilter==='LONG')    return s.direction==='LONG'  && s.outcome==='OPEN';
-    if(activeFilter==='SHORT')   return s.direction==='SHORT' && s.outcome==='OPEN';
-    return s.outcome==='OPEN' || s.verdict==='CLOSED';
+    // Never show REPLACED signals
+    if(s.outcome==='REPLACED') return false;
+    // Hide WIN/LOSS/IGNORED/EXPIRED from dashboard — DB only
+    if(['WIN','LOSS','IGNORED','EXPIRED'].includes(s.outcome)) return false;
+    // CLOSED = market closed cards, only in ALL
+    if(s.verdict==='CLOSED') return activeFilter==='ALL';
+    // Active filters
+    if(activeFilter==='PROCEED') return s.verdict==='PROCEED';
+    if(activeFilter==='WATCH')   return s.verdict==='WATCH';
+    if(activeFilter==='LONG')    return s.direction==='LONG';
+    if(activeFilter==='SHORT')   return s.direction==='SHORT';
+    return true;
   }).sort((a,b)=>{
-    const o={PROCEED:0,WATCH:1,SKIP:2,CLOSED:3};
-    return (o[a.verdict]??2)-(o[b.verdict]??2)||(b.score||0)-(a.score||0);
+    // ACTIVE signals first, then PROCEED, WATCH, SKIP, CLOSED
+    const stateO = {ACTIVE:0,OPEN:1};
+    const sa = stateO[a.outcome]??1;
+    const sb = stateO[b.outcome]??1;
+    if(sa!==sb) return sa-sb;
+    const vo={PROCEED:0,WATCH:1,SKIP:2,CLOSED:3};
+    return (vo[a.verdict]??2)-(vo[b.verdict]??2)||(b.score||0)-(a.score||0);
   });
 
   const c=document.getElementById('signals-container');
