@@ -17,7 +17,21 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-app.use(express.json());
+// Custom body parser that handles Pine Script's invalid NaN values
+app.use((req, res, next) => {
+  if (req.method !== 'POST') return next();
+  let body = '';
+  req.on('data', chunk => body += chunk.toString());
+  req.on('end', () => {
+    try {
+      const sanitized = body.replace(/:NaN/g, ':null').replace(/: NaN/g, ':null').replace(/:Infinity/g, ':null');
+      req.body = JSON.parse(sanitized);
+    } catch(e) {
+      req.body = {};
+    }
+    next();
+  });
+});
 app.use(express.static(path.join(__dirname, '../client')));
 
 // ── WebSocket broadcast ──────────────────────────────────────────────────────
