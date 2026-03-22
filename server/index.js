@@ -24,7 +24,12 @@ app.use((req, res, next) => {
   req.on('data', chunk => body += chunk.toString());
   req.on('end', () => {
     try {
-      const sanitized = body.replace(/:NaN/g, ':null').replace(/: NaN/g, ':null').replace(/:Infinity/g, ':null');
+      const sanitized = body
+        .replace(/:NaN([,}\]])/g, ':null$1')
+        .replace(/: NaN([,}\]])/g, ':null$1')
+        .replace(/:NaN$/g, ':null')
+        .replace(/:Infinity/g, ':null')
+        .replace(/:-Infinity/g, ':null');
       req.body = JSON.parse(sanitized);
     } catch(e) {
       req.body = {};
@@ -56,6 +61,7 @@ wss.on('connection', ws => {
 //   "bias": 2, "biasScore": 0.72, "structure": "bullish",
 //   "fvgPresent": true, "volume": 12400 }
 app.post('/webhook/pine', (req, res) => {
+  try {
   const data = req.body;
 
   // Accept both new format and existing ATLAS//FIVE Data Bridge format
@@ -135,6 +141,10 @@ app.post('/webhook/pine', (req, res) => {
   broadcast({ type: 'MARKET_UPDATE', symbol: sym, close: price, ts: Date.now() });
   console.log('[Webhook] ' + sym + ' @ ' + price + ' bias=' + bias);
   res.json({ ok: true });
+  } catch(e) {
+    console.error('[Webhook] Error processing ' + (req.body && req.body.symbol) + ':', e.message);
+    res.status(200).json({ ok: true, note: 'Processed with errors: ' + e.message });
+  }
 });
 
 // ── Webhook: FXSSI manual paste ──────────────────────────────────────────────
