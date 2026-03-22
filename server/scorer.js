@@ -52,6 +52,9 @@ function inferDirection(data) {
   const bias = data.bias || 0;
   if (bias > 0) return 'LONG';
   if (bias < 0) return 'SHORT';
+  // Fallback to structure if bias is 0
+  if (data.structure === 'bullish') return 'LONG';
+  if (data.structure === 'bearish') return 'SHORT';
   return null;
 }
 
@@ -189,7 +192,21 @@ function scoreAllPriority() {
         continue;
       }
       const result = scoreSymbol(symbol);
-      if (result) results.push(result);
+      if (result) {
+        results.push(result);
+      } else {
+        // Symbol is open but no data yet or no direction — show as SKIP
+        results.push({
+          symbol,
+          label: SYMBOLS[symbol].label,
+          direction: null,
+          score: 0,
+          verdict: 'SKIP',
+          session: require('./config').getSessionNow(),
+          reasoning: 'No data yet or insufficient bias signal',
+          ts: Date.now()
+        });
+      }
     } catch (e) {
       console.error(`Scorer error ${symbol}:`, e.message);
     }

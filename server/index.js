@@ -101,14 +101,21 @@ app.post('/webhook/pine', (req, res) => {
   const rsi     = data.rsi    ? (typeof data.rsi    === 'object' ? data.rsi['5m']   || data.rsi['1h']   : data.rsi)    : null;
   const vwap    = data.vwap   ? (typeof data.vwap   === 'object' ? data.vwap.mid    || data.vwap.upper1  : data.vwap)   : null;
 
-  // Bias: use emaScore or derive from emaDir
-  let bias = data.bias || 0;
-  if (!bias && data.emaDir) {
+  // Bias: handle object format {"score":-6,"bull":false,"bear":true} or number
+  let bias = 0;
+  if (data.bias !== null && data.bias !== undefined) {
+    if (typeof data.bias === 'object') {
+      bias = data.bias.score || (data.bias.bear ? -3 : data.bias.bull ? 3 : 0);
+    } else {
+      bias = Number(data.bias) || 0;
+    }
+  } else if (data.emaDir) {
     const d = data.emaDir;
     bias = (typeof d === 'object')
       ? ((d['5m']||0) + (d['1h']||0) + (d['4h']||0))
       : Number(d) || 0;
   }
+  const biasScore = Math.abs(bias) / 6; // normalize -6..+6 range to 0..1
 
   // FVG
   const fvg = data.fvg
