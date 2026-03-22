@@ -5,458 +5,503 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ATLAS // WATCHLIST</title>
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --bg: #0a0a0f;
-    --surface: #12121a;
-    --surface2: #1a1a26;
-    --border: #2a2a3a;
-    --text: #e8e8f0;
-    --muted: #6a6a8a;
-    --proceed: #00e676;
-    --watch: #ffd740;
-    --skip: #444460;
-    --long: #00bcd4;
-    --short: #ff5252;
-    --accent: #7c4dff;
+  *{box-sizing:border-box;margin:0;padding:0;}
+  :root{
+    --bg:#0a0a0f;--surface:#12121a;--surface2:#1a1a26;--border:#2a2a3a;
+    --text:#e8e8f0;--muted:#6a6a8a;--dim:#3a3a5a;
+    --proceed:#00e676;--watch:#ffd740;--skip:#444460;--closed:#2a2a3a;
+    --long:#00bcd4;--short:#ff5252;--accent:#7c4dff;
   }
-  body { background: var(--bg); color: var(--text); font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; min-height: 100vh; }
+  body{background:var(--bg);color:var(--text);font-family:'SF Mono','Fira Code',monospace;font-size:12px;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  @keyframes slideIn{from{transform:translateX(20px);opacity:0}to{transform:translateX(0);opacity:1}}
+  @keyframes spin{to{transform:rotate(360deg)}}
 
-  /* Header */
-  .header { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
-  .logo { font-size: 16px; font-weight: 700; letter-spacing: 2px; color: var(--accent); }
-  .logo span { color: var(--muted); }
-  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--proceed); display: inline-block; margin-right: 6px; animation: pulse 2s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-  .header-right { display: flex; gap: 20px; align-items: center; color: var(--muted); font-size: 11px; }
-  .session-badge { padding: 3px 10px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: 1px; }
-  .session-asia { background: #1a1a40; color: #7c7cff; border: 1px solid #3a3a70; }
-  .session-london { background: #1a2a1a; color: #4caf50; border: 1px solid #2a4a2a; }
-  .session-newYork { background: #2a1a1a; color: #ff7043; border: 1px solid #4a2a2a; }
-  .session-offHours { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .header{display:flex;align-items:center;justify-content:space-between;padding:10px 18px;background:var(--surface);border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px;}
+  .logo{font-size:14px;font-weight:700;letter-spacing:2px;color:var(--accent);}
+  .logo span{color:var(--muted);}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--proceed);display:inline-block;margin-right:5px;animation:pulse 2s infinite;}
+  .hright{display:flex;gap:12px;align-items:center;color:var(--muted);font-size:10px;flex-wrap:wrap;}
+  .sbadge{padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;letter-spacing:1px;}
+  .session-asia{background:#1a1a40;color:#7c7cff;border:1px solid #3a3a70;}
+  .session-london{background:#1a2a1a;color:#4caf50;border:1px solid #2a4a2a;}
+  .session-newYork{background:#2a1a1a;color:#ff7043;border:1px solid #4a2a2a;}
+  .session-offHours{background:var(--surface2);color:var(--muted);border:1px solid var(--border);}
 
-  /* Layout */
-  .main { display: grid; grid-template-columns: 1fr 320px; gap: 0; height: calc(100vh - 53px); overflow: hidden; }
-  .left { overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-  .right { border-left: 1px solid var(--border); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  /* Account input in header */
+  .acct-wrap{display:flex;align-items:center;gap:6px;font-size:10px;color:var(--muted);}
+  .acct-wrap input{background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:inherit;font-size:10px;padding:3px 7px;width:90px;text-align:right;}
+  .acct-wrap input:focus{outline:none;border-color:var(--accent);}
 
-  /* Signal cards */
-  .section-title { font-size: 10px; letter-spacing: 2px; color: var(--muted); padding: 4px 0 8px; text-transform: uppercase; }
-  .signal-grid { display: flex; flex-direction: column; gap: 8px; }
-  .signal-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; position: relative; transition: border-color .2s; cursor: default; }
-  .signal-card:hover { border-color: #3a3a5a; }
-  .signal-card.proceed { border-left: 3px solid var(--proceed); }
-  .signal-card.watch { border-left: 3px solid var(--watch); }
-  .signal-card.skip { opacity: 0.45; border-left: 3px solid var(--skip); }
+  .layout{display:grid;grid-template-columns:1fr 260px;min-height:calc(100vh - 45px);}
+  .left{overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px;}
+  .right{border-left:1px solid var(--border);overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px;}
 
-  .card-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-  .card-symbol { font-size: 15px; font-weight: 700; letter-spacing: 1px; }
-  .card-label { font-size: 10px; color: var(--muted); margin-left: 8px; }
-  .card-verdict { font-size: 10px; font-weight: 700; letter-spacing: 1.5px; padding: 3px 10px; border-radius: 4px; }
-  .verdict-PROCEED { background: rgba(0,230,118,.15); color: var(--proceed); border: 1px solid rgba(0,230,118,.3); }
-  .verdict-WATCH { background: rgba(255,215,64,.1); color: var(--watch); border: 1px solid rgba(255,215,64,.25); }
-  .verdict-SKIP { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); }
+  .filters{display:flex;gap:5px;margin-bottom:2px;}
+  .fbtn{font-size:9px;padding:3px 8px;border-radius:3px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;letter-spacing:1px;}
+  .fbtn.on{border-color:var(--accent);color:var(--accent);background:rgba(124,77,255,.1);}
+  .sec{font-size:9px;letter-spacing:2px;color:var(--muted);padding:2px 0 6px;text-transform:uppercase;}
 
-  .card-mid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
-  .card-field { display: flex; flex-direction: column; gap: 2px; }
-  .field-label { font-size: 9px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
-  .field-value { font-size: 13px; font-weight: 600; }
-  .dir-LONG { color: var(--long); }
-  .dir-SHORT { color: var(--short); }
+  /* Signal card */
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:11px 13px;}
+  .card.proceed{border-left:3px solid var(--proceed);}
+  .card.watch{border-left:3px solid var(--watch);}
+  .card.skip{opacity:.4;border-left:3px solid var(--skip);}
+  .card.closed{opacity:.25;border-left:3px solid var(--closed);pointer-events:none;}
 
-  .score-bar-wrap { height: 3px; background: var(--surface2); border-radius: 2px; margin-bottom: 10px; }
-  .score-bar { height: 3px; border-radius: 2px; transition: width .6s ease; }
-  .score-bar.proceed { background: var(--proceed); }
-  .score-bar.watch { background: var(--watch); }
-  .score-bar.skip { background: var(--skip); }
+  .ctop{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+  .csym{font-size:13px;font-weight:700;letter-spacing:1px;}
+  .clabel{font-size:9px;color:var(--muted);margin-left:6px;}
+  .verdict{font-size:9px;font-weight:700;letter-spacing:1.5px;padding:2px 8px;border-radius:3px;}
+  .vP{background:rgba(0,230,118,.12);color:var(--proceed);border:1px solid rgba(0,230,118,.25);}
+  .vW{background:rgba(255,215,64,.1);color:var(--watch);border:1px solid rgba(255,215,64,.2);}
+  .vS{background:var(--surface2);color:var(--muted);border:1px solid var(--border);}
+  .vC{background:#1a1a2a;color:#444466;border:1px solid #22223a;}
 
-  .card-reasoning { font-size: 10px; color: var(--muted); line-height: 1.5; border-top: 1px solid var(--border); padding-top: 8px; }
+  .sbar{height:2px;background:var(--surface2);border-radius:1px;margin-bottom:8px;}
+  .sbfill{height:2px;border-radius:1px;}
+  .sbP{background:var(--proceed);}.sbW{background:var(--watch);}.sbS{background:var(--skip);}
 
-  .card-actions { display: flex; gap: 6px; margin-top: 10px; }
-  .btn-outcome { font-size: 10px; padding: 4px 10px; border-radius: 4px; border: 1px solid; cursor: pointer; font-family: inherit; font-weight: 700; letter-spacing: 1px; background: transparent; transition: all .15s; }
-  .btn-win { border-color: var(--proceed); color: var(--proceed); }
-  .btn-win:hover { background: rgba(0,230,118,.15); }
-  .btn-loss { border-color: var(--short); color: var(--short); }
-  .btn-loss:hover { background: rgba(255,82,82,.15); }
-  .btn-ignore { border-color: var(--border); color: var(--muted); }
-  .btn-ignore:hover { background: var(--surface2); }
+  .cmid{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin-bottom:7px;}
+  .cf{display:flex;flex-direction:column;gap:1px;min-width:0;}
+  .fl{font-size:8px;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;}
+  .fv{font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .dL{color:var(--long);}.dS{color:var(--short);}
 
-  /* Breakdown bars */
-  .breakdown { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
-  .breakdown-item { display: flex; flex-direction: column; gap: 3px; }
-  .breakdown-label { font-size: 9px; color: var(--muted); }
-  .breakdown-bar-wrap { height: 3px; background: var(--surface2); border-radius: 2px; }
-  .breakdown-bar { height: 3px; border-radius: 2px; background: var(--accent); }
+  .bkd{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:7px;}
+  .bi{display:flex;flex-direction:column;gap:2px;}
+  .bl{font-size:8px;color:var(--muted);}
+  .bw{height:2px;background:var(--surface2);border-radius:1px;}
+  .bf{height:2px;border-radius:1px;background:var(--accent);}
 
-  /* Right panel */
-  .panel-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px; }
-  .panel-title { font-size: 10px; letter-spacing: 2px; color: var(--muted); margin-bottom: 12px; text-transform: uppercase; }
+  .reason{font-size:9px;color:var(--muted);line-height:1.5;border-top:1px solid var(--border);padding-top:6px;}
 
-  /* Stats table */
-  .stats-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
-  .stats-row:last-child { border-bottom: none; }
-  .stats-sym { color: var(--text); font-weight: 600; }
-  .stats-wr { font-weight: 700; }
-  .wr-good { color: var(--proceed); }
-  .wr-mid { color: var(--watch); }
-  .wr-bad { color: var(--short); }
+  .card-actions{display:flex;gap:5px;margin-top:8px;align-items:center;}
+  .abtn{font-size:9px;padding:3px 8px;border-radius:3px;border:1px solid;cursor:pointer;background:transparent;font-weight:700;letter-spacing:.8px;font-family:inherit;}
+  .aW{border-color:var(--proceed);color:var(--proceed);}
+  .aL{border-color:var(--short);color:var(--short);}
+  .aI{border-color:var(--border);color:var(--muted);}
+  .aE{border-color:var(--accent);color:var(--accent);margin-left:auto;}
+  .aE:hover{background:rgba(124,77,255,.15);}
 
-  /* Learning log */
-  .log-entry { font-size: 10px; color: var(--muted); padding: 8px 0; border-bottom: 1px solid var(--border); line-height: 1.6; }
-  .log-entry:last-child { border-bottom: none; }
-  .log-ts { color: #444460; margin-bottom: 3px; }
-  .log-change { color: var(--accent); }
+  /* Agent panel */
+  .agents-panel{margin-top:8px;border-top:1px solid var(--border);padding-top:8px;display:none;}
+  .agents-panel.open{display:block;}
+  .agent-tabs{display:flex;gap:4px;margin-bottom:8px;}
+  .atab{font-size:9px;padding:3px 10px;border-radius:3px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:inherit;letter-spacing:.8px;}
+  .atab.active{border-color:var(--accent);color:var(--accent);background:rgba(124,77,255,.1);}
+  .agent-content{min-height:60px;}
+  .agent-box{background:var(--surface2);border-radius:5px;padding:10px 12px;font-size:10px;color:var(--muted);line-height:1.7;display:none;}
+  .agent-box.active{display:block;}
+  .agent-loading{display:flex;align-items:center;gap:8px;font-size:9px;color:var(--muted);}
+  .spinner{width:10px;height:10px;border:1px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;}
 
-  /* Empty state */
-  .empty { color: var(--muted); font-size: 11px; text-align: center; padding: 30px; line-height: 2; }
+  /* Agent content styles */
+  .agent-section{margin-bottom:8px;}
+  .agent-section-title{font-size:9px;font-weight:700;color:var(--text);letter-spacing:1px;margin-bottom:4px;text-transform:uppercase;}
+  .agent-row{display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--border);font-size:9px;}
+  .agent-row:last-child{border-bottom:none;}
+  .agent-val-good{color:var(--proceed);font-weight:700;}
+  .agent-val-warn{color:var(--watch);font-weight:700;}
+  .agent-val-bad{color:var(--short);font-weight:700;}
+  .agent-verdict{font-size:10px;font-weight:700;padding:4px 10px;border-radius:3px;display:inline-block;margin-top:6px;}
+  .av-proceed{background:rgba(0,230,118,.12);color:var(--proceed);border:1px solid rgba(0,230,118,.25);}
+  .av-watch{background:rgba(255,215,64,.1);color:var(--watch);border:1px solid rgba(255,215,64,.2);}
+  .av-caution{background:rgba(255,82,82,.1);color:var(--short);border:1px solid rgba(255,82,82,.25);}
 
-  /* Toast */
-  .toast { position: fixed; bottom: 20px; right: 20px; background: var(--surface2); border: 1px solid var(--proceed); border-radius: 6px; padding: 12px 18px; font-size: 12px; color: var(--proceed); z-index: 999; animation: slideIn .3s ease; max-width: 300px; }
-  @keyframes slideIn { from{transform:translateX(20px);opacity:0} to{transform:translateX(0);opacity:1} }
+  /* Kelly sizing */
+  .kelly-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:6px;}
+  .kelly-card{background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:8px 10px;}
+  .kelly-label{font-size:8px;color:var(--muted);letter-spacing:1px;margin-bottom:4px;}
+  .kelly-val{font-size:14px;font-weight:700;color:var(--text);}
+  .kelly-sub{font-size:8px;color:var(--muted);margin-top:2px;}
 
-  /* Session filter */
-  .filters { display: flex; gap: 8px; margin-bottom: 4px; }
-  .filter-btn { font-size: 10px; padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--muted); cursor: pointer; font-family: inherit; letter-spacing: 1px; transition: all .15s; }
-  .filter-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(124,77,255,.1); }
-
-  .signal-card.closed { opacity: 0.3; border-left: 3px solid #333355; pointer-events: none; }
-  .verdict-CLOSED { background: #1a1a2a; color: #444466; border: 1px solid #2a2a3a; }
-
-  /* Market hours grid */
-  .mh-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .mh-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; border-radius: 5px; font-size: 10px; }
-  .mh-open  { background: rgba(0,230,118,.07); border: 1px solid rgba(0,230,118,.2); }
-  .mh-closed{ background: rgba(255,255,255,.03); border: 1px solid var(--border); }
-  .mh-sym   { font-weight: 700; color: var(--text); }
-  .mh-status-open   { color: var(--proceed); font-size: 9px; letter-spacing: 1px; }
-  .mh-status-closed { color: var(--muted);   font-size: 9px; letter-spacing: 1px; }
+  /* Right panels */
+  .panel{background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:11px;}
+  .ptitle{font-size:9px;letter-spacing:2px;color:var(--muted);margin-bottom:9px;text-transform:uppercase;}
+  .mhgrid{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
+  .mhrow{display:flex;align-items:center;justify-content:space-between;padding:4px 7px;border-radius:4px;font-size:9px;}
+  .mhO{background:rgba(0,230,118,.06);border:1px solid rgba(0,230,118,.18);}
+  .mhC{background:rgba(255,255,255,.02);border:1px solid #22223a;}
+  .mhsym{font-weight:700;}
+  .mhopen{color:var(--proceed);font-size:8px;}
+  .mhclosed{color:var(--muted);font-size:8px;}
+  .srow{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px solid var(--border);font-size:10px;}
+  .srow:last-child{border-bottom:none;}
+  .wr-g{color:var(--proceed);font-weight:700;}
+  .wr-m{color:var(--watch);font-weight:700;}
+  .wr-b{color:var(--short);font-weight:700;}
+  .log{font-size:9px;color:var(--muted);padding:6px 0;border-bottom:1px solid var(--border);line-height:1.6;}
+  .log:last-child{border-bottom:none;}
+  .logts{color:#33334a;margin-bottom:2px;}
+  .logch{color:var(--accent);}
+  .empty{color:var(--muted);font-size:10px;text-align:center;padding:16px;line-height:2;}
+  .toast{position:fixed;bottom:20px;right:20px;background:var(--surface2);border:1px solid var(--proceed);border-radius:6px;padding:10px 16px;font-size:11px;color:var(--proceed);z-index:999;animation:slideIn .3s ease;}
+  ::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
 </style>
 </head>
 <body>
 
 <div class="header">
   <div class="logo">ATLAS<span>//</span>WATCHLIST</div>
-  <div class="header-right">
-    <span><span class="status-dot" id="dot"></span><span id="conn-status">CONNECTING</span></span>
-    <span id="session-badge" class="session-badge session-offHours">OFF HOURS</span>
+  <div class="hright">
+    <span><span class="dot" id="dot"></span><span id="conn-status">CONNECTING</span></span>
+    <span id="session-badge" class="sbadge session-offHours">OFF HOURS</span>
     <span id="clock">--:--:--</span>
+    <div class="acct-wrap">
+      <span>Account</span>
+      <input type="number" id="account-size" value="10000" min="100" step="100" title="Your trading account size in USD">
+      <span>USD</span>
+    </div>
     <span id="symbol-count">0 symbols</span>
   </div>
 </div>
 
-<div class="main">
-  <div class="left">
-    <div style="display:flex;align-items:center;justify-content:space-between;">
-      <div class="section-title">Live signals</div>
-      <div class="filters">
-        <button class="filter-btn active" onclick="setFilter('ALL')">ALL</button>
-        <button class="filter-btn" onclick="setFilter('PROCEED')">PROCEED</button>
-        <button class="filter-btn" onclick="setFilter('WATCH')">WATCH</button>
-        <button class="filter-btn" onclick="setFilter('LONG')">LONG</button>
-        <button class="filter-btn" onclick="setFilter('SHORT')">SHORT</button>
-      </div>
-    </div>
-    <div class="signal-grid" id="signals-container">
-      <div class="empty">Waiting for signals...<br>Pine Script alerts will appear here<br>as they fire from TradingView.</div>
+<div class="layout">
+<div class="left">
+  <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div class="sec">Live signals</div>
+    <div class="filters">
+      <div class="fbtn on" onclick="setFilter('ALL')">ALL</div>
+      <div class="fbtn" onclick="setFilter('PROCEED')">PROCEED</div>
+      <div class="fbtn" onclick="setFilter('WATCH')">WATCH</div>
+      <div class="fbtn" onclick="setFilter('LONG')">LONG</div>
+      <div class="fbtn" onclick="setFilter('SHORT')">SHORT</div>
     </div>
   </div>
+  <div id="signals-container"><div class="empty">Waiting for signals...<br>Pine Script alerts will appear here.</div></div>
+</div>
 
-  <div class="right">
-    <div class="panel-card">
-      <div class="panel-title">Market hours — now</div>
-      <div class="mh-grid" id="mh-container"><div class="empty" style="padding:6px;grid-column:span 2">Loading...</div></div>
-    </div>
-    <div class="panel-card">
-      <div class="panel-title">Win rate by symbol</div>
-      <div id="stats-container"><div class="empty" style="padding:10px">No outcomes yet</div></div>
-    </div>
-    <div class="panel-card">
-      <div class="panel-title">Learning log</div>
-      <div id="learning-container"><div class="empty" style="padding:10px">First cycle runs in 30m</div></div>
-    </div>
-    <div class="panel-card">
-      <div class="panel-title">Webhook URL</div>
-      <div style="font-size:10px;color:var(--muted);line-height:2;">
-        Pine Script alerts → POST to:<br>
-        <span style="color:var(--accent);word-break:break-all;" id="webhook-url">loading...</span><br><br>
-        Alert message format (JSON):<br>
-        <span style="color:#6a6a8a;font-size:9px;">{"symbol":"GOLD","close":{{close}},"high":{{high}},"low":{{low}},"ema200":{{plot_0}},"rsi":{{plot_1}},"bias":{{plot_2}},"fvgPresent":{{plot_3}}}</span>
-      </div>
+<div class="right">
+  <div class="panel">
+    <div class="ptitle">Market hours — now</div>
+    <div class="mhgrid" id="mh-container"><div class="empty" style="padding:6px;grid-column:span 2">Loading...</div></div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Win rate by symbol</div>
+    <div id="stats-container"><div class="empty" style="padding:8px">Log WIN/LOSS on signals above</div></div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Learning log</div>
+    <div id="learning-container"><div class="empty" style="padding:8px">First cycle runs after 10 outcomes</div></div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Webhook</div>
+    <div style="font-size:9px;color:var(--muted);line-height:2;">
+      POST to:<br>
+      <span style="color:var(--accent);word-break:break-all;" id="webhook-url">loading...</span>
     </div>
   </div>
 </div>
+</div>
 
 <script>
-const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
-const API = '';
+const WS_URL = `${location.protocol==='https:'?'wss':'ws'}://${location.host}`;
+let allSignals=[], activeFilter='ALL', ws;
+let agentCache={};
 
-let allSignals = [];
-let activeFilter = 'ALL';
-let ws;
-let statsData = {};
+// Account size — persisted in localStorage-equivalent (in-memory for Railway)
+let accountSize = 10000;
+document.getElementById('account-size').addEventListener('change', e => {
+  accountSize = Math.max(100, parseInt(e.target.value)||10000);
+  renderSignals();
+});
 
 function connect() {
   ws = new WebSocket(WS_URL);
-
   ws.onopen = () => {
     document.getElementById('conn-status').textContent = 'LIVE';
-    document.getElementById('dot').style.background = '#00e676';
-    document.getElementById('webhook-url').textContent = `${location.origin}/webhook/pine`;
+    document.getElementById('dot').style.background = 'var(--proceed)';
+    document.getElementById('webhook-url').textContent = location.origin+'/webhook/pine';
   };
-
-  ws.onmessage = (e) => {
-    const msg = JSON.parse(e.data);
-    handleMessage(msg);
-  };
-
+  ws.onmessage = e => handleMessage(JSON.parse(e.data));
   ws.onclose = () => {
     document.getElementById('conn-status').textContent = 'RECONNECTING';
-    document.getElementById('dot').style.background = '#ff5252';
+    document.getElementById('dot').style.background = 'var(--short)';
     setTimeout(connect, 3000);
   };
 }
 
 function handleMessage(msg) {
-  if (msg.type === 'INIT') {
-    allSignals = msg.signals || [];
-    renderSignals();
-    fetchStats();
-    fetchLearningLog();
-    fetchMarketStatus();
-    document.getElementById('symbol-count').textContent = (msg.symbols || []).length + ' symbols';
-  }
-  else if (msg.type === 'SCORES') {
-    // Merge new scores
+  if (msg.type==='INIT') {
+    allSignals = msg.signals||[];
+    renderSignals(); fetchStats(); fetchLearningLog(); fetchMarketStatus();
+    document.getElementById('symbol-count').textContent=(msg.symbols||[]).length+' symbols';
+  } else if (msg.type==='SCORES') {
     for (const r of msg.results) {
-      const idx = allSignals.findIndex(s => s.symbol === r.symbol && s.outcome === 'OPEN');
-      if (idx >= 0 && r.verdict !== 'SKIP') allSignals[idx] = { ...allSignals[idx], ...r };
-      else if (r.verdict !== 'SKIP') allSignals.unshift({ ...r, outcome: 'OPEN' });
+      if (r.verdict==='CLOSED'||r.verdict==='SKIP') continue;
+      const idx = allSignals.findIndex(s=>s.symbol===r.symbol&&s.outcome==='OPEN');
+      if (idx>=0) allSignals[idx]={...allSignals[idx],...r};
+      else allSignals.unshift({...r,outcome:'OPEN'});
     }
     renderSignals();
-  }
-  else if (msg.type === 'ALERT') {
-    for (const sig of msg.signals) {
-      showToast(`◆ PROCEED — ${sig.symbol} ${sig.direction} @ ${sig.score}%`);
-    }
-  }
-  else if (msg.type === 'OUTCOME') {
-    const sig = allSignals.find(s => s.id === msg.signalId);
-    if (sig) { sig.outcome = msg.outcome; sig.pnlPct = msg.pnlPct; }
-    renderSignals();
-    fetchStats();
-  }
-  else if (msg.type === 'LEARNING_UPDATE') {
+  } else if (msg.type==='ALERT') {
+    msg.signals.forEach(s=>showToast('◆ PROCEED — '+s.symbol+' '+s.direction+' '+s.score+'%'));
+  } else if (msg.type==='OUTCOME') {
+    const s=allSignals.find(x=>x.id===msg.signalId);
+    if(s){s.outcome=msg.outcome;s.pnlPct=msg.pnlPct;}
+    renderSignals(); fetchStats();
+  } else if (msg.type==='LEARNING_UPDATE') {
     fetchLearningLog();
-    showToast(`↺ Weights updated for ${msg.changes.map(c => c.symbol).join(', ')}`);
+    showToast('↺ Weights updated for '+msg.changes.map(c=>c.symbol).join(', '));
   }
 }
 
 function setFilter(f) {
-  activeFilter = f;
-  document.querySelectorAll('.filter-btn').forEach(b => {
-    b.classList.toggle('active', b.textContent === f);
-  });
+  activeFilter=f;
+  document.querySelectorAll('.fbtn').forEach(b=>b.classList.toggle('on',b.textContent===f));
   renderSignals();
 }
 
 function renderSignals() {
-  let filtered = allSignals.filter(s => {
-    if (activeFilter === 'PROCEED') return s.verdict === 'PROCEED';
-    if (activeFilter === 'WATCH') return s.verdict === 'WATCH';
-    if (activeFilter === 'LONG') return s.direction === 'LONG';
-    if (activeFilter === 'SHORT') return s.direction === 'SHORT';
+  let filtered = allSignals.filter(s=>{
+    if(activeFilter==='PROCEED') return s.verdict==='PROCEED';
+    if(activeFilter==='WATCH') return s.verdict==='WATCH';
+    if(activeFilter==='LONG') return s.direction==='LONG';
+    if(activeFilter==='SHORT') return s.direction==='SHORT';
     return true;
+  }).sort((a,b)=>{
+    const o={PROCEED:0,WATCH:1,SKIP:2,CLOSED:3};
+    return (o[a.verdict]??2)-(o[b.verdict]??2)||(b.score||0)-(a.score||0);
   });
 
-  // Sort: PROCEED first, then WATCH, then by score
-  filtered.sort((a, b) => {
-    const vOrder = { PROCEED: 0, WATCH: 1, SKIP: 2 };
-    const va = vOrder[a.verdict] ?? 2;
-    const vb = vOrder[b.verdict] ?? 2;
-    if (va !== vb) return va - vb;
-    return (b.score || 0) - (a.score || 0);
-  });
-
-  const container = document.getElementById('signals-container');
-  if (filtered.length === 0) {
-    container.innerHTML = '<div class="empty">No signals match filter.<br>Scoring runs every 5 minutes.</div>';
-    return;
-  }
-
-  container.innerHTML = filtered.slice(0, 30).map(sig => renderCard(sig)).join('');
+  const c=document.getElementById('signals-container');
+  if(!filtered.length){c.innerHTML='<div class="empty">No signals match filter.<br>Scoring runs every 5 minutes.</div>';return;}
+  c.innerHTML=filtered.slice(0,30).map(renderCard).join('');
 }
 
 function renderCard(sig) {
-  const v = sig.verdict || 'SKIP';
-  if (v === 'CLOSED') {
-    return `<div class="signal-card closed">
-      <div class="card-top">
-        <div><span class="card-symbol">${sig.symbol}</span><span class="card-label">${sig.label || ''}</span></div>
-        <span class="card-verdict verdict-CLOSED">CLOSED</span>
-      </div>
-      <div class="card-reasoning">${sig.reasoning || 'Market closed'}</div>
-    </div>`;
-  }
-  const d = sig.direction || '—';
-  const bd = sig.breakdown || {};
-  const isOpen = sig.outcome === 'OPEN';
-  const outcomeLabel = sig.outcome !== 'OPEN' ? `<span style="margin-left:auto;font-size:10px;color:${sig.outcome==='WIN'?'var(--proceed)':'var(--short)'}">${sig.outcome} ${sig.pnlPct != null ? (sig.pnlPct > 0 ? '+' : '') + sig.pnlPct + '%' : ''}</span>` : '';
+  const v=sig.verdict||'SKIP';
+  if(v==='CLOSED') return `<div class="card closed"><div class="ctop"><div><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span></div><span class="verdict vC">CLOSED</span></div><div style="font-size:9px;color:var(--muted)">${sig.reasoning||'Market closed'}</div></div>`;
 
-  return `<div class="signal-card ${v.toLowerCase()}">
-    <div class="card-top">
-      <div>
-        <span class="card-symbol">${sig.symbol}</span>
-        <span class="card-label">${sig.label || ''}</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;">
-        ${outcomeLabel}
-        <span class="card-verdict verdict-${v}">${v}</span>
-      </div>
+  const d=sig.direction||'—';
+  const bd=sig.breakdown||{};
+  const isOpen=sig.outcome==='OPEN';
+  const outcomeHtml=sig.outcome!=='OPEN'?`<span style="font-size:9px;color:${sig.outcome==='WIN'?'var(--proceed)':'var(--short)'};">${sig.outcome}${sig.pnlPct!=null?' '+(sig.pnlPct>0?'+':'')+sig.pnlPct+'%':''}</span>`:'';
+  const vcls=v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
+  const scls=v==='PROCEED'?'sbP':v==='WATCH'?'sbW':'sbS';
+  const showAgents = v==='PROCEED';
+
+  return `<div class="card ${v.toLowerCase()}" id="card-${sig.id||sig.symbol}">
+    <div class="ctop">
+      <div><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span></div>
+      <div style="display:flex;align-items:center;gap:8px;">${outcomeHtml}<span class="verdict ${vcls}">${v}</span></div>
     </div>
-    <div class="score-bar-wrap"><div class="score-bar ${v.toLowerCase()}" style="width:${sig.score||0}%"></div></div>
-    <div class="card-mid">
-      <div class="card-field">
-        <span class="field-label">Direction</span>
-        <span class="field-value dir-${d}">${d}</span>
-      </div>
-      <div class="card-field">
-        <span class="field-label">Score</span>
-        <span class="field-value">${sig.score || '—'}%</span>
-      </div>
-      <div class="card-field">
-        <span class="field-label">Entry</span>
-        <span class="field-value">${sig.entry != null ? sig.entry : '—'}</span>
-      </div>
-      <div class="card-field">
-        <span class="field-label">SL</span>
-        <span class="field-value" style="color:var(--short)">${sig.sl != null ? sig.sl : '—'}</span>
-      </div>
-      <div class="card-field">
-        <span class="field-label">R:R</span>
-        <span class="field-value" style="color:var(--proceed)">${sig.rr != null ? '1:' + sig.rr : '—'}</span>
-      </div>
+    <div class="sbar"><div class="sbfill ${scls}" style="width:${sig.score||0}%"></div></div>
+    <div class="cmid">
+      <div class="cf"><span class="fl">Dir</span><span class="fv d${d}">${d}</span></div>
+      <div class="cf"><span class="fl">Score</span><span class="fv">${sig.score||'—'}%</span></div>
+      <div class="cf"><span class="fl">Entry</span><span class="fv">${sig.entry!=null?sig.entry:'—'}</span></div>
+      <div class="cf"><span class="fl">SL</span><span class="fv" style="color:var(--short)">${sig.sl!=null?sig.sl:'—'}</span></div>
+      <div class="cf"><span class="fl">TP</span><span class="fv" style="color:var(--proceed)">${sig.tp!=null?sig.tp:'—'}</span></div>
+      <div class="cf"><span class="fl">R:R</span><span class="fv" style="color:var(--proceed)">${sig.rr!=null?'1:'+sig.rr:'—'}</span></div>
     </div>
-    ${bd.bias != null ? `
-    <div class="breakdown">
-      ${['bias','fxssi','ob','session'].map(k => `
-        <div class="breakdown-item">
-          <span class="breakdown-label">${{bias:'Pine',fxssi:'FXSSI',ob:'OB',session:'Session'}[k]}</span>
-          <div class="breakdown-bar-wrap"><div class="breakdown-bar" style="width:${Math.round((bd[k]||0)*100)}%"></div></div>
-        </div>`).join('')}
-    </div>` : ''}
-    ${sig.reasoning ? `<div class="card-reasoning">${sig.reasoning}</div>` : ''}
-    ${isOpen && v !== 'SKIP' ? `
-    <div class="card-actions">
-      <button class="btn-outcome btn-win" onclick="logOutcome(${sig.id||'null'},'WIN')">WIN</button>
-      <button class="btn-outcome btn-loss" onclick="logOutcome(${sig.id||'null'},'LOSS')">LOSS</button>
-      <button class="btn-outcome btn-ignore" onclick="logOutcome(${sig.id||'null'},'IGNORED')">IGNORE</button>
-    </div>` : ''}
+    ${bd.bias!=null?`<div class="bkd">
+      ${['bias','fxssi','ob','session'].map(k=>`<div class="bi"><span class="bl">${{bias:'Pine',fxssi:'FXSSI',ob:'OB',session:'Session'}[k]}</span><div class="bw"><div class="bf" style="width:${Math.round((bd[k]||0)*100)}%"></div></div></div>`).join('')}
+    </div>`:''}
+    ${sig.reasoning?`<div class="reason">${sig.reasoning}</div>`:''}
+    ${isOpen&&v!=='SKIP'?`<div class="card-actions">
+      <div class="abtn aW" onclick="logOutcome(${sig.id||'null'},'WIN')">WIN</div>
+      <div class="abtn aL" onclick="logOutcome(${sig.id||'null'},'LOSS')">LOSS</div>
+      <div class="abtn aI" onclick="logOutcome(${sig.id||'null'},'IGNORED')">IGNORE</div>
+      ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',${JSON.stringify(sig).replace(/'/g,"&#39;")})">▼ ANALYSE</div>`:''}
+    </div>`:''}
+    ${showAgents?`<div class="agents-panel" id="agents-${sig.id||sig.symbol}">
+      <div class="agent-tabs">
+        <div class="atab active" onclick="switchTab('${sig.id||sig.symbol}','research')">RESEARCH</div>
+        <div class="atab" onclick="switchTab('${sig.id||sig.symbol}','predict')">PREDICT</div>
+        <div class="atab" onclick="switchTab('${sig.id||sig.symbol}','risk')">RISK</div>
+      </div>
+      <div class="agent-content">
+        <div class="agent-box active" id="agent-research-${sig.id||sig.symbol}"><div class="agent-loading"><div class="spinner"></div>Loading...</div></div>
+        <div class="agent-box" id="agent-predict-${sig.id||sig.symbol}"><div class="agent-loading"><div class="spinner"></div>Loading...</div></div>
+        <div class="agent-box" id="agent-risk-${sig.id||sig.symbol}"><div class="agent-loading"><div class="spinner"></div>Loading...</div></div>
+      </div>
+    </div>`:''}
   </div>`;
 }
 
-async function logOutcome(signalId, outcome) {
-  if (!signalId) return;
-  await fetch('/api/outcome', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ signalId, outcome })
+function toggleAgents(cardId, sig) {
+  const panel = document.getElementById('agents-'+cardId);
+  if(!panel) return;
+  const isOpen = panel.classList.contains('open');
+  panel.classList.toggle('open');
+  const btn = panel.previousElementSibling?.querySelector('.aE');
+  if(btn) btn.textContent = isOpen ? '▼ ANALYSE' : '▲ CLOSE';
+  if(!isOpen && !agentCache[cardId]) {
+    agentCache[cardId] = true;
+    runAllAgents(cardId, sig);
+  }
+}
+
+function switchTab(cardId, tab) {
+  const panel = document.getElementById('agents-'+cardId);
+  if(!panel) return;
+  panel.querySelectorAll('.atab').forEach((t,i)=>{
+    const tabs=['research','predict','risk'];
+    t.classList.toggle('active', tabs[i]===tab);
   });
-  const sig = allSignals.find(s => s.id === signalId);
-  if (sig) sig.outcome = outcome;
-  renderSignals();
-  fetchStats();
+  panel.querySelectorAll('.agent-box').forEach(b=>b.classList.remove('active'));
+  const box = document.getElementById('agent-'+tab+'-'+cardId);
+  if(box) box.classList.add('active');
+}
+
+async function runAllAgents(cardId, sig) {
+  const acct = accountSize;
+  await Promise.all([
+    runAgent(cardId, 'research', sig, acct),
+    runAgent(cardId, 'predict',  sig, acct),
+    runAgent(cardId, 'risk',     sig, acct)
+  ]);
+}
+
+async function runAgent(cardId, type, sig, acct) {
+  const box = document.getElementById('agent-'+type+'-'+cardId);
+  if(!box) return;
+
+  const prompts = {
+    research: `You are a trading research analyst. A signal has fired for ${sig.symbol} ${sig.direction} at ${sig.entry}.
+Current data: RSI=${sig.breakdown?.bias?Math.round(sig.breakdown.bias*100):'N/A'}%, structure=${sig.reasoning||'N/A'}.
+Search for and analyse: 1) Recent news or macro events affecting ${sig.symbol} in the last 24-48 hours 2) Any upcoming high-impact events (central bank decisions, economic data, earnings) in next 48h 3) Current market sentiment and positioning.
+Return a structured analysis: SUPPORTS signal, CONTRADICTS signal, or NEUTRAL. Keep it concise, trading-focused, bullet points only. Max 150 words.`,
+
+    predict: `You are a trading prediction analyst. A ${sig.direction} signal fired for ${sig.symbol} at entry ${sig.entry}, SL ${sig.sl}, TP ${sig.tp} (R:R 1:${sig.rr}).
+Signal data: score=${sig.score}%, reasoning="${sig.reasoning}", bias breakdown: ${JSON.stringify(sig.breakdown)}.
+Analyse: 1) Probability of this leg succeeding based on the confluence factors 2) Key price levels to watch 3) Most likely scenario vs alternative scenario 4) Suggested trade management (hold to TP, scale out, move SL to BE timing).
+Be specific about price levels. Max 150 words. Bullet points only.`,
+
+    risk: `You are a trading risk manager. Calculate position sizing for this trade.
+Trade: ${sig.symbol} ${sig.direction} | Entry: ${sig.entry} | SL: ${sig.sl} | TP: ${sig.tp} | R:R: 1:${sig.rr}
+Account size: $${acct} USD
+Historical context: Signal score ${sig.score}% (assume this score band has ~${Math.min(80,40+sig.score/4)}% win rate based on system calibration)
+Calculate and return ONLY this JSON structure (no explanation, no markdown):
+{"kelly_pct":X.X,"half_kelly_pct":X.X,"kelly_usd":XXXX,"half_kelly_usd":XXXX,"kelly_units":X.XX,"half_kelly_units":X.XX,"risk_per_trade_usd":XXX,"max_loss_kelly":XXXX,"verdict":"PROCEED|CAUTION|OVERSIZE","reasoning":"one sentence"}`
+  };
+
+  try {
+    const res = await fetch('/api/agent', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({type, prompt: prompts[type], symbol: sig.symbol, accountSize: acct})
+    });
+    const data = await res.json();
+    if(type==='risk') renderRisk(box, data.result, sig, acct);
+    else renderText(box, data.result, type);
+  } catch(e) {
+    box.innerHTML = `<div style="color:var(--short);font-size:9px;">Agent error: ${e.message}</div>`;
+  }
+}
+
+function renderText(box, text, type) {
+  if(!text){box.innerHTML='<div style="color:var(--muted);font-size:9px;">No response</div>';return;}
+  const color = type==='research' ? '#00bcd4' : '#c97cff';
+  const lines = text.split('\n').filter(l=>l.trim());
+  box.innerHTML = lines.map(l=>{
+    l = l.trim().replace(/^[-•*]\s*/,'');
+    const isHeader = l.endsWith(':') || l.toUpperCase()===l;
+    if(isHeader) return `<div class="agent-section-title" style="color:${color};margin-top:6px;">${l}</div>`;
+    const isGood = /support|confirm|align|bullish|bearish.*signal|proceed/i.test(l);
+    const isBad  = /contradict|risk|warn|caution|against/i.test(l);
+    const cls    = isGood?'agent-val-good':isBad?'agent-val-warn':'';
+    return `<div class="agent-row"><span class="${cls}">· ${l}</span></div>`;
+  }).join('');
+}
+
+function renderRisk(box, raw, sig, acct) {
+  let d;
+  try {
+    const clean = (raw||'').replace(/```json|```/g,'').trim();
+    d = JSON.parse(clean);
+  } catch(e) {
+    box.innerHTML=`<div style="font-size:9px;color:var(--muted);line-height:1.7;">${raw||'No data'}</div>`;
+    return;
+  }
+  const vcls = d.verdict==='PROCEED'?'av-proceed':d.verdict==='CAUTION'?'av-watch':'av-caution';
+  box.innerHTML = `
+    <div class="agent-section">
+      <div class="agent-section-title" style="color:#ffd740">Position sizing — $${acct.toLocaleString()} account</div>
+      <div class="kelly-grid">
+        <div class="kelly-card">
+          <div class="kelly-label">KELLY (${d.kelly_pct}%)</div>
+          <div class="kelly-val">$${Number(d.kelly_usd).toLocaleString()}</div>
+          <div class="kelly-sub">${d.kelly_units} units · Risk $${Number(d.risk_per_trade_usd).toLocaleString()}</div>
+        </div>
+        <div class="kelly-card">
+          <div class="kelly-label">HALF KELLY (${d.half_kelly_pct}%)</div>
+          <div class="kelly-val">$${Number(d.half_kelly_usd).toLocaleString()}</div>
+          <div class="kelly-sub">${d.half_kelly_units} units · Max loss $${Number(d.max_loss_kelly).toLocaleString()}</div>
+        </div>
+      </div>
+    </div>
+    <div class="agent-verdict ${vcls}">${d.verdict}</div>
+    <div style="font-size:9px;color:var(--muted);margin-top:5px;">${d.reasoning||''}</div>`;
+}
+
+async function logOutcome(signalId, outcome) {
+  if(!signalId) return;
+  await fetch('/api/outcome',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({signalId,outcome})});
+  const s=allSignals.find(x=>x.id===signalId);
+  if(s) s.outcome=outcome;
+  renderSignals(); fetchStats();
 }
 
 async function fetchStats() {
-  const signals = await fetch('/api/signals').then(r => r.json()).catch(() => []);
-  const bySymbol = {};
-  for (const s of signals) {
-    if (s.outcome === 'OPEN') continue;
-    if (!bySymbol[s.symbol]) bySymbol[s.symbol] = { wins: 0, losses: 0 };
-    if (s.outcome === 'WIN') bySymbol[s.symbol].wins++;
-    else if (s.outcome === 'LOSS') bySymbol[s.symbol].losses++;
+  const signals = await fetch('/api/signals').then(r=>r.json()).catch(()=>[]);
+  const by={};
+  for(const s of signals){
+    if(s.outcome==='OPEN') continue;
+    if(!by[s.symbol]) by[s.symbol]={wins:0,losses:0};
+    if(s.outcome==='WIN') by[s.symbol].wins++;
+    else if(s.outcome==='LOSS') by[s.symbol].losses++;
   }
-  const container = document.getElementById('stats-container');
-  const entries = Object.entries(bySymbol).filter(([,v]) => v.wins + v.losses > 0);
-  if (entries.length === 0) {
-    container.innerHTML = '<div class="empty" style="padding:10px">Log WIN/LOSS on signals above</div>';
-    return;
-  }
-  container.innerHTML = entries.map(([sym, s]) => {
-    const total = s.wins + s.losses;
-    const wr = Math.round((s.wins / total) * 100);
-    const cls = wr >= 60 ? 'wr-good' : wr >= 45 ? 'wr-mid' : 'wr-bad';
-    return `<div class="stats-row">
-      <span class="stats-sym">${sym}</span>
-      <span style="color:var(--muted);font-size:10px">${s.wins}W / ${s.losses}L</span>
-      <span class="stats-wr ${cls}">${wr}%</span>
-    </div>`;
+  const c=document.getElementById('stats-container');
+  const entries=Object.entries(by).filter(([,v])=>v.wins+v.losses>0);
+  if(!entries.length){c.innerHTML='<div class="empty" style="padding:8px">Log WIN/LOSS on signals above</div>';return;}
+  c.innerHTML=entries.map(([sym,s])=>{
+    const t=s.wins+s.losses,wr=Math.round(s.wins/t*100);
+    return `<div class="srow"><span style="font-weight:700">${sym}</span><span style="color:var(--muted);font-size:9px">${s.wins}W/${s.losses}L</span><span class="${wr>=60?'wr-g':wr>=45?'wr-m':'wr-b'}">${wr}%</span></div>`;
   }).join('');
 }
 
 async function fetchLearningLog() {
-  const log = await fetch('/api/learning-log').then(r => r.json()).catch(() => []);
-  const container = document.getElementById('learning-container');
-  if (log.length === 0) {
-    container.innerHTML = '<div class="empty" style="padding:10px">First cycle runs in 30m</div>';
-    return;
-  }
-  container.innerHTML = log.slice(0, 10).map(entry => {
-    const changes = JSON.parse(entry.changes || '[]');
-    const dt = new Date(entry.ts).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    return `<div class="log-entry">
-      <div class="log-ts">${dt} — ${entry.outcomes_used} outcomes</div>
-      ${changes.length > 0 ? changes.map(c => `<div class="log-change">↑ ${c.symbol} (${c.winRate}%WR): ${c.diffs.join(', ')}</div>`).join('') : '<div>No weight changes needed</div>'}
-      <div style="margin-top:3px">${entry.reasoning || ''}</div>
-    </div>`;
+  const log=await fetch('/api/learning-log').then(r=>r.json()).catch(()=>[]);
+  const c=document.getElementById('learning-container');
+  if(!log.length){c.innerHTML='<div class="empty" style="padding:8px">First cycle runs after 10 outcomes</div>';return;}
+  c.innerHTML=log.slice(0,8).map(e=>{
+    const changes=JSON.parse(e.changes||'[]');
+    const dt=new Date(e.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+    return `<div class="log"><div class="logts">${dt} — ${e.outcomes_used} outcomes</div>${changes.length?changes.map(c=>`<div class="logch">↑ ${c.symbol} (${c.winRate}%WR): ${c.diffs.join(', ')}</div>`).join(''):'<div>No changes needed</div>'}</div>`;
   }).join('');
-}
-
-function showToast(msg) {
-  const t = document.createElement('div');
-  t.className = 'toast';
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(() => t.remove(), 5000);
-}
-
-function updateClock() {
-  const now = new Date();
-  const uae = new Date(now.getTime() + 4 * 3600000);
-  const h = uae.getUTCHours();
-  document.getElementById('clock').textContent = uae.toUTCString().slice(17, 25) + ' UAE';
-
-  let session = 'OFF HOURS', cls = 'session-offHours';
-  if (h >= 2 && h < 10) { session = 'ASIA'; cls = 'session-asia'; }
-  else if (h >= 11 && h < 19) { session = 'LONDON'; cls = 'session-london'; }
-  else if (h >= 17 || h < 1) { session = 'NEW YORK'; cls = 'session-newYork'; }
-
-  const badge = document.getElementById('session-badge');
-  badge.textContent = session;
-  badge.className = `session-badge ${cls}`;
 }
 
 async function fetchMarketStatus() {
-  const status = await fetch('/api/market-status').then(r => r.json()).catch(() => ({}));
-  const container = document.getElementById('mh-container');
-  const entries = Object.entries(status);
-  if (entries.length === 0) return;
-  container.innerHTML = entries.map(([sym, s]) => {
-    const cls = s.open ? 'mh-open' : 'mh-closed';
-    const statusTxt = s.open ? 'OPEN' : (s.minutesUntilOpen ? `${s.minutesUntilOpen}m` : 'CLOSED');
-    const statusCls = s.open ? 'mh-status-open' : 'mh-status-closed';
-    return `<div class="mh-row ${cls}">
-      <span class="mh-sym">${sym}</span>
-      <span class="${statusCls}">${statusTxt}</span>
-    </div>`;
-  }).join('');
+  const status=await fetch('/api/market-status').then(r=>r.json()).catch(()=>({}));
+  const c=document.getElementById('mh-container');
+  const entries=Object.entries(status);
+  if(!entries.length) return;
+  c.innerHTML=entries.map(([sym,s])=>`<div class="mhrow ${s.open?'mhO':'mhC'}"><span class="mhsym">${sym}</span><span class="${s.open?'mhopen':'mhclosed'}">${s.open?'OPEN':s.minutesUntilOpen?s.minutesUntilOpen+'m':'CLOSED'}</span></div>`).join('');
 }
 
-setInterval(fetchMarketStatus, 60000);
+function showToast(msg) {
+  const t=document.createElement('div');t.className='toast';t.textContent=msg;
+  document.body.appendChild(t);setTimeout(()=>t.remove(),5000);
+}
 
-setInterval(updateClock, 1000);
-updateClock();
-connect();
+function updateClock() {
+  const uae=new Date(Date.now()+4*3600000);
+  document.getElementById('clock').textContent=uae.toUTCString().slice(17,25)+' UAE';
+  const h=uae.getUTCHours();
+  let session='OFF HOURS',cls='session-offHours';
+  if(h>=2&&h<10){session='ASIA';cls='session-asia';}
+  else if(h>=11&&h<19){session='LONDON';cls='session-london';}
+  else if(h>=17||h<1){session='NEW YORK';cls='session-newYork';}
+  const b=document.getElementById('session-badge');
+  b.textContent=session;b.className='sbadge '+cls;
+}
+
+setInterval(fetchMarketStatus,60000);
+setInterval(updateClock,1000);
+updateClock();connect();
 </script>
 </body>
 </html>

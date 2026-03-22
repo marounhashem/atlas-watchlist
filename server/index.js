@@ -212,6 +212,50 @@ app.get('/api/market-status', (req, res) => {
   res.json(status);
 });
 
+// Agent endpoint — runs Research, Predict, or Risk agent for a signal
+app.post('/api/agent', async (req, res) => {
+  const { type, prompt, symbol, accountSize } = req.body;
+  if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
+
+  try {
+    const tools = type === 'research' ? [{
+      type: 'web_search_20250305',
+      name: 'web_search'
+    }] : undefined;
+
+    const body = {
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1000,
+      messages: [{ role: 'user', content: prompt }]
+    };
+    if (tools) body.tools = tools;
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify(body)
+    });
+
+    const data = await response.json();
+    // Extract text from content blocks (may include tool_use blocks for search)
+    const text = (data.content || [])
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('
+');
+
+    console.log(`[Agent] ${type} for ${symbol} — ${text.length} chars`);
+    res.json({ ok: true, result: text });
+  } catch (e) {
+    console.error('[Agent] Error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Debug: check latest market data for a symbol
 app.get('/api/data/:symbol', (req, res) => {
   const { getLatestMarketData } = require('./db');
