@@ -333,16 +333,231 @@ function applyWeightAdjustment(symbol, adj) {
   }
 }
 
+// ── Layer 4: Exact level calculation ─────────────────────────────────────────
+// Claude calculates exact entry, SL and TP prices based on:
+// - Current order book structure (gravity, SL clusters, limit walls, losing clusters)
+// - Historical win/loss at specific price levels for this symbol
+// - FVG zones, swing structure, VWAP bands from Pine
+// - What has worked before vs what has failed
+
+let entryOptimisation = {}; // { GOLD: { slMultiplier, tpMultiplier, confidence, ... } }
+
+// Calculate exact levels for a live signal
+async function calculateExactLevels(symbol, direction, currentData, fxssi) {
+  if (!ANTHROPIC_API_KEY) return null;
+
+  try {
+    const db = require('./db');
+    const cp = currentData.close;
+
+    // Get historical closed trades for this symbol+direction
+    const history = db.getAllSignals(100).filter(s =>
+      s.symbol === symbol &&
+      s.direction === direction &&
+      (s.outcome === 'WIN' || s.outcome === 'LOSS') &&
+      s.entry && s.sl && s.tp
+    );
+
+    // Build level context from order book
+    const slClusters   = fxssi?.slClusters?.slice(0,5)   || [];
+    const limitWalls   = fxssi?.limitWalls?.slice(0,5)   || [];
+    const losingClusters = fxssi?.losingClusters?.slice(0,5) || [];
+    const gravity      = fxssi?.gravity;
+    const midVol       = fxssi?.middleOfVolume;
+
+    // Parse raw payload for FVG and swing levels
+    let fvg = null, swings = null, vwap = null, atr = null;
+    try {
+      const raw = JSON.parse(currentData.raw_payload || '{}');
+      fvg    = raw.fvg;
+      swings = raw.structure;
+      vwap   = raw.vwap;
+      atr    = raw.atr;
+    } catch(e) {}
+
+    const prompt = `You are calculating exact entry, SL and TP price levels for an ${direction} trade on ${symbol}.
+
+CURRENT PRICE: ${cp}
+DIRECTION: ${direction}
+
+ORDER BOOK STRUCTURE:
+SL clusters (price hunts these — use as TP targets):
+${slClusters.map(c => '  ' + c.price + ' (volume: ' + (c.os?.toFixed(3) || 'N/A') + ')').join('\n') || '  None detected'}
+
+Limit walls (real S/R — orange orders slow price):
+${limitWalls.map(c => '  ' + c.price + ' (volume: ' + (c.ol?.toFixed(3) || 'N/A') + ')').join('\n') || '  None detected'}
+
+Losing position clusters (trapped traders = fuel):
+${losingClusters.map(c => '  ' + c.price + ' (ps: ' + (c.ps?.toFixed(3) || 0) + ' pl: ' + (c.pl?.toFixed(3) || 0) + ')').join('\n') || '  None detected'}
+
+Gravity (strongest SL cluster): ${gravity?.price || 'N/A'} (vol: ${gravity?.volume || 'N/A'})
+Middle of volume: ${midVol || 'N/A'}
+
+TECHNICAL LEVELS:
+${fvg?.bearActive ? `Bear FVG: ${fvg.bearBot} - ${fvg.bearTop} (mid: ${fvg.bearMid})` : ''}
+${fvg?.bullActive ? `Bull FVG: ${fvg.bullBot} - ${fvg.bullTop} (mid: ${fvg.bullMid})` : ''}
+Swing H1: ${swings?.swingH1 || 'N/A'} | H2: ${swings?.swingH2 || 'N/A'}
+Swing L1: ${swings?.swingL1 || 'N/A'} | L2: ${swings?.swingL2 || 'N/A'}
+VWAP: ${vwap?.mid || 'N/A'} | Upper2: ${vwap?.upper2 || 'N/A'} | Lower2: ${vwap?.lower2 || 'N/A'}
+ATR 1h: ${atr?.['1h'] || 'N/A'}
+
+HISTORICAL PERFORMANCE (${history.length} closed ${direction} trades):
+${history.slice(0, 10).map(t =>
+  t.direction + ' entry=' + t.entry + ' sl=' + t.sl + ' tp=' + t.tp + ' -> ' + t.outcome
+).join('\n') || 'No history yet — use order book logic only'}
+
+${history.length > 0 ? `Win rate: ${Math.round(history.filter(t => t.outcome === 'WIN').length / history.length * 100)}%` : ''}
+
+RULES:
+- Entry: for ${direction === 'SHORT' ? 'SHORT — entry should be at or just below resistance (limit wall above, FVG bear mid, or swing high)' : 'LONG — entry should be at or just above support (limit wall below, FVG bull mid, or swing low)'}
+- SL: place BEYOND a losing cluster or limit wall — if it breaks, the trade is wrong anyway
+- TP: target the nearest SL cluster in trade direction — price hunts these
+- R:R must be between 1.5 and 4.0
+- If no clear level exists for any component, use null and explain why
+
+Return ONLY this JSON (no markdown):
+{
+  "entry": <exact price>,
+  "sl": <exact price>,
+  "tp": <exact price>,
+  "entry_reason": "<why this entry level>",
+  "sl_reason": "<why this SL level>",
+  "tp_reason": "<why this TP level>",
+  "rr": <calculated R:R>,
+  "confidence": <0-100>,
+  "key_levels_used": ["<level type used>"]
+}`;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 500,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    const data = await res.json();
+    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+    const levels = JSON.parse(text.replace(/```json|```/g, '').trim());
+
+    console.log(`[Claude] Exact levels for ${symbol} ${direction}: entry=${levels.entry} sl=${levels.sl} tp=${levels.tp} R:R=${levels.rr} (${levels.confidence}% confidence)`);
+    return levels;
+
+  } catch(e) {
+    console.error('[Claude] Level calculation error:', e.message);
+    return null;
+  }
+}
+
+async function optimiseEntryLevels(symbol) {
+  if (!ANTHROPIC_API_KEY) return null;
+
+  try {
+    const db = require('./db');
+    const closed = db.getAllSignals(100).filter(s =>
+      s.symbol === symbol &&
+      (s.outcome === 'WIN' || s.outcome === 'LOSS') &&
+      s.entry && s.sl && s.tp
+    );
+
+    if (closed.length < 5) return null; // need minimum history
+
+    const wins  = closed.filter(s => s.outcome === 'WIN');
+    const losses = closed.filter(s => s.outcome === 'LOSS');
+
+    // Calculate average distances for wins vs losses
+    const avgWinSlDist  = wins.length  ? wins.reduce((s,t)  => s + Math.abs(t.sl - t.entry), 0) / wins.length  : null;
+    const avgLossSlDist = losses.length ? losses.reduce((s,t) => s + Math.abs(t.sl - t.entry), 0) / losses.length : null;
+    const avgWinTpDist  = wins.length  ? wins.reduce((s,t)  => s + Math.abs(t.tp - t.entry), 0) / wins.length  : null;
+    const avgWinRR      = wins.length  ? wins.reduce((s,t)  => s + (t.rr || 0), 0) / wins.length  : null;
+    const avgLossRR     = losses.length ? losses.reduce((s,t) => s + (t.rr || 0), 0) / losses.length : null;
+
+    const prompt = `You are optimising entry, SL and TP placement for ${symbol} trades in the ATLAS system.
+
+HISTORICAL DATA (${closed.length} closed trades):
+Win rate: ${Math.round(wins.length / closed.length * 100)}% (${wins.length}W / ${losses.length}L)
+
+Winning trades avg:
+- SL distance from entry: ${avgWinSlDist?.toFixed(4) || 'N/A'}
+- TP distance from entry: ${avgWinTpDist?.toFixed(4) || 'N/A'}
+- R:R: ${avgWinRR?.toFixed(2) || 'N/A'}
+
+Losing trades avg:
+- SL distance from entry: ${avgLossSlDist?.toFixed(4) || 'N/A'}
+- R:R: ${avgLossRR?.toFixed(2) || 'N/A'}
+
+${closed.slice(0, 15).map(t => t.direction + " entry=" + t.entry + " sl=" + t.sl + " tp=" + t.tp + " rr=" + t.rr + " -> " + t.outcome).join("\n")}
+')}
+
+Based on this data, what adjustments would improve future ${symbol} trade placement?
+Consider: SL too tight (getting stopped out before TP), TP too ambitious (price reverses before hitting), entry timing.
+
+Return ONLY this JSON (no markdown):
+{
+  "sl_multiplier": <0.5 to 2.0, multiply ATR-based SL distance by this>,
+  "tp_multiplier": <0.5 to 3.0, multiply ATR-based TP distance by this>,
+  "entry_bias": <-0.5 to 0.5, shift entry toward limit wall (negative) or away (positive)>,
+  "ideal_rr_min": <minimum R:R to accept for this symbol>,
+  "ideal_rr_max": <maximum R:R before TP is unrealistic>,
+  "key_insight": "<one sentence about what the data shows>",
+  "confidence": <0-100, based on sample size and consistency>
+}`;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 400,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    const data = await res.json();
+    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+    const opt  = JSON.parse(text.replace(/```json|```/g, '').trim());
+
+    // Only apply if confidence is high enough
+    if (opt.confidence >= 60) {
+      entryOptimisation[symbol] = { ...opt, updatedAt: Date.now() };
+      console.log(`[Claude] Entry optimised for ${symbol}: SL×${opt.sl_multiplier} TP×${opt.tp_multiplier} — ${opt.key_insight}`);
+    }
+
+    return opt;
+  } catch(e) {
+    console.error('[Claude] Entry optimisation error:', e.message);
+    return null;
+  }
+}
+
+function getEntryOptimisation(symbol) {
+  return entryOptimisation[symbol] || null;
+}
+
 // ── Getters for dashboard ─────────────────────────────────────────────────────
 function getRegime()          { return regimeCache; }
 function getSessionPatterns() { return sessionPatterns; }
 function getInsights()        { return postTradeInsights.slice(0, 20); }
+function getAllOptimisations() { return entryOptimisation; }
 
 module.exports = {
   onOutcome,
   dailySessionSummary,
   detectRegime,
+  optimiseEntryLevels,
+  getEntryOptimisation,
   getRegime,
   getSessionPatterns,
-  getInsights
+  getInsights,
+  getAllOptimisations
 };
