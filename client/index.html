@@ -612,6 +612,7 @@ function renderRisk(box, raw, sig, acct) {
     return;
   }
   const vcls = d.verdict==='PROCEED'?'av-proceed':d.verdict==='CAUTION'?'av-watch':'av-caution';
+  const cardId = sig.id || sig.symbol;
   box.innerHTML = `
     <div class="agent-section">
       <div class="agent-section-title" style="color:#ffd740">Position sizing — $${acct.toLocaleString()} account</div>
@@ -629,7 +630,113 @@ function renderRisk(box, raw, sig, acct) {
       </div>
     </div>
     <div class="agent-verdict ${vcls}">${d.verdict}</div>
-    <div style="font-size:9px;color:var(--muted);margin-top:5px;">${d.reasoning||''}</div>`;
+    <div style="font-size:9px;color:var(--muted);margin-top:5px;">${d.reasoning||''}</div>
+    <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
+      <button class="abtn" style="border-color:var(--accent);color:var(--accent);width:100%;font-size:9px;padding:6px;"
+        onclick="copyTradeDossier('${cardId}', ${JSON.stringify(d).replace(/'/g,"&#39;")})">
+        ⊞ COPY FULL TRADE DOSSIER
+      </button>
+      <div id="copy-confirm-${cardId}" style="font-size:8px;color:var(--proceed);text-align:center;margin-top:4px;display:none;">✓ Copied to clipboard</div>
+    </div>`;
+}
+
+async function copyTradeDossier(cardId, riskData) {
+  const sig = allSignals.find(s => (s.id||s.symbol) == cardId || s.symbol == cardId) || {};
+  const cached = agentCache;
+
+  // Fetch live market data for this symbol
+  let marketData = null;
+  try {
+    const r = await fetch('/api/data/' + sig.symbol);
+    marketData = await r.json();
+  } catch(e) {}
+
+  // Build full dossier
+  const dossier = {
+    source: 'ATLAS//WATCHLIST',
+    timestamp: new Date().toISOString(),
+    account_size_usd: accountSize,
+
+    signal: {
+      symbol:    sig.symbol,
+      label:     sig.label,
+      direction: sig.direction,
+      score:     sig.score,
+      verdict:   sig.verdict,
+      session:   sig.session,
+      entry:     sig.entry,
+      sl:        sig.sl,
+      tp:        sig.tp,
+      rr:        sig.rr,
+      reasoning: sig.reasoning,
+      breakdown: sig.breakdown,
+      ts:        sig.ts
+    },
+
+    position_sizing: {
+      kelly_pct:       riskData.kelly_pct,
+      half_kelly_pct:  riskData.half_kelly_pct,
+      kelly_usd:       riskData.kelly_usd,
+      half_kelly_usd:  riskData.half_kelly_usd,
+      kelly_units:     riskData.kelly_units,
+      half_kelly_units: riskData.half_kelly_units,
+      risk_per_trade:  riskData.risk_per_trade_usd,
+      verdict:         riskData.verdict,
+      reasoning:       riskData.reasoning
+    },
+
+    market_data: marketData ? {
+      close:       marketData.close,
+      high:        marketData.high,
+      low:         marketData.low,
+      ema200:      marketData.ema200,
+      rsi:         marketData.rsi,
+      macd_hist:   marketData.macd_hist,
+      bias:        marketData.bias,
+      structure:   marketData.structure,
+      fvg_present: marketData.fvg_present,
+      fvg_high:    marketData.fvg_high,
+      fvg_low:     marketData.fvg_low,
+      fvg_mid:     marketData.fvg_mid
+    } : null,
+
+    fxssi: marketData ? {
+      long_pct:    marketData.fxssi_long_pct,
+      short_pct:   marketData.fxssi_short_pct,
+      trapped:     marketData.fxssi_trapped,
+      absorption:  marketData.ob_absorption,
+      imbalance:   marketData.ob_imbalance,
+      analysis:    (() => {
+        try { return JSON.parse(marketData.fxssi_analysis); } catch(e) { return null; }
+      })()
+    } : null,
+
+    agents: {
+      research: (() => {
+        try { return agentCache[sig.symbol+'_research']?.data || null; } catch(e) { return null; }
+      })(),
+      predict: (() => {
+        try { return agentCache[sig.symbol+'_predict']?.data || null; } catch(e) { return null; }
+      })()
+    }
+  };
+
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(dossier, null, 2));
+    const confirm = document.getElementById('copy-confirm-'+cardId);
+    if (confirm) {
+      confirm.style.display = 'block';
+      setTimeout(() => { confirm.style.display = 'none'; }, 2000);
+    }
+  } catch(e) {
+    // Fallback for browsers that block clipboard
+    const ta = document.createElement('textarea');
+    ta.value = JSON.stringify(dossier, null, 2);
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
 }
 
 async function logOutcome(signalId, outcome) {
