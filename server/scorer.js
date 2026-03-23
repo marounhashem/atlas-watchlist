@@ -216,19 +216,57 @@ function scoreSymbol(symbol) {
   const direction = inferDirection(data);
   if (!direction) return null;
 
-  const biasSc = scoreBias(data);
-  const fxssiSc = scoreFXSSI(data, direction);
-  const obSc = scoreOrderBook(data, direction);
+  const biasSc   = scoreBias(data);
+  const fxssiSc  = scoreFXSSI(data, direction);
+  const obSc     = scoreOrderBook(data, direction);
   const sessionSc = scoreSession(symbol);
 
-  const total = (
-    biasSc * weights.pineBias +
-    fxssiSc * weights.fxssiSentiment +
-    obSc * weights.orderBook +
+  // ── Conflict multiplier ───────────────────────────────────────────────────
+  // When Pine and FXSSI contradict each other, penalise the total score.
+  // Agreement amplifies; contradiction suppresses — they are not merely additive.
+  let conflictMultiplier = 1.0;
+
+  // Determine Pine direction strength and FXSSI direction
+  const pineStrong  = biasSc >= 0.65;   // Pine has clear view
+  const fxssiSentiment = (() => {
+    try {
+      const raw = data.fxssi_analysis || data.raw_payload;
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      const fx = parsed.fxssiAnalysis
+        ? (typeof parsed.fxssiAnalysis === 'string' ? JSON.parse(parsed.fxssiAnalysis) : parsed.fxssiAnalysis)
+        : (parsed.longPct != null ? parsed : null);
+      return fx?.signals?.bias || null; // 'BUY', 'SELL', 'NEUTRAL'
+    } catch(e) { return null; }
+  })();
+
+  if (pineStrong && fxssiSentiment) {
+    const pineDir  = direction === 'LONG' ? 'BUY' : 'SELL';
+    const conflict = (pineDir === 'BUY'  && fxssiSentiment === 'SELL') ||
+                     (pineDir === 'SELL' && fxssiSentiment === 'BUY');
+    const agree    = (pineDir === 'BUY'  && fxssiSentiment === 'BUY')  ||
+                     (pineDir === 'SELL' && fxssiSentiment === 'SELL');
+
+    if (conflict)          conflictMultiplier = 0.72; // hard conflict — 28% penalty
+    else if (agree)        conflictMultiplier = 1.12; // full agreement — 12% bonus
+    // NEUTRAL = no adjustment
+  }
+
+  // Also check crowd trap vs direction
+  const longPct  = data.fxssi_long_pct  || 50;
+  const shortPct = data.fxssi_short_pct || 50;
+  const crowdWithUs = (direction === 'LONG'  && longPct  >= 60) ||
+                      (direction === 'SHORT' && shortPct >= 60);
+  if (crowdWithUs) conflictMultiplier *= 0.85; // crowd on same side = danger
+
+  const raw = (
+    biasSc   * weights.pineBias +
+    fxssiSc  * weights.fxssiSentiment +
+    obSc     * weights.orderBook +
     sessionSc * weights.sessionQuality
   ) * 100;
 
-  const score = Math.round(total);
+  const score = Math.round(raw * conflictMultiplier);
 
   let verdict = 'SKIP';
   if (score >= minScore) verdict = 'PROCEED';
@@ -311,6 +349,22 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
           const side = direction === 'SHORT' ? cp > fx.middleOfVolume : cp < fx.middleOfVolume;
           if (side) parts.push(`Price ${direction === 'SHORT' ? 'above' : 'below'} volume midpoint — overextension confirmed`);
         }
+      }
+    }
+  } catch(e) {}
+
+  // Conflict/agreement signal
+  try {
+    const raw2 = data.fxssi_analysis || data.raw_payload;
+    if (raw2) {
+      const parsed2 = JSON.parse(raw2);
+      const fx2 = parsed2.fxssiAnalysis
+        ? (typeof parsed2.fxssiAnalysis === 'string' ? JSON.parse(parsed2.fxssiAnalysis) : parsed2.fxssiAnalysis)
+        : (parsed2.longPct != null ? parsed2 : null);
+      if (fx2?.signals?.bias) {
+        const pineDir = direction === 'LONG' ? 'BUY' : 'SELL';
+        if (fx2.signals.bias === pineDir) parts.push(`✓ Pine + FXSSI aligned — high conviction`);
+        else if (fx2.signals.bias !== 'NEUTRAL') parts.push(`⚠ Pine/FXSSI conflict — score penalised`);
       }
     }
   } catch(e) {}
