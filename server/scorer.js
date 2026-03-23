@@ -252,6 +252,39 @@ async function scoreSymbol(symbol) {
                       (direction === 'SHORT' && shortPct >= 60);
   if (crowdWithUs) conflictMultiplier *= 0.85;
 
+  // Structure alignment check — Claude learned this from repeated losses
+  // Avoid counter-trend signals when Pine structure contradicts direction
+  const structure = data.structure || 'ranging';
+  const structureConflict =
+    (direction === 'SHORT' && structure === 'bullish') ||
+    (direction === 'LONG'  && structure === 'bearish');
+  const structureAlign =
+    (direction === 'SHORT' && structure === 'bearish') ||
+    (direction === 'LONG'  && structure === 'bullish');
+
+  if (structureConflict) {
+    if (!fxssiSentiment || fxssiSentiment === 'NEUTRAL') {
+      conflictMultiplier *= 0.75; // no FXSSI backup = high risk
+    } else {
+      conflictMultiplier *= 0.88; // FXSSI partially offsets structure conflict
+    }
+  } else if (structureAlign) {
+    conflictMultiplier *= 1.05;
+  }
+
+  // RSI momentum filter — Claude learned: RSI > 60 on SHORT or < 40 on LONG = momentum against trade
+  const rsi = data.rsi || 50;
+  if (direction === 'SHORT' && rsi > 60) {
+    const rsiPenalty = rsi > 70 ? 0.80 : 0.90; // extreme RSI = bigger penalty
+    conflictMultiplier *= rsiPenalty;
+  } else if (direction === 'LONG' && rsi < 40) {
+    const rsiPenalty = rsi < 30 ? 0.80 : 0.90;
+    conflictMultiplier *= rsiPenalty;
+  }
+  // RSI confirming direction = small bonus
+  if (direction === 'SHORT' && rsi < 45) conflictMultiplier *= 1.05;
+  if (direction === 'LONG'  && rsi > 55) conflictMultiplier *= 1.05;
+
   const rawScore = (
     biasSc   * weights.pineBias +
     fxssiSc  * weights.fxssiSentiment +
@@ -471,6 +504,24 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
       }
     }
   } catch(e) {}
+
+  // RSI momentum warning
+  const rsiVal = data.rsi || 50;
+  if (direction === 'SHORT' && rsiVal > 70) parts.push(`⚠ RSI ${Math.round(rsiVal)} — strong momentum against SHORT`);
+  else if (direction === 'SHORT' && rsiVal > 60) parts.push(`⚠ RSI ${Math.round(rsiVal)} — momentum against SHORT`);
+  else if (direction === 'LONG' && rsiVal < 30) parts.push(`⚠ RSI ${Math.round(rsiVal)} — strong momentum against LONG`);
+  else if (direction === 'LONG' && rsiVal < 40) parts.push(`⚠ RSI ${Math.round(rsiVal)} — momentum against LONG`);
+  else if (direction === 'SHORT' && rsiVal < 45) parts.push(`RSI ${Math.round(rsiVal)} — momentum confirms SHORT`);
+  else if (direction === 'LONG'  && rsiVal > 55) parts.push(`RSI ${Math.round(rsiVal)} — momentum confirms LONG`);
+
+  // Structure alignment
+  const struct = data.structure || 'ranging';
+  if ((direction === 'SHORT' && struct === 'bullish') ||
+      (direction === 'LONG'  && struct === 'bearish')) {
+    parts.push(`⚠ Counter-trend — structure is ${struct}`);
+  } else if (struct !== 'ranging') {
+    parts.push(`✓ Structure aligned (${struct})`);
+  }
 
   const session = getSessionNow();
   if (session === cfg.peakSession) parts.push(`Peak session (${session}) — optimal timing`);
