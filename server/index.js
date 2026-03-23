@@ -268,6 +268,20 @@ app.get('/api/fxssi-fetch', async (req, res) => {
   }
 });
 
+// FXSSI force scrape — trigger immediately regardless of schedule
+app.get('/api/fxssi-force', async (req, res) => {
+  try {
+    const { runFXSSIScrape } = require('./fxssiScraper');
+    // Temporarily override shouldFetch
+    process.env.FXSSI_FORCE = '1';
+    await runFXSSIScrape(null);
+    process.env.FXSSI_FORCE = '';
+    res.json({ ok: true, message: 'Scrape triggered — check /api/fxssi-status' });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // FXSSI direct test — call the API right now and return raw result
 app.get('/api/fxssi-test', async (req, res) => {
   const token  = process.env.FXSSI_TOKEN;
