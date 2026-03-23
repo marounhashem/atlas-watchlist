@@ -407,7 +407,23 @@ function scoreSymbol(symbol) {
     }
   }
 
-  const rr = calcRR(entry, sl, tp, direction);
+  let rr = calcRR(entry, sl, tp, direction);
+
+  // ── Sanity check R:R — revert to ATR if order book levels are unreasonable ──
+  const RR_MIN = 1.5;
+  const RR_MAX = 4.0;
+  if (!rr || rr < RR_MIN || rr > RR_MAX) {
+    // ATR fallback
+    if (direction === 'LONG') {
+      sl = Math.round((entry - atr * 1.5) * 10000) / 10000;
+      tp = Math.round((entry + atr * 3.0) * 10000) / 10000;
+    } else {
+      sl = Math.round((entry + atr * 1.5) * 10000) / 10000;
+      tp = Math.round((entry - atr * 3.0) * 10000) / 10000;
+    }
+    rr = calcRR(entry, sl, tp, direction);
+    console.log(`[Scorer] ${symbol} R:R out of range — reverted to ATR (R:R ${rr})`);
+  }
 
   const reasoning = buildReasoning(symbol, direction, {
     biasSc, fxssiSc, obSc, sessionSc, data, cfg
