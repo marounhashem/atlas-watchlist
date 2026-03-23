@@ -279,13 +279,15 @@ async function runFXSSIScrape(broadcast) {
           biasScore:     existing.bias_score,
           structure:     existing.structure,
           fvgPresent:    existing.fvg_present === 1,
+          fvgHigh:       existing.fvg_high   || null,
+          fvgLow:        existing.fvg_low    || null,
+          fvgMid:        existing.fvg_mid    || null,
           fxssiLongPct:  analysed.longPct,
           fxssiShortPct: analysed.shortPct,
           fxssiTrapped:  analysed.trapped,
           obAbsorption:  analysed.obAbsorption,
           obImbalance:   analysed.obImbalance,
           obLargeOrders: analysed.largeOrders,
-          // Store full analysed data as JSON in raw_payload extension
           fxssiAnalysis: JSON.stringify(analysed)
         });
       }
