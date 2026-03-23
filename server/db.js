@@ -86,7 +86,8 @@ function initSchema() {
     id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL, ts INTEGER NOT NULL,
     close REAL, high REAL, low REAL, volume REAL, ema200 REAL, vwap REAL,
     rsi REAL, macd_hist REAL, bias INTEGER, bias_score REAL, structure TEXT,
-    fvg_present INTEGER DEFAULT 0, fxssi_long_pct REAL, fxssi_short_pct REAL,
+    fvg_present INTEGER DEFAULT 0, fvg_high REAL, fvg_low REAL, fvg_mid REAL,
+    fxssi_long_pct REAL, fxssi_short_pct REAL,
     fxssi_trapped TEXT, ob_absorption INTEGER DEFAULT 0, ob_imbalance REAL,
     ob_large_orders INTEGER DEFAULT 0, fxssi_analysis TEXT, raw_payload TEXT)`);
 
@@ -118,6 +119,9 @@ function initSchema() {
   }
   // Run migrations for new columns
   try { db.run('ALTER TABLE market_data ADD COLUMN fxssi_analysis TEXT'); console.log('[DB] Migration: added fxssi_analysis column'); } catch(e) {}
+  try { db.run('ALTER TABLE market_data ADD COLUMN fvg_high REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE market_data ADD COLUMN fvg_low REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE market_data ADD COLUMN fvg_mid REAL'); } catch(e) {}
 
   console.log('[DB] Schema initialised, weights seeded');
 }
@@ -135,9 +139,9 @@ function upsertMarketData(symbol, data) {
   if (hasFxssiCol) {
     run(`INSERT INTO market_data
       (symbol,ts,close,high,low,volume,ema200,vwap,rsi,macd_hist,bias,bias_score,
-       structure,fvg_present,fxssi_long_pct,fxssi_short_pct,fxssi_trapped,
+       structure,fvg_present,fvg_high,fvg_low,fvg_mid,fxssi_long_pct,fxssi_short_pct,fxssi_trapped,
        ob_absorption,ob_imbalance,ob_large_orders,fxssi_analysis,raw_payload)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [symbol, Date.now(),
        n(data.close), n(data.high), n(data.low), n(data.volume),
        n(data.ema200), n(data.vwap), n(data.rsi), n(data.macdHist),
@@ -155,9 +159,9 @@ function upsertMarketData(symbol, data) {
   } else {
     run(`INSERT INTO market_data
       (symbol,ts,close,high,low,volume,ema200,vwap,rsi,macd_hist,bias,bias_score,
-       structure,fvg_present,fxssi_long_pct,fxssi_short_pct,fxssi_trapped,
+       structure,fvg_present,fvg_high,fvg_low,fvg_mid,fxssi_long_pct,fxssi_short_pct,fxssi_trapped,
        ob_absorption,ob_imbalance,ob_large_orders,raw_payload)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [symbol, Date.now(),
        n(data.close), n(data.high), n(data.low), n(data.volume),
        n(data.ema200), n(data.vwap), n(data.rsi), n(data.macdHist),
