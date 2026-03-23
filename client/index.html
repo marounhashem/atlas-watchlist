@@ -689,7 +689,7 @@ function copyTradeDossier(cardId) {
         <span class="dossier-title">⊞ TRADE DOSSIER — \${sig.symbol} \${sig.direction||''}</span>
         <button class="dossier-close" onclick="this.closest('.dossier-modal').remove()">✕</button>
       </div>
-      <textarea class="dossier-ta" id="dossier-ta" readonly>\${text}</textarea>
+      <textarea class="dossier-ta" id="dossier-ta" readonly></textarea>
       <div class="dossier-hint">Ctrl+A to select all · Ctrl+C to copy · Esc to close</div>
     </div>
   \`;
@@ -697,6 +697,7 @@ function copyTradeDossier(cardId) {
 
   // Auto select all text
   const ta = document.getElementById('dossier-ta');
+  ta.value = text;
   ta.focus();
   ta.select();
 
