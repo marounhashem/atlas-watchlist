@@ -256,6 +256,50 @@ app.post('/api/agent', async (req, res) => {
   }
 });
 
+// Manual FXSSI fetch trigger
+app.get('/api/fxssi-fetch', async (req, res) => {
+  try {
+    process.env.FXSSI_FORCE_FETCH = '1';
+    await runFXSSIScrape(broadcast);
+    process.env.FXSSI_FORCE_FETCH = '0';
+    res.json({ ok: true, message: 'FXSSI fetch complete' });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// FXSSI direct test — call the API right now and return raw result
+app.get('/api/fxssi-test', async (req, res) => {
+  const token  = process.env.FXSSI_TOKEN;
+  const userId = process.env.FXSSI_USER_ID || '118460';
+  if (!token) return res.json({ error: 'No FXSSI_TOKEN set' });
+
+  try {
+    const url = `https://c.fxssi.com/api/order-book?pair=XAUUSD&view=all&rand=${Math.random()}&token=${token}&user_id=${userId}&period=1200`;
+    const r = await fetch(url, {
+      headers: {
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+        'Referer': 'https://fxssi.com/'
+      }
+    });
+    const status = r.status;
+    const text = await r.text();
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch(e) {}
+    res.json({
+      httpStatus: status,
+      hasLevels: parsed?.levels?.length || 0,
+      price: parsed?.price || null,
+      time: parsed?.time || null,
+      snapshotAge: parsed?.time ? Math.round((Date.now()/1000 - parsed.time)/60) + 'm' : null,
+      rawPreview: text.slice(0, 200)
+    });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // FXSSI Rich webhook — accepts payload from browser extension as backup
 app.post('/webhook/fxssi-rich', (req, res) => {
   const payload = req.body;
