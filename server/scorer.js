@@ -191,7 +191,7 @@ function estimateATR(data, assetClass) {
   return fallbacks[assetClass] || 5;
 }
 
-async function scoreSymbol(symbol) {
+function scoreSymbol(symbol) {
   let data;
   try { data = getLatestMarketData(symbol); } catch(e) { return null; }
   if (!data) return null;
@@ -546,16 +546,7 @@ function scoreAllPriority() {
         continue;
       }
       const result = scoreSymbol(symbol);
-      if (result instanceof Promise) {
-        // scoreSymbol is now async — handle promise
-        result.then(r => { if (r) results.push(r); }).catch(() => {});
-        // For sync return, score with last known data
-        results.push({
-          symbol, label: SYMBOLS[symbol].label,
-          verdict: 'SKIP', score: 0, direction: null,
-          reasoning: 'Scoring...', ts: Date.now()
-        });
-      } else if (result) {
+      if (result) {
         results.push(result);
       } else {
         results.push({
