@@ -232,6 +232,11 @@ function scoreSymbol(symbol) {
   const direction = inferDirection(data);
   if (!direction) return null;
 
+  // Sanitise corrupted ob_imbalance (old rows may have JSON string)
+  if (data.ob_imbalance && typeof data.ob_imbalance === 'string' && data.ob_imbalance.startsWith('{')) {
+    data.ob_imbalance = 0;
+  }
+
   const biasSc   = scoreBias(data);
   const fxssiSc  = scoreFXSSI(data, direction);
   const obSc     = scoreOrderBook(data, direction);
@@ -541,7 +546,16 @@ function scoreAllPriority() {
         });
       }
     } catch (e) {
-      console.error(`Scorer error ${symbol}:`, e.message);
+      console.error(`[Scorer] ${symbol} error:`, e.message, e.stack?.split('\n')[1]);
+      results.push({
+        symbol,
+        label: SYMBOLS[symbol]?.label || symbol,
+        verdict: 'SKIP',
+        score: 0,
+        direction: null,
+        reasoning: `Error: ${e.message}`,
+        ts: Date.now()
+      });
     }
   }
   // Sort: open symbols first (by score desc), closed at bottom
