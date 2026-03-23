@@ -410,6 +410,7 @@ function renderCard(sig) {
       <div class="abtn aI" onclick="logOutcome(${sig.id||'null'},'IGNORED')">IGNORE</div>`:''}
       ${sig.outcome==='ACTIVE'?`<span style="font-size:9px;color:#ffd740;letter-spacing:.5px;">● MONITORING TP/SL</span>`:''}
       ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
+      ${showAgents?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}', null)" title="Copy full trade dossier">⊞</div>`:''}
     </div>
     ${showAgents?`<div class="agents-panel" id="agents-${sig.id||sig.symbol}">
       <div class="agent-tabs">
@@ -642,7 +643,24 @@ function renderRisk(box, raw, sig, acct) {
 
 async function copyTradeDossier(cardId, riskData) {
   const sig = allSignals.find(s => (s.id||s.symbol) == cardId || s.symbol == cardId) || {};
-  const cached = agentCache;
+
+  // If riskData not passed (called from card button), fetch it via agent
+  if (!riskData) {
+    try {
+      const acct = accountSize;
+      const prompt = `You are a trading risk manager. Calculate position sizing.
+Trade: ${sig.symbol} ${sig.direction} | Entry: ${sig.entry} | SL: ${sig.sl} | TP: ${sig.tp} | R:R: 1:${sig.rr}
+Account: $${acct} USD
+Return ONLY JSON: {"kelly_pct":X,"half_kelly_pct":X,"kelly_usd":X,"half_kelly_usd":X,"kelly_units":X,"half_kelly_units":X,"risk_per_trade_usd":X,"max_loss_kelly":X,"verdict":"PROCEED|CAUTION|OVERSIZE","reasoning":"one sentence"}`;
+      const r = await fetch('/api/agent', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({type:'risk', prompt, symbol: sig.symbol, accountSize: acct})
+      });
+      const data = await r.json();
+      try { riskData = JSON.parse((data.result||'').replace(/```json|```/g,'').trim()); } catch(e) {}
+    } catch(e) {}
+  }
 
   // Fetch live market data for this symbol
   let marketData = null;
@@ -723,11 +741,7 @@ async function copyTradeDossier(cardId, riskData) {
 
   try {
     await navigator.clipboard.writeText(JSON.stringify(dossier, null, 2));
-    const confirm = document.getElementById('copy-confirm-'+cardId);
-    if (confirm) {
-      confirm.style.display = 'block';
-      setTimeout(() => { confirm.style.display = 'none'; }, 2000);
-    }
+    showToast('⊞ Trade dossier copied to clipboard');
   } catch(e) {
     // Fallback for browsers that block clipboard
     const ta = document.createElement('textarea');
