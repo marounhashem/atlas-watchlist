@@ -312,6 +312,20 @@ app.get('/api/fxssi-fetch', async (req, res) => {
   }
 });
 
+// Reset — wipe signals and market data, keep weights and schema
+app.post('/api/reset-data', (req, res) => {
+  try {
+    const db = require('./db');
+    db.run('DELETE FROM signals');
+    db.run('DELETE FROM market_data');
+    db.run('DELETE FROM learning_log');
+    console.log('[Reset] Signals, market data and learning log cleared');
+    res.json({ ok: true, message: 'Signals, market data and learning log cleared. Weights preserved.' });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // FXSSI force scrape — trigger immediately regardless of schedule
 app.get('/api/fxssi-force', async (req, res) => {
   try {
