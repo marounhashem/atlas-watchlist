@@ -2,11 +2,27 @@ const { SYMBOLS, getSessionNow, sessionMultiplier } = require('./config');
 const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 
 function scoreBias(data) {
-  // Pine Script sends bias as integer: -3 to +3
-  // EMA alignment, MACD, structure, FVG all baked in
+  // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
+  // v1: bias was -3 to +3
   const raw = Math.abs(data.bias || 0);
-  const fvgBonus = data.fvg_present ? 0.15 : 0;
-  return Math.min(1.0, (raw / 3) + fvgBonus);
+  const maxBias = raw > 3 ? 8 : 3; // detect v1 vs v2 payload
+  const fvgBonus = data.fvg_present ? 0.10 : 0;
+
+  // VWAP overextension from raw_payload — price beyond 2σ = strong confirmation
+  let vwapBonus = 0;
+  try {
+    if (data.raw_payload) {
+      const raw2 = JSON.parse(data.raw_payload);
+      const vwap = raw2.vwap;
+      if (vwap) {
+        // aboveUpper2 = overbought = confirms SHORT
+        // belowLower2 = oversold = confirms LONG
+        if (vwap.aboveUpper2 || vwap.belowLower2) vwapBonus = 0.10;
+      }
+    }
+  } catch(e) {}
+
+  return Math.min(1.0, (raw / maxBias) + fvgBonus + vwapBonus);
 }
 
 function scoreFXSSI(data, direction) {
@@ -408,9 +424,21 @@ function scoreSymbol(symbol) {
 }
 
 function estimateATR(data, assetClass) {
+  // Try Pine's multi-TF ATR from raw_payload first
+  try {
+    if (data.raw_payload) {
+      const raw = JSON.parse(data.raw_payload);
+      const atr = raw.atr;
+      if (atr) {
+        // Use 1h ATR for SL/TP — best balance of sensitivity and noise
+        return atr['1h'] || atr['4h'] || atr['15m'] || atr['5m'] || null;
+      }
+    }
+  } catch(e) {}
+  // Fallback: use high-low range of current bar
   const range = (data.high || 0) - (data.low || 0);
   if (range > 0) return range;
-  // Fallback ATR estimates by asset class
+  // Last resort: asset class defaults
   const fallbacks = { commodity: 2.5, crypto: 300, index: 15 };
   return fallbacks[assetClass] || 5;
 }
