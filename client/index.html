@@ -143,6 +143,12 @@
   .logts{color:#33334a;margin-bottom:2px;}
   .logch{color:var(--accent);}
   .empty{color:var(--muted);font-size:10px;text-align:center;padding:16px;line-height:2;}
+  .regime-badge{display:inline-block;padding:3px 10px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:1px;margin-bottom:6px;}
+  .regime-TRENDING{background:rgba(0,230,118,.12);color:var(--proceed);border:1px solid rgba(0,230,118,.25);}
+  .regime-RANGING{background:rgba(255,215,64,.1);color:var(--watch);border:1px solid rgba(255,215,64,.2);}
+  .regime-HIGH_VOLATILITY{background:rgba(255,82,82,.1);color:var(--short);border:1px solid rgba(255,82,82,.25);}
+  .regime-NEWS_DRIVEN{background:rgba(124,77,255,.1);color:var(--accent);border:1px solid rgba(124,77,255,.25);}
+  .regime-LOW_CONVICTION{background:var(--surface2);color:var(--muted);border:1px solid var(--border);}
   .toast{position:fixed;bottom:20px;right:20px;background:var(--surface2);border:1px solid var(--proceed);border-radius:6px;padding:10px 16px;font-size:11px;color:var(--proceed);z-index:999;animation:slideIn .3s ease;}
   ::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
 </style>
@@ -191,6 +197,10 @@
   <div class="panel">
     <div class="ptitle">Learning log</div>
     <div id="learning-container"><div class="empty" style="padding:8px">First cycle runs after 10 outcomes</div></div>
+  </div>
+  <div class="panel" id="regime-panel">
+    <div class="ptitle">Market regime — Claude</div>
+    <div id="regime-container"><div class="empty" style="padding:8px">Fires after 10 outcomes</div></div>
   </div>
   <div class="panel">
     <div class="ptitle">Webhook</div>
@@ -248,7 +258,7 @@ function connect() {
 function handleMessage(msg) {
   if (msg.type==='INIT') {
     allSignals = msg.signals||[];
-    renderSignals(); fetchStats(); fetchLearningLog(); fetchMarketStatus();
+    renderSignals(); fetchStats(); fetchLearningLog(); fetchMarketStatus(); fetchRegime();
     document.getElementById('symbol-count').textContent=(msg.symbols||[]).length+' symbols';
   } else if (msg.type==='SCORES') {
     for (const r of msg.results) {
@@ -267,6 +277,15 @@ function handleMessage(msg) {
   } else if (msg.type==='LEARNING_UPDATE') {
     fetchLearningLog();
     showToast('↺ Weights updated for '+msg.changes.map(c=>c.symbol).join(', '));
+  } else if (msg.type==='CLAUDE_INSIGHT') {
+    showToast(`🧠 ${msg.insight.symbol} ${msg.insight.outcome}: ${msg.insight.summary}`);
+    fetchRegime();
+  } else if (msg.type==='REGIME_UPDATE') {
+    renderRegime(msg.regime);
+    showToast(`📊 Regime: ${msg.regime.regime} — ${msg.regime.summary}`);
+  } else if (msg.type==='DAILY_SUMMARY') {
+    showToast(`📋 Daily: ${msg.summary.summary?.slice(0,80)}`);
+    fetchLearningLog();
   }
 }
 
@@ -648,6 +667,25 @@ async function fetchLearningLog() {
     const dt=new Date(e.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
     return `<div class="log"><div class="logts">${dt} — ${e.outcomes_used} outcomes</div>${changes.length?changes.map(c=>`<div class="logch">↑ ${c.symbol} (${c.winRate}%WR): ${c.diffs.join(', ')}</div>`).join(''):'<div>No changes needed</div>'}</div>`;
   }).join('');
+}
+
+async function fetchRegime() {
+  const regime = await fetch('/api/claude/regime').then(r=>r.json()).catch(()=>null);
+  if (!regime || regime.regime === 'UNKNOWN') return;
+  renderRegime(regime);
+}
+
+function renderRegime(r) {
+  const c = document.getElementById('regime-container');
+  if (!c || !r) return;
+  const cls = 'regime-'+(r.regime||'LOW_CONVICTION');
+  c.innerHTML = `
+    <div class="regime-badge ${cls}">${r.regime||'UNKNOWN'}</div>
+    <div style="font-size:9px;color:var(--text);line-height:1.6;margin-bottom:6px;">${r.summary||''}</div>
+    ${r.best_symbols?.length ? `<div style="font-size:8px;color:var(--proceed);">▲ Focus: ${r.best_symbols.join(', ')}</div>` : ''}
+    ${r.avoid_symbols?.length ? `<div style="font-size:8px;color:var(--short);">▼ Avoid: ${r.avoid_symbols.join(', ')}</div>` : ''}
+    ${r.key_observation ? `<div style="font-size:8px;color:var(--muted);margin-top:4px;border-top:1px solid var(--border);padding-top:4px;">${r.key_observation}</div>` : ''}
+    ${r.confidence ? `<div style="font-size:8px;color:var(--muted);">Confidence: ${r.confidence}%</div>` : ''}`;
 }
 
 async function fetchMarketStatus() {

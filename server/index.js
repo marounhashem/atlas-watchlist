@@ -11,6 +11,7 @@ const { isMarketOpen, getMarketStatus, minutesUntilOpen } = require('./marketHou
 const { scoreAllPriority, saveSignal } = require('./scorer');
 const { checkOutcomes } = require('./outcome');
 const { runLearningCycle } = require('./learner');
+const claudeLearner = require('./claudeLearner');
 const { runFXSSIScrape, processBridgePayload } = require('./fxssiScraper');
 const { SYMBOLS } = require('./config');
 
@@ -312,6 +313,20 @@ app.get('/api/fxssi-fetch', async (req, res) => {
   }
 });
 
+// Reset — wipe signals and market data, keep weights and schema
+app.post('/api/reset-data', (req, res) => {
+  try {
+    const db = require('./db');
+    db.run('DELETE FROM signals');
+    db.run('DELETE FROM market_data');
+    db.run('DELETE FROM learning_log');
+    console.log('[Reset] Signals, market data and learning log cleared');
+    res.json({ ok: true, message: 'Signals, market data and learning log cleared. Weights preserved.' });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // FXSSI force scrape — trigger immediately regardless of schedule
 app.get('/api/fxssi-force', async (req, res) => {
   try {
@@ -324,6 +339,24 @@ app.get('/api/fxssi-force', async (req, res) => {
   } catch(e) {
     res.json({ error: e.message });
   }
+});
+
+// Claude learning endpoints
+app.get('/api/claude/regime', (req, res) => {
+  res.json(claudeLearner.getRegime() || { regime: 'UNKNOWN', summary: 'Not enough data yet' });
+});
+
+app.get('/api/claude/insights', (req, res) => {
+  res.json(claudeLearner.getInsights());
+});
+
+app.get('/api/claude/patterns', (req, res) => {
+  res.json(claudeLearner.getSessionPatterns());
+});
+
+app.post('/api/claude/regime-now', async (req, res) => {
+  const regime = await claudeLearner.detectRegime();
+  res.json(regime || { error: 'Not enough data' });
 });
 
 // FXSSI direct test — call the API right now and return raw result
@@ -424,7 +457,9 @@ app.get('/api/data/:symbol', (req, res) => {
 // Manual score trigger — for testing
 app.get('/api/score-now', (req, res) => {
   if (!dbReady) return res.json({ error: 'DB not ready' });
-  const results = scoreAllPriority();
+  let results;
+  try { results = scoreAllPriority(); }
+  catch(e) { return res.json({ error: e.message, stack: e.stack?.split('\n').slice(0,3) }); }
   const proceeds = results.filter(r => r.verdict === 'PROCEED');
   const watches  = results.filter(r => r.verdict === 'WATCH');
   for (const r of [...proceeds, ...watches]) {

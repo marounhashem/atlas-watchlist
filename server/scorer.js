@@ -232,6 +232,11 @@ function scoreSymbol(symbol) {
   const direction = inferDirection(data);
   if (!direction) return null;
 
+  // Sanitise corrupted ob_imbalance (old rows may have JSON string)
+  if (data.ob_imbalance && typeof data.ob_imbalance === 'string' && data.ob_imbalance.startsWith('{')) {
+    data.ob_imbalance = 0;
+  }
+
   const biasSc   = scoreBias(data);
   const fxssiSc  = scoreFXSSI(data, direction);
   const obSc     = scoreOrderBook(data, direction);
@@ -291,6 +296,18 @@ function scoreSymbol(symbol) {
   const close = data.close || 0;
   const atr   = estimateATR(data, cfg.assetClass);
 
+  // ── Parse FXSSI levels — needed for both entry and SL/TP ────────────────
+  let fxssiLevels = null;
+  try {
+    const rawPayload = data.fxssi_analysis || data.raw_payload;
+    if (rawPayload) {
+      const parsed = JSON.parse(rawPayload);
+      fxssiLevels = parsed.fxssiAnalysis
+        ? (typeof parsed.fxssiAnalysis === 'string' ? JSON.parse(parsed.fxssiAnalysis) : parsed.fxssiAnalysis)
+        : (parsed.longPct != null ? parsed : null);
+    }
+  } catch(e) {}
+
   // ── Entry price from FXSSI limit wall ────────────────────────────────────
   // SHORT: entry just below nearest limit wall above (resistance rejection)
   // LONG:  entry just above nearest limit wall below (support bounce)
@@ -322,17 +339,7 @@ function scoreSymbol(symbol) {
 
   let sl, tp;
 
-  // ── Use FXSSI order book levels for SL/TP when available ─────────────────
-  let fxssiLevels = null;
-  try {
-    const rawPayload = data.fxssi_analysis || data.raw_payload;
-    if (rawPayload) {
-      const parsed = JSON.parse(rawPayload);
-      fxssiLevels = parsed.fxssiAnalysis
-        ? (typeof parsed.fxssiAnalysis === 'string' ? JSON.parse(parsed.fxssiAnalysis) : parsed.fxssiAnalysis)
-        : (parsed.longPct != null ? parsed : null);
-    }
-  } catch(e) {}
+
 
   if (fxssiLevels && close > 0) {
     const cp = close;
@@ -400,7 +407,23 @@ function scoreSymbol(symbol) {
     }
   }
 
-  const rr = calcRR(entry, sl, tp, direction);
+  let rr = calcRR(entry, sl, tp, direction);
+
+  // ── Sanity check R:R — revert to ATR if order book levels are unreasonable ──
+  const RR_MIN = 1.5;
+  const RR_MAX = 4.0;
+  if (!rr || rr < RR_MIN || rr > RR_MAX) {
+    // ATR fallback
+    if (direction === 'LONG') {
+      sl = Math.round((entry - atr * 1.5) * 10000) / 10000;
+      tp = Math.round((entry + atr * 3.0) * 10000) / 10000;
+    } else {
+      sl = Math.round((entry + atr * 1.5) * 10000) / 10000;
+      tp = Math.round((entry - atr * 3.0) * 10000) / 10000;
+    }
+    rr = calcRR(entry, sl, tp, direction);
+    console.log(`[Scorer] ${symbol} R:R out of range — reverted to ATR (R:R ${rr})`);
+  }
 
   const reasoning = buildReasoning(symbol, direction, {
     biasSc, fxssiSc, obSc, sessionSc, data, cfg
@@ -541,7 +564,16 @@ function scoreAllPriority() {
         });
       }
     } catch (e) {
-      console.error(`Scorer error ${symbol}:`, e.message);
+      console.error(`[Scorer] ${symbol} error:`, e.message, e.stack?.split('\n')[1]);
+      results.push({
+        symbol,
+        label: SYMBOLS[symbol]?.label || symbol,
+        verdict: 'SKIP',
+        score: 0,
+        direction: null,
+        reasoning: `Error: ${e.message}`,
+        ts: Date.now()
+      });
     }
   }
   // Sort: open symbols first (by score desc), closed at bottom
