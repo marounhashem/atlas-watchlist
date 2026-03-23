@@ -256,6 +256,27 @@ app.post('/api/agent', async (req, res) => {
   }
 });
 
+// FXSSI status — check what's cached
+app.get('/api/fxssi-status', (req, res) => {
+  const { runFXSSIScrape } = require('./fxssiScraper');
+  const db = require('./db');
+  const symbols = ['GOLD','SILVER','OILWTI','BTCUSD','US100','US30'];
+  const status = {};
+  for (const sym of symbols) {
+    const data = db.getLatestMarketData(sym);
+    status[sym] = {
+      hasData: !!data,
+      fxssiLongPct:  data?.fxssi_long_pct  ?? null,
+      fxssiShortPct: data?.fxssi_short_pct ?? null,
+      fxssiTrapped:  data?.fxssi_trapped   ?? null,
+      obAbsorption:  data?.ob_absorption   ?? null,
+      obImbalance:   data?.ob_imbalance    ?? null,
+      lastUpdate:    data?.ts ? new Date(data.ts).toISOString() : null
+    };
+  }
+  res.json({ token_set: !!process.env.FXSSI_TOKEN, status });
+});
+
 // Debug: check latest market data for a symbol
 app.get('/api/data/:symbol', (req, res) => {
   const { getLatestMarketData } = require('./db');
