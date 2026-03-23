@@ -273,16 +273,87 @@ function scoreSymbol(symbol) {
   else if (score >= 55) verdict = 'WATCH';
 
   const close = data.close || 0;
-  const atr = estimateATR(data, cfg.assetClass);
+  const atr   = estimateATR(data, cfg.assetClass);
 
   let entry = close;
   let sl, tp;
-  if (direction === 'LONG') {
-    sl = Math.round((close - atr * 1.5) * 10000) / 10000;
-    tp = Math.round((close + atr * 3.0) * 10000) / 10000;
+
+  // ── Use FXSSI order book levels for SL/TP when available ─────────────────
+  let fxssiLevels = null;
+  try {
+    const rawPayload = data.fxssi_analysis || data.raw_payload;
+    if (rawPayload) {
+      const parsed = JSON.parse(rawPayload);
+      fxssiLevels = parsed.fxssiAnalysis
+        ? (typeof parsed.fxssiAnalysis === 'string' ? JSON.parse(parsed.fxssiAnalysis) : parsed.fxssiAnalysis)
+        : (parsed.longPct != null ? parsed : null);
+    }
+  } catch(e) {}
+
+  if (fxssiLevels && close > 0) {
+    const cp = close;
+    const atrSl = atr * 1.5; // ATR fallback distance
+
+    if (direction === 'LONG') {
+      // TP: nearest SL cluster above price (price hunts it) — Part 2 signal #1
+      // Fallback to gravity if no SL cluster above
+      const tpLevel = fxssiLevels.nearestSLAbove?.price || fxssiLevels.gravity?.price;
+      if (tpLevel && tpLevel > cp && (tpLevel - cp) > atr * 0.5) {
+        tp = Math.round(tpLevel * 10000) / 10000;
+      } else {
+        tp = Math.round((cp + atr * 3.0) * 10000) / 10000;
+      }
+
+      // SL: just beyond nearest losing cluster below (trampoline — if breaks, move continues)
+      // Or nearest limit wall below minus a buffer
+      const slClusterBelow = fxssiLevels.losingClusters?.filter(c => c.price < cp)
+        .sort((a,b) => b.price - a.price)[0];
+      const limitBelow = fxssiLevels.nearestLimitBelow?.price;
+
+      if (slClusterBelow && slClusterBelow.price > cp - atrSl * 2) {
+        // SL just below the losing cluster — if cluster breaks, we're out
+        sl = Math.round((slClusterBelow.price - atr * 0.3) * 10000) / 10000;
+      } else if (limitBelow && limitBelow > cp - atrSl * 2) {
+        // SL below support wall
+        sl = Math.round((limitBelow - atr * 0.5) * 10000) / 10000;
+      } else {
+        sl = Math.round((cp - atrSl) * 10000) / 10000;
+      }
+
+    } else { // SHORT
+      // TP: nearest SL cluster below price (price hunts it)
+      const tpLevel = fxssiLevels.nearestSLBelow?.price || fxssiLevels.gravity?.price;
+      if (tpLevel && tpLevel < cp && (cp - tpLevel) > atr * 0.5) {
+        tp = Math.round(tpLevel * 10000) / 10000;
+      } else {
+        tp = Math.round((cp - atr * 3.0) * 10000) / 10000;
+      }
+
+      // SL: just beyond nearest losing cluster above (if breaks, move continues down)
+      const slClusterAbove = fxssiLevels.losingClusters?.filter(c => c.price > cp)
+        .sort((a,b) => a.price - b.price)[0];
+      const limitAbove = fxssiLevels.nearestLimitAbove?.price;
+
+      if (slClusterAbove && slClusterAbove.price < cp + atrSl * 2) {
+        // SL just above the losing cluster
+        sl = Math.round((slClusterAbove.price + atr * 0.3) * 10000) / 10000;
+      } else if (limitAbove && limitAbove < cp + atrSl * 2) {
+        // SL above resistance wall
+        sl = Math.round((limitAbove + atr * 0.5) * 10000) / 10000;
+      } else {
+        sl = Math.round((cp + atrSl) * 10000) / 10000;
+      }
+    }
+
   } else {
-    sl = Math.round((close + atr * 1.5) * 10000) / 10000;
-    tp = Math.round((close - atr * 3.0) * 10000) / 10000;
+    // ATR fallback — no FXSSI data
+    if (direction === 'LONG') {
+      sl = Math.round((close - atr * 1.5) * 10000) / 10000;
+      tp = Math.round((close + atr * 3.0) * 10000) / 10000;
+    } else {
+      sl = Math.round((close + atr * 1.5) * 10000) / 10000;
+      tp = Math.round((close - atr * 3.0) * 10000) / 10000;
+    }
   }
 
   const rr = calcRR(entry, sl, tp, direction);
