@@ -1,4 +1,5 @@
 const { getOpenSignals, updateOutcome, getLatestMarketData, run } = require('./db');
+const claudeLearner = require('./claudeLearner');
 
 // Signal lifecycle:
 // OPEN (entry not touched) → ACTIVE (entry touched, TP/SL not yet) → WIN / LOSS
@@ -59,6 +60,10 @@ function checkOutcomes(broadcast) {
         updateOutcome(id, outcome, pnlPct);
         console.log(`[Outcome] ${sig.symbol} ${direction} → ${outcome} (${pnlPct > 0 ? '+' : ''}${pnlPct}%)`);
         if (broadcast) broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction, outcome, pnlPct, ts: Date.now() });
+        // Fire Claude learning automatically
+        claudeLearner.onOutcome({ ...sig, pnl_pct: pnlPct }, outcome, broadcast).catch(e =>
+          console.error('[Claude] Auto-learning error:', e.message)
+        );
       }
     }
 
