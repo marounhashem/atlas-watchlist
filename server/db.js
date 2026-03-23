@@ -128,53 +128,48 @@ function initSchema() {
 
 function upsertMarketData(symbol, data) {
   const n = (v) => (v === null || v === undefined || isNaN(v)) ? null : Number(v);
-  // Build insert dynamically — fxssi_analysis column may not exist on older DBs
-  const hasFxssiCol = (() => {
-    try {
-      const cols = db.exec("PRAGMA table_info(market_data)")[0]?.values || [];
-      return cols.some(c => c[1] === 'fxssi_analysis');
-    } catch(e) { return false; }
-  })();
+
+  // Check if fxssi_analysis column exists (added via migration)
+  let hasFxssiCol = false;
+  try {
+    const cols = db.exec("PRAGMA table_info(market_data)")[0]?.values || [];
+    hasFxssiCol = cols.some(c => c[1] === 'fxssi_analysis');
+  } catch(e) {}
+
+  const baseParams = [
+    symbol, Date.now(),
+    n(data.close), n(data.high), n(data.low), n(data.volume),
+    n(data.ema200), n(data.vwap), n(data.rsi), n(data.macdHist),
+    n(data.bias), n(data.biasScore),
+    data.structure || 'ranging',
+    data.fvgPresent ? 1 : 0,
+    n(data.fvgHigh), n(data.fvgLow), n(data.fvgMid),
+    n(data.fxssiLongPct), n(data.fxssiShortPct),
+    data.fxssiTrapped || null,
+    data.obAbsorption ? 1 : 0,
+    n(data.obImbalance),
+    data.obLargeOrders ? 1 : 0
+  ];
 
   if (hasFxssiCol) {
     run(`INSERT INTO market_data
       (symbol,ts,close,high,low,volume,ema200,vwap,rsi,macd_hist,bias,bias_score,
-       structure,fvg_present,fvg_high,fvg_low,fvg_mid,fxssi_long_pct,fxssi_short_pct,fxssi_trapped,
-       ob_absorption,ob_imbalance,ob_large_orders,fxssi_analysis,raw_payload)
+       structure,fvg_present,fvg_high,fvg_low,fvg_mid,
+       fxssi_long_pct,fxssi_short_pct,fxssi_trapped,
+       ob_absorption,ob_imbalance,ob_large_orders,
+       fxssi_analysis,raw_payload)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [symbol, Date.now(),
-       n(data.close), n(data.high), n(data.low), n(data.volume),
-       n(data.ema200), n(data.vwap), n(data.rsi), n(data.macdHist),
-       n(data.bias), n(data.biasScore),
-       data.structure || 'ranging',
-       data.fvgPresent ? 1 : 0,
-       n(data.fxssiLongPct), n(data.fxssiShortPct),
-       data.fxssiTrapped || null,
-       data.obAbsorption ? 1 : 0,
-       n(data.obImbalance),
-       data.obLargeOrders ? 1 : 0,
-       data.fxssiAnalysis || null,
-       JSON.stringify(data)
-      ]);
+      [...baseParams, data.fxssiAnalysis || null, JSON.stringify(data)]
+    );
   } else {
     run(`INSERT INTO market_data
       (symbol,ts,close,high,low,volume,ema200,vwap,rsi,macd_hist,bias,bias_score,
-       structure,fvg_present,fvg_high,fvg_low,fvg_mid,fxssi_long_pct,fxssi_short_pct,fxssi_trapped,
+       structure,fvg_present,fvg_high,fvg_low,fvg_mid,
+       fxssi_long_pct,fxssi_short_pct,fxssi_trapped,
        ob_absorption,ob_imbalance,ob_large_orders,raw_payload)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [symbol, Date.now(),
-       n(data.close), n(data.high), n(data.low), n(data.volume),
-       n(data.ema200), n(data.vwap), n(data.rsi), n(data.macdHist),
-       n(data.bias), n(data.biasScore),
-       data.structure || 'ranging',
-       data.fvgPresent ? 1 : 0,
-       n(data.fxssiLongPct), n(data.fxssiShortPct),
-       data.fxssiTrapped || null,
-       data.obAbsorption ? 1 : 0,
-       n(data.obImbalance),
-       data.obLargeOrders ? 1 : 0,
-       JSON.stringify(data)
-      ]);
+      [...baseParams, JSON.stringify(data)]
+    );
   }
 }
 
