@@ -11,6 +11,7 @@ const { isMarketOpen, getMarketStatus, minutesUntilOpen } = require('./marketHou
 const { scoreAllPriority, saveSignal } = require('./scorer');
 const { checkOutcomes } = require('./outcome');
 const { runLearningCycle } = require('./learner');
+const claudeLearner = require('./claudeLearner');
 const { runFXSSIScrape, processBridgePayload } = require('./fxssiScraper');
 const { SYMBOLS } = require('./config');
 
@@ -338,6 +339,24 @@ app.get('/api/fxssi-force', async (req, res) => {
   } catch(e) {
     res.json({ error: e.message });
   }
+});
+
+// Claude learning endpoints
+app.get('/api/claude/regime', (req, res) => {
+  res.json(claudeLearner.getRegime() || { regime: 'UNKNOWN', summary: 'Not enough data yet' });
+});
+
+app.get('/api/claude/insights', (req, res) => {
+  res.json(claudeLearner.getInsights());
+});
+
+app.get('/api/claude/patterns', (req, res) => {
+  res.json(claudeLearner.getSessionPatterns());
+});
+
+app.post('/api/claude/regime-now', async (req, res) => {
+  const regime = await claudeLearner.detectRegime();
+  res.json(regime || { error: 'Not enough data' });
 });
 
 // FXSSI direct test — call the API right now and return raw result
