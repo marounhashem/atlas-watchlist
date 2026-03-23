@@ -275,7 +275,35 @@ function scoreSymbol(symbol) {
   const close = data.close || 0;
   const atr   = estimateATR(data, cfg.assetClass);
 
+  // ── Entry price from FXSSI limit wall ────────────────────────────────────
+  // SHORT: entry just below nearest limit wall above (resistance rejection)
+  // LONG:  entry just above nearest limit wall below (support bounce)
+  // Fallback: FVG midpoint if sent by Pine, then current price
   let entry = close;
+
+  if (fxssiLevels && close > 0) {
+    const buffer = close * 0.001; // 0.1% buffer inside the wall
+    if (direction === 'SHORT' && fxssiLevels.nearestLimitAbove?.price) {
+      const wall = fxssiLevels.nearestLimitAbove.price;
+      const dist = wall - close;
+      if (dist > 0 && dist < atr * 2) {
+        // Wall is close — enter at wall minus buffer (catch rejection)
+        entry = Math.round((wall - buffer) * 10000) / 10000;
+      }
+    } else if (direction === 'LONG' && fxssiLevels.nearestLimitBelow?.price) {
+      const wall = fxssiLevels.nearestLimitBelow.price;
+      const dist = close - wall;
+      if (dist > 0 && dist < atr * 2) {
+        entry = Math.round((wall + buffer) * 10000) / 10000;
+      }
+    }
+  }
+
+  // FVG mid fallback if entry is still current price
+  if (entry === close && data.fvg_mid && data.fvg_mid > 0) {
+    entry = Math.round(data.fvg_mid * 10000) / 10000;
+  }
+
   let sl, tp;
 
   // ── Use FXSSI order book levels for SL/TP when available ─────────────────
