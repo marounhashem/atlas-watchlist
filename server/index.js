@@ -354,6 +354,16 @@ app.get('/api/claude/patterns', (req, res) => {
   res.json(claudeLearner.getSessionPatterns());
 });
 
+app.get('/api/claude/optimisations', (req, res) => {
+  res.json(claudeLearner.getAllOptimisations());
+});
+
+app.post('/api/claude/optimise/:symbol', async (req, res) => {
+  const symbol = req.params.symbol.toUpperCase();
+  const result = await claudeLearner.optimiseEntryLevels(symbol);
+  res.json(result || { error: 'Not enough data (need 5+ closed trades)' });
+});
+
 app.post('/api/claude/regime-now', async (req, res) => {
   const regime = await claudeLearner.detectRegime();
   res.json(regime || { error: 'Not enough data' });
