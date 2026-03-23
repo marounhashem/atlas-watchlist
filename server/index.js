@@ -465,10 +465,10 @@ app.get('/api/data/:symbol', (req, res) => {
 });
 
 // Manual score trigger — for testing
-app.get('/api/score-now', (req, res) => {
+app.get('/api/score-now', async (req, res) => {
   if (!dbReady) return res.json({ error: 'DB not ready' });
   let results;
-  try { results = scoreAllPriority(); }
+  try { results = await scoreAllPriority(); }
   catch(e) { return res.json({ error: e.message, stack: e.stack?.split('\n').slice(0,3) }); }
   const proceeds = results.filter(r => r.verdict === 'PROCEED');
   const watches  = results.filter(r => r.verdict === 'WATCH');
@@ -492,9 +492,9 @@ app.get('/api/status', (req, res) => {
 
 // ── Cron jobs ─────────────────────────────────────────────────────────────────
 // Score all priority symbols every 5 minutes
-cron.schedule('*/5 * * * *', () => {
+cron.schedule('*/5 * * * *', async () => {
   console.log('[Cron] Running 5m scoring cycle...');
-  const results = scoreAllPriority();
+  const results = await scoreAllPriority();
   const proceeds = results.filter(r => r.verdict === 'PROCEED');
   const watches = results.filter(r => r.verdict === 'WATCH');
 
