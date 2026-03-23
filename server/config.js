@@ -96,6 +96,22 @@ const SYMBOLS = {
     macroEvents: ['FOMC', 'CPI', 'NFP', 'EARNINGS'],
     minScoreProceed: 70
   },
+  US30: {
+    label: 'Dow Jones',
+    capitalTicker: 'US30',
+    pineTicker: 'US30USD',
+    assetClass: 'index',
+    sessions: { london: false, newYork: true, asia: false },
+    peakSession: 'newYork',
+    scoringWeights: {
+      pineBias: 0.35,
+      fxssiSentiment: 0.15,
+      orderBook: 0.20,
+      sessionQuality: 0.30
+    },
+    macroEvents: ['FOMC', 'CPI', 'NFP', 'EARNINGS'],
+    minScoreProceed: 70
+  },
   DE40: {
     label: 'DAX 40',
     capitalTicker: 'DE40',

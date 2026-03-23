@@ -40,6 +40,12 @@
   .filters{display:flex;gap:5px;margin-bottom:2px;}
   .fbtn{font-size:9px;padding:3px 8px;border-radius:3px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;letter-spacing:1px;}
   .fbtn.on{border-color:var(--accent);color:var(--accent);background:rgba(124,77,255,.1);}
+  .ck-group{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;padding:6px 8px;background:var(--surface2);border-radius:5px;border:1px solid var(--border);}
+  .ck-label{font-size:9px;color:var(--muted);letter-spacing:1px;margin-right:2px;}
+  .ck-item{display:flex;align-items:center;gap:3px;cursor:pointer;user-select:none;}
+  .ck-item input{accent-color:var(--accent);width:11px;height:11px;cursor:pointer;}
+  .ck-item span{font-size:9px;color:var(--text);letter-spacing:.5px;}
+  .ck-item.fxssi span{color:var(--proceed);}
   .sec{font-size:9px;letter-spacing:2px;color:var(--muted);padding:2px 0 6px;text-transform:uppercase;}
 
   /* Signal card */
@@ -165,6 +171,12 @@
 
 <div class="layout">
 <div class="left">
+  <div class="ck-group">
+    <span class="ck-label">SHOW:</span>
+    <label class="ck-item fxssi"><input type="checkbox" id="ck-fxssi" checked onchange="applyFilters()"><span>FXSSI (Gold·Silver·Oil·BTC·NAS100·US30)</span></label>
+    <label class="ck-item"><input type="checkbox" id="ck-indices" checked onchange="applyFilters()"><span>Indices (DE40·UK100·J225·HK50·CN50·US500·US100·US30)</span></label>
+    <label class="ck-item"><input type="checkbox" id="ck-forex" checked onchange="applyFilters()"><span>Forex</span></label>
+  </div>
   <div style="display:flex;align-items:center;justify-content:space-between;">
     <div class="sec">Live signals</div>
     <div class="filters">
@@ -204,6 +216,22 @@
 <script>
 const WS_URL = `${location.protocol==='https:'?'wss':'ws'}://${location.host}`;
 let allSignals=[], activeFilter='ALL', ws;
+
+const FXSSI_SYMBOLS = new Set(['GOLD','SILVER','OILWTI','BTCUSD','US100','US30']);
+const INDEX_SYMBOLS = new Set(['DE40','UK100','J225','HK50','CN50','US500','US100','US30']);
+const FOREX_SYMBOLS = new Set(['EURUSD','GBPUSD','USDJPY']);
+
+function isVisible(symbol) {
+  const fxssiOn   = document.getElementById('ck-fxssi')?.checked ?? true;
+  const indicesOn = document.getElementById('ck-indices')?.checked ?? true;
+  const forexOn   = document.getElementById('ck-forex')?.checked ?? true;
+  if (FXSSI_SYMBOLS.has(symbol)  && !fxssiOn)   return false;
+  if (INDEX_SYMBOLS.has(symbol)  && !indicesOn)  return false;
+  if (FOREX_SYMBOLS.has(symbol)  && !forexOn)    return false;
+  return true;
+}
+
+function applyFilters() { renderSignals(); }
 const agentCache = {};
 const CACHE_TTL = { research: 4*60*60*1000, predict: 5*60*1000, risk: 0 };
 
@@ -303,14 +331,26 @@ function renderSignals() {
   });
 
   let filtered = deduped.filter(s=>{
-    if(activeFilter==='PROCEED') return s.verdict==='PROCEED' && s.outcome==='OPEN';
-    if(activeFilter==='WATCH')   return s.verdict==='WATCH'   && s.outcome==='OPEN';
-    if(activeFilter==='LONG')    return s.direction==='LONG'  && s.outcome==='OPEN';
-    if(activeFilter==='SHORT')   return s.direction==='SHORT' && s.outcome==='OPEN';
-    return s.outcome==='OPEN' || s.verdict==='CLOSED';
+    // Never show REPLACED signals
+    if(s.outcome==='REPLACED') return false;
+    // Hide WIN/LOSS/IGNORED/EXPIRED from dashboard — DB only
+    if(['WIN','LOSS','IGNORED','EXPIRED'].includes(s.outcome)) return false;
+    // CLOSED = market closed cards, only in ALL
+    if(s.verdict==='CLOSED') return activeFilter==='ALL';
+    // Active filters
+    if(activeFilter==='PROCEED') return s.verdict==='PROCEED';
+    if(activeFilter==='WATCH')   return s.verdict==='WATCH';
+    if(activeFilter==='LONG')    return s.direction==='LONG';
+    if(activeFilter==='SHORT')   return s.direction==='SHORT';
+    return true;
   }).sort((a,b)=>{
-    const o={PROCEED:0,WATCH:1,SKIP:2,CLOSED:3};
-    return (o[a.verdict]??2)-(o[b.verdict]??2)||(b.score||0)-(a.score||0);
+    // ACTIVE signals first, then PROCEED, WATCH, SKIP, CLOSED
+    const stateO = {ACTIVE:0,OPEN:1};
+    const sa = stateO[a.outcome]??1;
+    const sb = stateO[b.outcome]??1;
+    if(sa!==sb) return sa-sb;
+    const vo={PROCEED:0,WATCH:1,SKIP:2,CLOSED:3};
+    return (vo[a.verdict]??2)-(vo[b.verdict]??2)||(b.score||0)-(a.score||0);
   });
 
   const c=document.getElementById('signals-container');

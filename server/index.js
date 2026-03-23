@@ -11,6 +11,7 @@ const { isMarketOpen, getMarketStatus, minutesUntilOpen } = require('./marketHou
 const { scoreAllPriority, saveSignal } = require('./scorer');
 const { checkOutcomes } = require('./outcome');
 const { runLearningCycle } = require('./learner');
+const { runFXSSIScrape } = require('./fxssiScraper');
 const { SYMBOLS } = require('./config');
 
 const app = express();
