@@ -166,6 +166,8 @@ app.post('/webhook/pine', (req, res) => {
   const srResistance  = data.sr?.resistance || null;
   const srSupport     = data.sr?.support    || null;
 
+  // Preserve existing FXSSI data — Pine webhook must not overwrite it with nulls
+  const existing = require('./db').getLatestMarketData(sym);
   upsertMarketData(sym, {
     close:       price,
     high:        data.high,
@@ -182,13 +184,14 @@ app.post('/webhook/pine', (req, res) => {
     fvgHigh:     fvgHigh,
     fvgLow:      fvgLow,
     fvgMid:      fvgMid,
-    fxssiLongPct:  data.fxssiLongPct  || null,
-    fxssiShortPct: data.fxssiShortPct || null,
-    fxssiTrapped:  data.fxssiTrapped  || null,
-    obAbsorption:  data.obAbsorption  || false,
-    obImbalance:   data.obImbalance   || 0,
-    obLargeOrders: data.obLargeOrders || false,
-    // Extended fields stored in raw_payload via JSON.stringify(data)
+    // Preserve FXSSI data from last scrape — only overwrite if Pine sends it
+    fxssiLongPct:  data.fxssiLongPct  || existing?.fxssi_long_pct  || null,
+    fxssiShortPct: data.fxssiShortPct || existing?.fxssi_short_pct || null,
+    fxssiTrapped:  data.fxssiTrapped  || existing?.fxssi_trapped   || null,
+    obAbsorption:  data.obAbsorption  || existing?.ob_absorption   || false,
+    obImbalance:   data.obImbalance   || existing?.ob_imbalance    || 0,
+    obLargeOrders: data.obLargeOrders || existing?.ob_large_orders || false,
+    fxssiAnalysis: existing?.fxssi_analysis || null,
   });
 
   // Verify the write worked
