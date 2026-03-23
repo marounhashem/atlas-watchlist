@@ -424,7 +424,9 @@ app.get('/api/data/:symbol', (req, res) => {
 // Manual score trigger — for testing
 app.get('/api/score-now', (req, res) => {
   if (!dbReady) return res.json({ error: 'DB not ready' });
-  const results = scoreAllPriority();
+  let results;
+  try { results = scoreAllPriority(); }
+  catch(e) { return res.json({ error: e.message, stack: e.stack?.split('\n').slice(0,3) }); }
   const proceeds = results.filter(r => r.verdict === 'PROCEED');
   const watches  = results.filter(r => r.verdict === 'WATCH');
   for (const r of [...proceeds, ...watches]) {
