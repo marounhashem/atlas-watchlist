@@ -287,13 +287,18 @@ app.get('/api/fxssi-test', async (req, res) => {
     const text = await r.text();
     let parsed = null;
     try { parsed = JSON.parse(text); } catch(e) {}
+    // Show first level to verify field names
+    const firstLevel = parsed?.levels?.[0] || null;
+    const midLevel = parsed?.levels?.[Math.floor((parsed?.levels?.length||0)/2)] || null;
     res.json({
       httpStatus: status,
       hasLevels: parsed?.levels?.length || 0,
       price: parsed?.price || null,
       time: parsed?.time || null,
       snapshotAge: parsed?.time ? Math.round((Date.now()/1000 - parsed.time)/60) + 'm' : null,
-      rawPreview: text.slice(0, 200)
+      firstLevel,
+      midLevel,
+      fieldNames: firstLevel ? Object.keys(firstLevel) : []
     });
   } catch(e) {
     res.json({ error: e.message });
@@ -319,12 +324,18 @@ app.get('/api/fxssi-status', (req, res) => {
     const data = db.getLatestMarketData(sym);
     let fx = null;
     try {
-      // fxssi_analysis is a dedicated column now
+      // Try fxssi_analysis column first, fall back to raw_payload
       const raw = data?.fxssi_analysis || data?.raw_payload;
       if (raw) {
         const parsed = JSON.parse(raw);
-        // raw_payload wraps everything; fxssi_analysis is the analysed object directly
-        fx = parsed.fxssiAnalysis ? JSON.parse(parsed.fxssiAnalysis) : parsed;
+        // raw_payload has {fxssiAnalysis: "...json..."} or fxssi_analysis has the object directly
+        if (parsed.fxssiAnalysis) {
+          fx = typeof parsed.fxssiAnalysis === 'string'
+            ? JSON.parse(parsed.fxssiAnalysis)
+            : parsed.fxssiAnalysis;
+        } else if (parsed.longPct != null) {
+          fx = parsed; // fxssi_analysis column stores object directly
+        }
       }
     } catch(e) {}
     status[sym] = {
