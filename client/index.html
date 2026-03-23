@@ -149,6 +149,13 @@
   .regime-HIGH_VOLATILITY{background:rgba(255,82,82,.1);color:var(--short);border:1px solid rgba(255,82,82,.25);}
   .regime-NEWS_DRIVEN{background:rgba(124,77,255,.1);color:var(--accent);border:1px solid rgba(124,77,255,.25);}
   .regime-LOW_CONVICTION{background:var(--surface2);color:var(--muted);border:1px solid var(--border);}
+  .dossier-modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:1000;display:flex;align-items:center;justify-content:center;}
+  .dossier-box{background:var(--surface);border:1px solid var(--accent);border-radius:8px;width:90%;max-width:700px;max-height:80vh;display:flex;flex-direction:column;padding:16px;}
+  .dossier-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+  .dossier-title{font-size:11px;font-weight:700;color:var(--accent);letter-spacing:2px;}
+  .dossier-close{background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:16px;font-family:inherit;}
+  .dossier-ta{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:'SF Mono','Fira Code',monospace;font-size:10px;padding:10px;resize:none;outline:none;min-height:300px;}
+  .dossier-hint{font-size:9px;color:var(--muted);margin-top:6px;text-align:center;}
   .toast{position:fixed;bottom:20px;right:20px;background:var(--surface2);border:1px solid var(--proceed);border-radius:6px;padding:10px 16px;font-size:11px;color:var(--proceed);z-index:999;animation:slideIn .3s ease;}
   ::-webkit-scrollbar{width:3px;}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
 </style>
@@ -410,7 +417,7 @@ function renderCard(sig) {
       <div class="abtn aI" onclick="logOutcome(${sig.id||'null'},'IGNORED')">IGNORE</div>`:''}
       ${sig.outcome==='ACTIVE'?`<span style="font-size:9px;color:#ffd740;letter-spacing:.5px;">● MONITORING TP/SL</span>`:''}
       ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
-      ${showAgents?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}', null)" title="Copy full trade dossier">⊞</div>`:''}
+      ${showAgents?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')" title="Copy full trade dossier">⊞</div>`:''}
     </div>
     ${showAgents?`<div class="agents-panel" id="agents-${sig.id||sig.symbol}">
       <div class="agent-tabs">
@@ -634,47 +641,24 @@ function renderRisk(box, raw, sig, acct) {
     <div style="font-size:9px;color:var(--muted);margin-top:5px;">${d.reasoning||''}</div>
     <div style="margin-top:10px;border-top:1px solid var(--border);padding-top:8px;">
       <button class="abtn" style="border-color:var(--accent);color:var(--accent);width:100%;font-size:9px;padding:6px;"
-        onclick="copyTradeDossier('${cardId}', ${JSON.stringify(d).replace(/'/g,"&#39;")})">
+        onclick="copyTradeDossier('${cardId}')">
         ⊞ COPY FULL TRADE DOSSIER
       </button>
       <div id="copy-confirm-${cardId}" style="font-size:8px;color:var(--proceed);text-align:center;margin-top:4px;display:none;">✓ Copied to clipboard</div>
     </div>`;
 }
 
-async function copyTradeDossier(cardId, riskData) {
-  const sig = allSignals.find(s => (s.id||s.symbol) == cardId || s.symbol == cardId) || {};
+function copyTradeDossier(cardId) {
+  const sig = allSignals.find(s => String(s.id||s.symbol) === String(cardId) || s.symbol === cardId) || {};
 
-  // If riskData not passed (called from card button), fetch it via agent
-  if (!riskData) {
-    try {
-      const acct = accountSize;
-      const prompt = `You are a trading risk manager. Calculate position sizing.
-Trade: ${sig.symbol} ${sig.direction} | Entry: ${sig.entry} | SL: ${sig.sl} | TP: ${sig.tp} | R:R: 1:${sig.rr}
-Account: $${acct} USD
-Return ONLY JSON: {"kelly_pct":X,"half_kelly_pct":X,"kelly_usd":X,"half_kelly_usd":X,"kelly_units":X,"half_kelly_units":X,"risk_per_trade_usd":X,"max_loss_kelly":X,"verdict":"PROCEED|CAUTION|OVERSIZE","reasoning":"one sentence"}`;
-      const r = await fetch('/api/agent', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({type:'risk', prompt, symbol: sig.symbol, accountSize: acct})
-      });
-      const data = await r.json();
-      try { riskData = JSON.parse((data.result||'').replace(/```json|```/g,'').trim()); } catch(e) {}
-    } catch(e) {}
-  }
+  const researchCache = agentCache[sig.symbol+'_research'];
+  const predictCache  = agentCache[sig.symbol+'_predict'];
+  const riskCache     = agentCache[sig.symbol+'_risk'];
 
-  // Fetch live market data for this symbol
-  let marketData = null;
-  try {
-    const r = await fetch('/api/data/' + sig.symbol);
-    marketData = await r.json();
-  } catch(e) {}
-
-  // Build full dossier
   const dossier = {
-    source: 'ATLAS//WATCHLIST',
+    source:    'ATLAS//WATCHLIST',
     timestamp: new Date().toISOString(),
-    account_size_usd: accountSize,
-
+    account:   accountSize,
     signal: {
       symbol:    sig.symbol,
       label:     sig.label,
@@ -687,70 +671,40 @@ Return ONLY JSON: {"kelly_pct":X,"half_kelly_pct":X,"kelly_usd":X,"half_kelly_us
       tp:        sig.tp,
       rr:        sig.rr,
       reasoning: sig.reasoning,
-      breakdown: sig.breakdown,
-      ts:        sig.ts
+      breakdown: sig.breakdown
     },
-
-    position_sizing: {
-      kelly_pct:       riskData.kelly_pct,
-      half_kelly_pct:  riskData.half_kelly_pct,
-      kelly_usd:       riskData.kelly_usd,
-      half_kelly_usd:  riskData.half_kelly_usd,
-      kelly_units:     riskData.kelly_units,
-      half_kelly_units: riskData.half_kelly_units,
-      risk_per_trade:  riskData.risk_per_trade_usd,
-      verdict:         riskData.verdict,
-      reasoning:       riskData.reasoning
-    },
-
-    market_data: marketData ? {
-      close:       marketData.close,
-      high:        marketData.high,
-      low:         marketData.low,
-      ema200:      marketData.ema200,
-      rsi:         marketData.rsi,
-      macd_hist:   marketData.macd_hist,
-      bias:        marketData.bias,
-      structure:   marketData.structure,
-      fvg_present: marketData.fvg_present,
-      fvg_high:    marketData.fvg_high,
-      fvg_low:     marketData.fvg_low,
-      fvg_mid:     marketData.fvg_mid
-    } : null,
-
-    fxssi: marketData ? {
-      long_pct:    marketData.fxssi_long_pct,
-      short_pct:   marketData.fxssi_short_pct,
-      trapped:     marketData.fxssi_trapped,
-      absorption:  marketData.ob_absorption,
-      imbalance:   marketData.ob_imbalance,
-      analysis:    (() => {
-        try { return JSON.parse(marketData.fxssi_analysis); } catch(e) { return null; }
-      })()
-    } : null,
-
-    agents: {
-      research: (() => {
-        try { return agentCache[sig.symbol+'_research']?.data || null; } catch(e) { return null; }
-      })(),
-      predict: (() => {
-        try { return agentCache[sig.symbol+'_predict']?.data || null; } catch(e) { return null; }
-      })()
-    }
+    research: researchCache ? (() => { try { return JSON.parse(researchCache.data); } catch(e) { return researchCache.data; } })() : null,
+    predict:  predictCache  ? (() => { try { return JSON.parse(predictCache.data);  } catch(e) { return predictCache.data;  } })() : null,
+    risk:     riskCache     ? (() => { try { return JSON.parse(riskCache.data);     } catch(e) { return riskCache.data;     } })() : null
   };
 
-  try {
-    await navigator.clipboard.writeText(JSON.stringify(dossier, null, 2));
-    showToast('⊞ Trade dossier copied to clipboard');
-  } catch(e) {
-    // Fallback for browsers that block clipboard
-    const ta = document.createElement('textarea');
-    ta.value = JSON.stringify(dossier, null, 2);
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    ta.remove();
-  }
+  const text = JSON.stringify(dossier, null, 2);
+
+  // Show modal with textarea — user selects all and copies
+  const modal = document.createElement('div');
+  modal.className = 'dossier-modal';
+  modal.innerHTML = \`
+    <div class="dossier-box">
+      <div class="dossier-header">
+        <span class="dossier-title">⊞ TRADE DOSSIER — \${sig.symbol} \${sig.direction||''}</span>
+        <button class="dossier-close" onclick="this.closest('.dossier-modal').remove()">✕</button>
+      </div>
+      <textarea class="dossier-ta" id="dossier-ta" readonly>\${text}</textarea>
+      <div class="dossier-hint">Ctrl+A to select all · Ctrl+C to copy · Esc to close</div>
+    </div>
+  \`;
+  document.body.appendChild(modal);
+
+  // Auto select all text
+  const ta = document.getElementById('dossier-ta');
+  ta.focus();
+  ta.select();
+
+  // Close on Escape or clicking backdrop
+  modal.addEventListener('click', e => { if(e.target===modal) modal.remove(); });
+  document.addEventListener('keydown', function esc(e) {
+    if(e.key==='Escape') { modal.remove(); document.removeEventListener('keydown', esc); }
+  });
 }
 
 async function logOutcome(signalId, outcome) {
