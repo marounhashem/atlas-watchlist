@@ -296,6 +296,18 @@ function scoreSymbol(symbol) {
   const close = data.close || 0;
   const atr   = estimateATR(data, cfg.assetClass);
 
+  // ── Parse FXSSI levels — needed for both entry and SL/TP ────────────────
+  let fxssiLevels = null;
+  try {
+    const rawPayload = data.fxssi_analysis || data.raw_payload;
+    if (rawPayload) {
+      const parsed = JSON.parse(rawPayload);
+      fxssiLevels = parsed.fxssiAnalysis
+        ? (typeof parsed.fxssiAnalysis === 'string' ? JSON.parse(parsed.fxssiAnalysis) : parsed.fxssiAnalysis)
+        : (parsed.longPct != null ? parsed : null);
+    }
+  } catch(e) {}
+
   // ── Entry price from FXSSI limit wall ────────────────────────────────────
   // SHORT: entry just below nearest limit wall above (resistance rejection)
   // LONG:  entry just above nearest limit wall below (support bounce)
@@ -327,17 +339,7 @@ function scoreSymbol(symbol) {
 
   let sl, tp;
 
-  // ── Use FXSSI order book levels for SL/TP when available ─────────────────
-  let fxssiLevels = null;
-  try {
-    const rawPayload = data.fxssi_analysis || data.raw_payload;
-    if (rawPayload) {
-      const parsed = JSON.parse(rawPayload);
-      fxssiLevels = parsed.fxssiAnalysis
-        ? (typeof parsed.fxssiAnalysis === 'string' ? JSON.parse(parsed.fxssiAnalysis) : parsed.fxssiAnalysis)
-        : (parsed.longPct != null ? parsed : null);
-    }
-  } catch(e) {}
+
 
   if (fxssiLevels && close > 0) {
     const cp = close;
