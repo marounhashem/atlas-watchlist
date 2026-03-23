@@ -649,65 +649,69 @@ function renderRisk(box, raw, sig, acct) {
 }
 
 function copyTradeDossier(cardId) {
-  const sig = allSignals.find(s => String(s.id||s.symbol) === String(cardId) || s.symbol === cardId) || {};
+  const sig = allSignals.find(function(s){ return String(s.id||s.symbol) === String(cardId) || s.symbol === cardId; }) || {};
+  const rc = agentCache[sig.symbol+'_research'];
+  const pc = agentCache[sig.symbol+'_predict'];
+  const rk = agentCache[sig.symbol+'_risk'];
 
-  const researchCache = agentCache[sig.symbol+'_research'];
-  const predictCache  = agentCache[sig.symbol+'_predict'];
-  const riskCache     = agentCache[sig.symbol+'_risk'];
+  function tryParse(d){ try{ return JSON.parse(d); }catch(e){ return d; } }
 
   const dossier = {
-    source:    'ATLAS//WATCHLIST',
-    timestamp: new Date().toISOString(),
-    account:   accountSize,
-    signal: {
-      symbol:    sig.symbol,
-      label:     sig.label,
-      direction: sig.direction,
-      score:     sig.score,
-      verdict:   sig.verdict,
-      session:   sig.session,
-      entry:     sig.entry,
-      sl:        sig.sl,
-      tp:        sig.tp,
-      rr:        sig.rr,
-      reasoning: sig.reasoning,
-      breakdown: sig.breakdown
-    },
-    research: researchCache ? (() => { try { return JSON.parse(researchCache.data); } catch(e) { return researchCache.data; } })() : null,
-    predict:  predictCache  ? (() => { try { return JSON.parse(predictCache.data);  } catch(e) { return predictCache.data;  } })() : null,
-    risk:     riskCache     ? (() => { try { return JSON.parse(riskCache.data);     } catch(e) { return riskCache.data;     } })() : null
+    source: 'ATLAS//WATCHLIST', timestamp: new Date().toISOString(), account: accountSize,
+    signal: { symbol:sig.symbol, label:sig.label, direction:sig.direction, score:sig.score,
+              verdict:sig.verdict, session:sig.session, entry:sig.entry, sl:sig.sl,
+              tp:sig.tp, rr:sig.rr, reasoning:sig.reasoning, breakdown:sig.breakdown },
+    research: rc ? tryParse(rc.data) : null,
+    predict:  pc ? tryParse(pc.data) : null,
+    risk:     rk ? tryParse(rk.data) : null
   };
 
   const text = JSON.stringify(dossier, null, 2);
 
-  // Show modal with textarea — user selects all and copies
   const modal = document.createElement('div');
   modal.className = 'dossier-modal';
-  modal.innerHTML = \`
-    <div class="dossier-box">
-      <div class="dossier-header">
-        <span class="dossier-title">⊞ TRADE DOSSIER — \${sig.symbol} \${sig.direction||''}</span>
-        <button class="dossier-close" onclick="this.closest('.dossier-modal').remove()">✕</button>
-      </div>
-      <textarea class="dossier-ta" id="dossier-ta" readonly></textarea>
-      <div class="dossier-hint">Ctrl+A to select all · Ctrl+C to copy · Esc to close</div>
-    </div>
-  \`;
+
+  const box = document.createElement('div');
+  box.className = 'dossier-box';
+
+  const hdr = document.createElement('div');
+  hdr.className = 'dossier-header';
+
+  const ttl = document.createElement('span');
+  ttl.className = 'dossier-title';
+  ttl.textContent = 'TRADE DOSSIER - ' + (sig.symbol||'') + ' ' + (sig.direction||'');
+
+  const cls = document.createElement('button');
+  cls.className = 'dossier-close';
+  cls.textContent = 'X';
+  cls.onclick = function(){ modal.remove(); };
+
+  hdr.appendChild(ttl);
+  hdr.appendChild(cls);
+
+  const ta = document.createElement('textarea');
+  ta.className = 'dossier-ta';
+  ta.readOnly = true;
+  ta.value = text;
+
+  const hint = document.createElement('div');
+  hint.className = 'dossier-hint';
+  hint.textContent = 'Ctrl+A to select all, Ctrl+C to copy, Esc to close';
+
+  box.appendChild(hdr);
+  box.appendChild(ta);
+  box.appendChild(hint);
+  modal.appendChild(box);
   document.body.appendChild(modal);
 
-  // Auto select all text
-  const ta = document.getElementById('dossier-ta');
-  ta.value = text;
   ta.focus();
   ta.select();
 
-  // Close on Escape or clicking backdrop
-  modal.addEventListener('click', e => { if(e.target===modal) modal.remove(); });
-  document.addEventListener('keydown', function esc(e) {
-    if(e.key==='Escape') { modal.remove(); document.removeEventListener('keydown', esc); }
+  modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
+  document.addEventListener('keydown', function esc(e){
+    if(e.key==='Escape'){ modal.remove(); document.removeEventListener('keydown', esc); }
   });
 }
-
 async function logOutcome(signalId, outcome) {
   if(!signalId) return;
   await fetch('/api/outcome',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({signalId,outcome})});
