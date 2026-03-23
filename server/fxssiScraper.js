@@ -17,6 +17,7 @@ const API_BASE = 'https://c.fxssi.com/api/order-book';
 const cache = {}; // { symbol: { data, analysed, ts } }
 
 function shouldFetch() {
+  if (process.env.FXSSI_FORCE_FETCH === '1') return true;
   const min = new Date().getUTCMinutes();
   return min === 1 || min === 21 || min === 41;
 }
@@ -248,18 +249,23 @@ async function runFXSSIScrape(broadcast) {
         if (raw) {
           const analysed = analyseOrderBook(raw);
           cache[symbol]  = { raw, analysed, ts: now };
-          console.log(`[FXSSI] ${symbol} — fetched. long:${analysed?.longPct}% short:${analysed?.shortPct}% trapped:${analysed?.trapped||'—'} bias:${analysed?.signals?.bias}`);
+          console.log(`[FXSSI] ${symbol} — fetched. long:${analysed?.longPct}% short:${analysed?.shortPct}% trapped:${analysed?.trapped||'—'} bias:${analysed?.signals?.bias} levels:${raw.levels?.length}`);
+        } else {
+          console.log(`[FXSSI] ${symbol} — fetch returned null`);
         }
       } else {
         raw = cached?.raw;
+        console.log(`[FXSSI] ${symbol} — using cache (${Math.round(cacheAge)}m old)`);
       }
 
       const analysed = cache[symbol]?.analysed;
-      if (!analysed) continue;
+      if (!analysed) { console.log(`[FXSSI] ${symbol} — no analysed data, skipping`); continue; }
 
       // Merge into existing market data
       const existing = getLatestMarketData(symbol);
+      console.log(`[FXSSI] ${symbol} — existing market data: ${existing ? 'yes' : 'NO — skipping write'}`);
       if (existing) {
+        console.log(`[FXSSI] ${symbol} — writing longPct:${analysed.longPct} shortPct:${analysed.shortPct}`);
         upsertMarketData(symbol, {
           close:         existing.close,
           high:          existing.high,
