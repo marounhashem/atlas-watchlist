@@ -10,26 +10,80 @@ function scoreBias(data) {
 }
 
 function scoreFXSSI(data, direction) {
-  // Contrarian logic: high % of crowd on SAME side = stop hunt risk
-  // High % on OPPOSITE side = trapped = good for our direction
-  const longPct = data.fxssi_long_pct || 50;
-  const shortPct = data.fxssi_short_pct || 50;
-
   if (!direction) return 0.5;
 
+  const longPct  = data.fxssi_long_pct  || 50;
+  const shortPct = data.fxssi_short_pct || 50;
+  const trapped  = data.fxssi_trapped;
+
+  // Parse full FXSSI analysis if available
+  let fxssi = null;
+  try {
+    if (data.fxssiAnalysis) fxssi = JSON.parse(data.fxssiAnalysis);
+    else if (data.raw_payload) {
+      const raw = JSON.parse(data.raw_payload);
+      if (raw.fxssiAnalysis) fxssi = JSON.parse(raw.fxssiAnalysis);
+    }
+  } catch(e) {}
+
+  let score = 0.5; // baseline
+
+  // ── 1. CONTRARIAN CROWD POSITION (most important) ────────────────────────
+  // Crowd trapped on wrong side = high probability move against them
   if (direction === 'LONG') {
-    // We want crowd heavily short (trapped bears)
-    if (shortPct >= 70) return 1.0;
-    if (shortPct >= 60) return 0.75;
-    if (shortPct >= 50) return 0.5;
-    return 0.25; // crowd is long = dangerous
-  } else {
-    // We want crowd heavily long (trapped bulls)
-    if (longPct >= 70) return 1.0;
-    if (longPct >= 60) return 0.75;
-    if (longPct >= 50) return 0.5;
-    return 0.25;
+    if (shortPct >= 70) score += 0.30;       // crowd heavily short = rocket launch
+    else if (shortPct >= 60) score += 0.20;
+    else if (longPct >= 65) score -= 0.20;   // crowd already long = dangerous
+    else if (longPct >= 70) score -= 0.30;
+  } else { // SHORT
+    if (longPct >= 70) score += 0.30;        // crowd heavily long = rocket launch
+    else if (longPct >= 60) score += 0.20;
+    else if (shortPct >= 65) score -= 0.20;  // crowd already short = dangerous
+    else if (shortPct >= 70) score -= 0.30;
   }
+
+  // ── 2. IN PROFIT RATIO — reversal risk ───────────────────────────────────
+  // High inProfit% = move too obvious = reversal near (negative signal)
+  if (fxssi) {
+    const inProfit = fxssi.inProfitPct || 50;
+    if (inProfit > 65) score -= 0.15; // too many winners = reversal imminent
+    if (inProfit < 35) score += 0.10; // mostly losers = move has legs
+  }
+
+  // ── 3. SL CLUSTER IN DIRECTION = gravity target ───────────────────────────
+  // Price hunts SL clusters — if cluster is in our direction, adds confluence
+  if (fxssi && data.close) {
+    const cp = data.close;
+    if (direction === 'LONG' && fxssi.nearestSLAbove?.price) {
+      score += 0.10; // SL cluster above = price wants to go there = bullish
+    }
+    if (direction === 'SHORT' && fxssi.nearestSLBelow?.price) {
+      score += 0.10; // SL cluster below = price wants to go there = bearish
+    }
+    // Losing cluster trampoline in our direction
+    if (direction === 'LONG' && fxssi.losingClusters?.some(l => l.price < cp)) {
+      score += 0.08; // losing sellers below = fuel for bounce
+    }
+    if (direction === 'SHORT' && fxssi.losingClusters?.some(l => l.price > cp)) {
+      score += 0.08; // losing buyers above = fuel for drop
+    }
+    // Limit wall blocking our direction = negative
+    if (direction === 'LONG'  && fxssi.nearestLimitAbove?.price) score -= 0.08;
+    if (direction === 'SHORT' && fxssi.nearestLimitBelow?.price) score -= 0.08;
+  }
+
+  // ── 4. ABSORPTION ─────────────────────────────────────────────────────────
+  if (data.ob_absorption && direction === 'LONG') score += 0.10;
+
+  // ── 5. SIGNAL BIAS from FXSSI composite ──────────────────────────────────
+  if (fxssi?.signals?.bias) {
+    if (fxssi.signals.bias === 'BUY'  && direction === 'LONG')  score += 0.10;
+    if (fxssi.signals.bias === 'SELL' && direction === 'SHORT') score += 0.10;
+    if (fxssi.signals.bias === 'BUY'  && direction === 'SHORT') score -= 0.10;
+    if (fxssi.signals.bias === 'SELL' && direction === 'LONG')  score -= 0.10;
+  }
+
+  return Math.max(0, Math.min(1, score));
 }
 
 function scoreOrderBook(data, direction) {

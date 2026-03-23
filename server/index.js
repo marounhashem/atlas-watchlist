@@ -11,7 +11,7 @@ const { isMarketOpen, getMarketStatus, minutesUntilOpen } = require('./marketHou
 const { scoreAllPriority, saveSignal } = require('./scorer');
 const { checkOutcomes } = require('./outcome');
 const { runLearningCycle } = require('./learner');
-const { runFXSSIScrape } = require('./fxssiScraper');
+const { runFXSSIScrape, processBridgePayload } = require('./fxssiScraper');
 const { SYMBOLS } = require('./config');
 
 const app = express();
@@ -256,21 +256,39 @@ app.post('/api/agent', async (req, res) => {
   }
 });
 
+// FXSSI Rich webhook — accepts payload from browser extension as backup
+app.post('/webhook/fxssi-rich', (req, res) => {
+  const payload = req.body;
+  if (!payload || !payload.fxssi) return res.status(400).json({ error: 'Missing fxssi data' });
+  const result = processBridgePayload(payload);
+  if (!result) return res.status(400).json({ error: 'Symbol not recognised or no market data' });
+  broadcast({ type: 'FXSSI_UPDATE', symbol: result.symbol, analysed: result.analysed, ts: Date.now() });
+  res.json({ ok: true, symbol: result.symbol });
+});
+
 // FXSSI status — check what's cached
 app.get('/api/fxssi-status', (req, res) => {
-  const { runFXSSIScrape } = require('./fxssiScraper');
   const db = require('./db');
   const symbols = ['GOLD','SILVER','OILWTI','BTCUSD','US100','US30'];
   const status = {};
   for (const sym of symbols) {
     const data = db.getLatestMarketData(sym);
+    let fxssiAnalysis = null;
+    try {
+      if (data?.fxssiAnalysis) fxssiAnalysis = JSON.parse(data.fxssiAnalysis);
+    } catch(e) {}
     status[sym] = {
-      hasData: !!data,
-      fxssiLongPct:  data?.fxssi_long_pct  ?? null,
-      fxssiShortPct: data?.fxssi_short_pct ?? null,
-      fxssiTrapped:  data?.fxssi_trapped   ?? null,
-      obAbsorption:  data?.ob_absorption   ?? null,
-      obImbalance:   data?.ob_imbalance    ?? null,
+      hasData:       !!data,
+      longPct:       data?.fxssi_long_pct  ?? null,
+      shortPct:      data?.fxssi_short_pct ?? null,
+      trapped:       data?.fxssi_trapped   ?? null,
+      absorption:    data?.ob_absorption   ?? null,
+      imbalance:     data?.ob_imbalance    ?? null,
+      signalBias:    fxssiAnalysis?.signals?.bias ?? null,
+      gravity:       fxssiAnalysis?.gravity?.price ?? null,
+      nearestSLAbove: fxssiAnalysis?.nearestSLAbove?.price ?? null,
+      nearestSLBelow: fxssiAnalysis?.nearestSLBelow?.price ?? null,
+      inProfitPct:   fxssiAnalysis?.inProfitPct ?? null,
       lastUpdate:    data?.ts ? new Date(data.ts).toISOString() : null
     };
   }
