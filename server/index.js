@@ -273,23 +273,29 @@ app.get('/api/fxssi-status', (req, res) => {
   const status = {};
   for (const sym of symbols) {
     const data = db.getLatestMarketData(sym);
-    let fxssiAnalysis = null;
+    let fx = null;
     try {
-      if (data?.fxssiAnalysis) fxssiAnalysis = JSON.parse(data.fxssiAnalysis);
+      // fxssi_analysis is a dedicated column now
+      const raw = data?.fxssi_analysis || data?.raw_payload;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        // raw_payload wraps everything; fxssi_analysis is the analysed object directly
+        fx = parsed.fxssiAnalysis ? JSON.parse(parsed.fxssiAnalysis) : parsed;
+      }
     } catch(e) {}
     status[sym] = {
-      hasData:       !!data,
-      longPct:       data?.fxssi_long_pct  ?? null,
-      shortPct:      data?.fxssi_short_pct ?? null,
-      trapped:       data?.fxssi_trapped   ?? null,
-      absorption:    data?.ob_absorption   ?? null,
-      imbalance:     data?.ob_imbalance    ?? null,
-      signalBias:    fxssiAnalysis?.signals?.bias ?? null,
-      gravity:       fxssiAnalysis?.gravity?.price ?? null,
-      nearestSLAbove: fxssiAnalysis?.nearestSLAbove?.price ?? null,
-      nearestSLBelow: fxssiAnalysis?.nearestSLBelow?.price ?? null,
-      inProfitPct:   fxssiAnalysis?.inProfitPct ?? null,
-      lastUpdate:    data?.ts ? new Date(data.ts).toISOString() : null
+      hasData:        !!data,
+      longPct:        data?.fxssi_long_pct  ?? null,
+      shortPct:       data?.fxssi_short_pct ?? null,
+      trapped:        data?.fxssi_trapped   ?? null,
+      absorption:     data?.ob_absorption   ?? null,
+      imbalance:      data?.ob_imbalance    ?? null,
+      signalBias:     fx?.signals?.bias     ?? null,
+      gravity:        fx?.gravity?.price    ?? null,
+      nearestSLAbove: fx?.nearestSLAbove?.price ?? null,
+      nearestSLBelow: fx?.nearestSLBelow?.price ?? null,
+      inProfitPct:    fx?.inProfitPct       ?? null,
+      lastUpdate:     data?.ts ? new Date(data.ts).toISOString() : null
     };
   }
   res.json({ token_set: !!process.env.FXSSI_TOKEN, status });
