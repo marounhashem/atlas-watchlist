@@ -87,14 +87,89 @@ function scoreFXSSI(data, direction) {
 }
 
 function scoreOrderBook(data, direction) {
-  // Absorption at key levels, imbalance, large resting orders
-  let score = 0.4; // baseline
-  if (data.ob_absorption) score += 0.3;
+  if (!direction) return 0.4;
+
+  let score = 0.4;
+  let fxssi = null;
+  try {
+    const raw = data.fxssi_analysis || data.raw_payload;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      fxssi = parsed.fxssiAnalysis
+        ? (typeof parsed.fxssiAnalysis === 'string' ? JSON.parse(parsed.fxssiAnalysis) : parsed.fxssiAnalysis)
+        : (parsed.longPct != null ? parsed : null);
+    }
+  } catch(e) {}
+
+  const cp = data.close || 0;
+
+  // ── 1. ABSORPTION (orange limit orders absorbing near price) ─────────────
+  // Only meaningful for LONG — limit orders below absorbing sell pressure
+  if (data.ob_absorption && direction === 'LONG') score += 0.20;
+  if (data.ob_absorption && direction === 'SHORT') score += 0.05; // minor for short
+
+  // ── 2. IMBALANCE at current price zone ───────────────────────────────────
   const imbalance = data.ob_imbalance || 0;
-  if (direction === 'LONG' && imbalance > 0.3) score += 0.2;
-  if (direction === 'SHORT' && imbalance < -0.3) score += 0.2;
-  if (data.ob_large_orders) score += 0.1;
-  return Math.min(1.0, score);
+  if (direction === 'LONG'  && imbalance > 0.3)  score += 0.15;
+  if (direction === 'SHORT' && imbalance < -0.3) score += 0.15;
+
+  if (!fxssi) return Math.min(1.0, score);
+
+  // ── 3. WINNING CLUSTER = reversal risk (Part 2 signal #4) ────────────────
+  // Large winning positions = price came too far = they'll close = push back
+  // If winning cluster is on OUR side = they'll close AGAINST us = negative
+  if (fxssi.winningClusters?.length > 0) {
+    const winsAbove = fxssi.winningClusters.filter(c => c.price > cp);
+    const winsBelow = fxssi.winningClusters.filter(c => c.price < cp);
+    if (direction === 'LONG'  && winsAbove.length > 0) score -= 0.15; // winners above = resistance
+    if (direction === 'SHORT' && winsBelow.length > 0) score -= 0.15; // winners below = support
+  }
+
+  // ── 4. LOSING CLUSTER TRAMPOLINE (Part 2 signal #3) ──────────────────────
+  // Losing positions = trapped traders = fuel for move in opposite direction
+  // Losing shorts below price = fuel for bounce up = bullish for LONG
+  // Losing longs above price = fuel for drop = bullish for SHORT
+  if (fxssi.losingClusters?.length > 0) {
+    const losersAbove = fxssi.losingClusters.filter(c => c.price > cp);
+    const losersBelow = fxssi.losingClusters.filter(c => c.price < cp);
+    if (direction === 'LONG'  && losersBelow.length > 0) score += 0.12; // trapped sellers below = spring
+    if (direction === 'SHORT' && losersAbove.length > 0) score += 0.12; // trapped buyers above = weight
+  }
+
+  // ── 5. MIDDLE OF VOLUME — trend direction indicator ───────────────────────
+  // Price above midVol = bearish (overextended), price below = bullish
+  if (fxssi.middleOfVolume && cp) {
+    if (direction === 'SHORT' && cp > fxssi.middleOfVolume) score += 0.10; // price above mid = fade
+    if (direction === 'LONG'  && cp < fxssi.middleOfVolume) score += 0.10; // price below mid = bounce
+  }
+
+  // ── 6. LIMIT WALL QUALITY (Part 2 signal #2) ─────────────────────────────
+  // True S/R: limit wall with NO stop losses nearby = strong barrier
+  // Weak S/R: limit wall WITH stop losses = will likely break through
+  if (fxssi.nearestLimitAbove && direction === 'SHORT') {
+    // Resistance above — good for short BUT check if SL cluster also there (will break)
+    const slAlsoAbove = fxssi.nearestSLAbove &&
+      Math.abs(fxssi.nearestLimitAbove.price - fxssi.nearestSLAbove.price) < cp * 0.005;
+    if (!slAlsoAbove) score += 0.10; // clean limit wall = true resistance
+    // If SL cluster at same level, cancel out — price will break through to hunt SL
+  }
+  if (fxssi.nearestLimitBelow && direction === 'LONG') {
+    const slAlsoBelow = fxssi.nearestSLBelow &&
+      Math.abs(fxssi.nearestLimitBelow.price - fxssi.nearestSLBelow.price) < cp * 0.005;
+    if (!slAlsoBelow) score += 0.10; // clean limit wall = true support
+  }
+
+  // ── 7. SL CLUSTER AS TP TARGET (Part 2 signal #1) ────────────────────────
+  // SL cluster in direction = price WILL go there = high probability target
+  // This confirms our TP is a realistic target
+  if (direction === 'SHORT' && fxssi.nearestSLBelow?.price) score += 0.10;
+  if (direction === 'LONG'  && fxssi.nearestSLAbove?.price) score += 0.10;
+
+  // ── 8. OVERBOUGHT/OVERSOLD from winning position zones ────────────────────
+  if (direction === 'SHORT' && fxssi.overbought?.price && fxssi.overbought.price >= cp * 0.998) score += 0.08;
+  if (direction === 'LONG'  && fxssi.oversold?.price  && fxssi.oversold.price  <= cp * 1.002) score += 0.08;
+
+  return Math.max(0, Math.min(1.0, score));
 }
 
 function scoreSession(symbol) {
@@ -216,6 +291,29 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
 
   if (data.ob_absorption) parts.push(`Order book absorption detected at level`);
   if (data.fvg_present) parts.push(`FVG present — entry zone active`);
+
+  // FXSSI order book insights
+  try {
+    const raw = data.fxssi_analysis || data.raw_payload;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const fx = parsed.fxssiAnalysis
+        ? (typeof parsed.fxssiAnalysis === 'string' ? JSON.parse(parsed.fxssiAnalysis) : parsed.fxssiAnalysis)
+        : (parsed.longPct != null ? parsed : null);
+      if (fx) {
+        const cp = data.close || 0;
+        if (fx.gravity?.price) parts.push(`SL gravity at ${fx.gravity.price} — price magnet`);
+        if (fx.losingClusters?.some(c => direction === 'SHORT' ? c.price > cp : c.price < cp))
+          parts.push(`Trapped ${direction === 'SHORT' ? 'buyers' : 'sellers'} — trampoline fuel`);
+        if (fx.winningClusters?.some(c => direction === 'SHORT' ? c.price < cp : c.price > cp))
+          parts.push(`⚠ Winning cluster — reversal risk`);
+        if (fx.middleOfVolume) {
+          const side = direction === 'SHORT' ? cp > fx.middleOfVolume : cp < fx.middleOfVolume;
+          if (side) parts.push(`Price ${direction === 'SHORT' ? 'above' : 'below'} volume midpoint — overextension confirmed`);
+        }
+      }
+    }
+  } catch(e) {}
 
   const session = getSessionNow();
   if (session === cfg.peakSession) parts.push(`Peak session (${session}) — optimal timing`);
