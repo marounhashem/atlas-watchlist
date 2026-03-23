@@ -118,16 +118,53 @@ app.post('/webhook/pine', (req, res) => {
   }
   const biasScore = Math.abs(bias) / 6; // normalize -6..+6 range to 0..1
 
-  // FVG
-  const fvg = data.fvg
-    ? (data.fvg.bullActive || data.fvg.bearActive || false)
-    : (data.fvgPresent || false);
+  // FVG — extract active flag and entry levels
+  let fvg = false;
+  let fvgHigh = null, fvgLow = null, fvgMid = null;
+  if (data.fvg && typeof data.fvg === 'object') {
+    fvg = data.fvg.bullActive || data.fvg.bearActive || false;
+    // Use bear FVG for SHORT entry, bull FVG for LONG entry
+    // Store the active one based on bias direction
+    if (bias < 0 && data.fvg.bearActive) {
+      fvgHigh = data.fvg.bearTop;
+      fvgLow  = data.fvg.bearBot;
+      fvgMid  = data.fvg.bearMid;
+    } else if (bias > 0 && data.fvg.bullActive) {
+      fvgHigh = data.fvg.bullTop;
+      fvgLow  = data.fvg.bullBot;
+      fvgMid  = data.fvg.bullMid;
+    }
+  } else {
+    fvg = data.fvgPresent || false;
+    fvgHigh = data.fvgHigh || null;
+    fvgLow  = data.fvgLow  || null;
+    fvgMid  = data.fvgMid  || null;
+  }
 
   // Structure
   let structure = data.structure || 'ranging';
   if (typeof structure === 'object') {
     structure = structure.bull ? 'bullish' : structure.bear ? 'bearish' : 'ranging';
   }
+
+  // MACD hist — handle nested object
+  const macdHist = data.macd
+    ? (data.macd.hist || data.macd.histogram || null)
+    : (data.macdHist || null);
+
+  // ATR — use 1h ATR for SL/TP calculations, fallback to range
+  const atr1h = data.atr
+    ? (data.atr['1h'] || data.atr['4h'] || null)
+    : null;
+
+  // VWAP extended flags
+  const vwapExtended  = data.vwap?.extended  || false;
+  const aboveUpper2   = data.vwap?.aboveUpper2 || false;
+  const belowLower2   = data.vwap?.belowLower2 || false;
+
+  // SR levels from swing structure
+  const srResistance  = data.sr?.resistance || null;
+  const srSupport     = data.sr?.support    || null;
 
   upsertMarketData(sym, {
     close:       price,
@@ -137,17 +174,21 @@ app.post('/webhook/pine', (req, res) => {
     ema200:      ema200,
     vwap:        vwap,
     rsi:         rsi,
-    macdHist:    data.macdHist || null,
+    macdHist:    macdHist,
     bias:        bias,
     biasScore:   data.biasScore || Math.abs(bias) / 3,
     structure:   structure,
     fvgPresent:  fvg,
+    fvgHigh:     fvgHigh,
+    fvgLow:      fvgLow,
+    fvgMid:      fvgMid,
     fxssiLongPct:  data.fxssiLongPct  || null,
     fxssiShortPct: data.fxssiShortPct || null,
     fxssiTrapped:  data.fxssiTrapped  || null,
     obAbsorption:  data.obAbsorption  || false,
     obImbalance:   data.obImbalance   || 0,
-    obLargeOrders: data.obLargeOrders || false
+    obLargeOrders: data.obLargeOrders || false,
+    // Extended fields stored in raw_payload via JSON.stringify(data)
   });
 
   // Verify the write worked
