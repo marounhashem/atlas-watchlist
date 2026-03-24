@@ -1,4 +1,4 @@
-const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, run } = require('./db');
+const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, updateMFE, run } = require('./db');
 const claudeLearner = require('./claudeLearner');
 
 // Signal lifecycle:
@@ -31,6 +31,19 @@ function checkOutcomes(broadcast) {
       console.log(`[Outcome] ${sig.symbol} ${direction} → ACTIVE (entry touched @ ${price})`);
       if (broadcast) broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction, outcome: 'ACTIVE', ts: Date.now() });
       continue;
+    }
+
+    // ── Track max favorable excursion (MFE) on ACTIVE signals ────────────────
+    // MFE = how far price moved toward TP before reversing
+    // Stored so Claude can distinguish "right direction, bad SL" vs "wrong call"
+    if (currentState === 'ACTIVE' && entry) {
+      let favorable = 0;
+      if (direction === 'LONG'  && price > entry) favorable = price - entry;
+      if (direction === 'SHORT' && price < entry) favorable = entry - price;
+      if (favorable > 0) {
+        const mfePct = Math.round((favorable / entry) * 10000) / 100;
+        updateMFE(id, favorable, mfePct);
+      }
     }
 
     // ── Check TP / SL for ACTIVE signals ─────────────────────────────────────

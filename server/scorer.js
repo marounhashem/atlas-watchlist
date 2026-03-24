@@ -17,7 +17,27 @@ function scoreBias(data) {
     }
   } catch(e) {}
 
-  return Math.min(1.0, (raw / maxBias) + fvgBonus + vwapBonus);
+  // ── Momentum alignment bonus (v2 Pine only) ───────────────────────────────
+  // momScore (0-100) measures whether momentum is ACCELERATING in bias direction:
+  // RSI trending, MACD accelerating, price accelerating, volume confirming
+  // High momScore = conviction entry. Low momScore = present but weak.
+  let momBonus = 0;
+  try {
+    if (data.raw_payload) {
+      const raw3 = JSON.parse(data.raw_payload);
+      const mom = raw3.momScore;
+      if (mom != null && !isNaN(mom)) {
+        // Scale: 0-30 = no bonus, 30-60 = small bonus, 60-80 = medium, 80+ = strong
+        if      (mom >= 80) momBonus = 0.15;
+        else if (mom >= 60) momBonus = 0.10;
+        else if (mom >= 30) momBonus = 0.05;
+        // Negative momentum against bias direction = penalty
+        else if (mom < 15 && raw >= 3) momBonus = -0.08; // bias strong but momentum weak
+      }
+    }
+  } catch(e) {}
+
+  return Math.min(1.0, Math.max(0, (raw / maxBias) + fvgBonus + vwapBonus + momBonus));
 }
 
 function scoreFXSSI(data, direction) {
@@ -304,6 +324,35 @@ function scoreSymbol(symbol) {
   if (direction === 'SHORT' && rsi < 45) conflictMultiplier *= 1.05;
   if (direction === 'LONG'  && rsi > 55) conflictMultiplier *= 1.05;
 
+  // ── Macro context alignment ───────────────────────────────────────────────
+  // Daily macro fetch (07:00 UTC) provides directional bias per symbol.
+  // If macro contradicts signal direction, apply penalty.
+  // If macro confirms, apply small bonus.
+  let macroNote = '';
+  try {
+    // getMacroContext is in-process via index.js — access via global if available
+    const macroCtx = global.atlasGetMacroContext ? global.atlasGetMacroContext() : null;
+    const macro = macroCtx ? macroCtx[symbol] : null;
+    if (macro && macro.ts && (Date.now() - macro.ts) < 26 * 3600000) { // use if <26h old
+      const macroConflict =
+        (direction === 'LONG'  && macro.supports_short && !macro.supports_long) ||
+        (direction === 'SHORT' && macro.supports_long  && !macro.supports_short);
+      const macroConfirm =
+        (direction === 'LONG'  && macro.supports_long  && !macro.supports_short) ||
+        (direction === 'SHORT' && macro.supports_short && !macro.supports_long);
+
+      if (macroConflict) {
+        const penalty = macro.strength >= 7 ? 0.78 : macro.strength >= 4 ? 0.88 : 0.94;
+        conflictMultiplier *= penalty;
+        macroNote = `⚠ Macro ${macro.sentiment} conflicts — ${macro.summary}`;
+      } else if (macroConfirm) {
+        const bonus = macro.strength >= 7 ? 1.08 : 1.04;
+        conflictMultiplier *= bonus;
+        macroNote = `✓ Macro ${macro.sentiment} confirms — ${macro.summary}`;
+      }
+    }
+  } catch(e) {}
+
   const rawScore = (
     biasSc   * weights.pineBias +
     fxssiSc  * weights.fxssiSentiment +
@@ -313,8 +362,68 @@ function scoreSymbol(symbol) {
 
   const score = Math.round(rawScore * conflictMultiplier);
 
-  const verdict = score >= minScore ? 'PROCEED' : score >= 55 ? 'WATCH' : 'SKIP';
-  const reasoning = buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, data, cfg });
+  // ── Regime adjustment ─────────────────────────────────────────────────────
+  // Claude's regime detection feeds back into scoring — don't just display it
+  let regimeMultiplier = 1.0;
+  let regimeNote = '';
+  let regimeMinScoreAdj = 0;
+  let regimeSlAdj = 1.0; // multiplier applied to SL distance
+  try {
+    const { getRegime } = require('./claudeLearner');
+    const regime = getRegime();
+    if (regime && regime.confidence >= 50) {
+      switch(regime.regime) {
+        case 'TRENDING':
+          // Trending = higher edge, lower threshold needed
+          regimeMultiplier = 1.08;
+          regimeMinScoreAdj = -3;
+          regimeNote = `✓ ${regime.regime} regime`;
+          break;
+        case 'RANGING':
+          // Ranging = lower edge, raise threshold, tighten SL
+          regimeMultiplier = 0.88;
+          regimeMinScoreAdj = +6;
+          regimeSlAdj = 0.8; // tighter SL — less room to breathe in chop
+          regimeNote = `⚠ RANGING regime — threshold raised`;
+          break;
+        case 'HIGH_VOLATILITY':
+          // High vol = widen SL, raise threshold, reduce score
+          regimeMultiplier = 0.92;
+          regimeMinScoreAdj = +4;
+          regimeSlAdj = 1.5; // wider SL — price swings more
+          regimeNote = `⚠ HIGH_VOL regime — SL widened`;
+          break;
+        case 'NEWS_DRIVEN':
+          // News = unpredictable, significant penalty
+          regimeMultiplier = 0.82;
+          regimeMinScoreAdj = +8;
+          regimeNote = `⚠ NEWS_DRIVEN regime — reduced confidence`;
+          break;
+        case 'LOW_CONVICTION':
+          // Low conviction = moderate penalty
+          regimeMultiplier = 0.90;
+          regimeMinScoreAdj = +5;
+          regimeNote = `⚠ LOW_CONVICTION regime`;
+          break;
+      }
+      // Also check if this symbol is in regime's avoid list
+      if (regime.avoid_symbols?.includes(symbol)) {
+        regimeMultiplier *= 0.75;
+        regimeNote += ` · avoid list`;
+      }
+      // Boost if in best_symbols list
+      if (regime.best_symbols?.includes(symbol)) {
+        regimeMultiplier *= 1.08;
+        regimeNote += ` · best symbol`;
+      }
+    }
+  } catch(e) {}
+
+  const finalScore = Math.round(score * regimeMultiplier);
+  const adjustedMinScore = Math.min(88, Math.max(55, minScore + regimeMinScoreAdj));
+
+  const verdict = finalScore >= adjustedMinScore ? 'PROCEED' : finalScore >= Math.max(55, adjustedMinScore - 15) ? 'WATCH' : 'SKIP';
+  const reasoning = buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, data, cfg, regimeNote, macroNote });
 
   const close = data.close || 0;
   const atr   = estimateATR(data, cfg.assetClass);
@@ -371,7 +480,7 @@ function scoreSymbol(symbol) {
   //     of the move, set TP just before it instead of running into reversal risk.
   let sl, tp;
   if (fxssiLevels && close > 0) {
-    const atrSl = atr * 1.5;
+    const atrSl = atr * 1.5 * regimeSlAdj; // regime widens/tightens SL
 
     if (direction === 'LONG') {
       // ── TP: nearest SL cluster above, winning cluster obstruction check ──────
@@ -497,11 +606,12 @@ function scoreSymbol(symbol) {
     }
   } else {
     // No FXSSI levels — pure ATR fallback
+    const atrSl = atr * 1.5 * regimeSlAdj;
     if (direction === 'LONG') {
-      sl = Math.round((close - atr * 1.5) * 10000) / 10000;
+      sl = Math.round((close - atrSl) * 10000) / 10000;
       tp = Math.round((close + atr * 3.0) * 10000) / 10000;
     } else {
-      sl = Math.round((close + atr * 1.5) * 10000) / 10000;
+      sl = Math.round((close + atrSl) * 10000) / 10000;
       tp = Math.round((close - atr * 3.0) * 10000) / 10000;
     }
   }
@@ -545,22 +655,39 @@ function scoreSymbol(symbol) {
     : reasoning;
 
   return {
-    symbol, label: cfg.label, direction, score, verdict,
+    symbol, label: cfg.label, direction, score: finalScore, verdict,
     entry: Math.round(entry * 100) / 100,
     sl, tp, rr,
     session: getSessionNow(),
     breakdown: { bias: biasSc, fxssi: fxssiSc, ob: obSc, session: sessionSc },
     reasoning: finalReasoning,
+    entrySource: entrySource || 'price',
     fxssiStale: fxssiStale || false,
+    regimeAdj: regimeMultiplier !== 1.0 ? { multiplier: regimeMultiplier, note: regimeNote } : null,
     ts: Date.now()
   };
 }
 
-function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, data, cfg }) {
+function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, data, cfg, regimeNote, macroNote }) {
   const parts = [];
   if (biasSc > 0.7) parts.push(`Strong ${direction} structure on Pine (${Math.round(biasSc * 100)}%)`);
   else if (biasSc > 0.4) parts.push(`Moderate ${direction} bias`);
   else parts.push(`Weak bias — treat with caution`);
+
+  // Momentum score from v2 Pine
+  try {
+    const raw = data.raw_payload;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      const mom = parsed.momScore;
+      if (mom != null && !isNaN(mom)) {
+        if      (mom >= 80) parts.push(`Momentum ${mom}% — strong acceleration`);
+        else if (mom >= 60) parts.push(`Momentum ${mom}% — confirming`);
+        else if (mom >= 30) parts.push(`Momentum ${mom}% — moderate`);
+        else                parts.push(`⚠ Momentum ${mom}% — weak, bias unconfirmed`);
+      }
+    }
+  } catch(e) {}
 
   const longPct  = data.fxssi_long_pct || 50;
   const shortPct = data.fxssi_short_pct || 50;
@@ -660,6 +787,9 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
   const session = getSessionNow();
   if (session === cfg.peakSession) parts.push(`Peak session (${session}) — optimal timing`);
   else if (session === 'offHours') parts.push(`Off-hours — reduced reliability`);
+
+  if (regimeNote) parts.push(regimeNote);
+  if (macroNote)  parts.push(macroNote);
 
   return parts.join(' · ');
 }

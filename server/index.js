@@ -167,6 +167,9 @@ app.post('/webhook/pine', (req, res) => {
   const srResistance  = data.sr?.resistance || null;
   const srSupport     = data.sr?.support    || null;
 
+  // Momentum alignment score from v2 Pine (0-100)
+  const momScore = data.momScore != null ? Number(data.momScore) : null;
+
   // Preserve existing FXSSI data — Pine webhook must not overwrite it with nulls
   const existing = require('./db').getLatestMarketData(sym);
   upsertMarketData(sym, {
@@ -193,6 +196,16 @@ app.post('/webhook/pine', (req, res) => {
     obImbalance:   data.obImbalance   || existing?.ob_imbalance    || 0,
     obLargeOrders: data.obLargeOrders || existing?.ob_large_orders || false,
     fxssiAnalysis: existing?.fxssi_analysis || null,
+    // v2 fields stored in raw_payload via JSON merge
+    rawExtra: {
+      momScore,
+      sr: { swingH1: data.sr?.swingH1, swingH2: data.sr?.swingH2,
+            swingL1: data.sr?.swingL1, swingL2: data.sr?.swingL2 },
+      atr: data.atr || atr1h,
+      vwap: { mid: vwap, upper1: data.vwap?.upper1, lower1: data.vwap?.lower1,
+              upper2: data.vwap?.upper2, lower2: data.vwap?.lower2,
+              aboveUpper2, belowLower2 }
+    }
   });
 
   // Verify the write worked
@@ -653,6 +666,17 @@ app.get('/api/paper-trades', (req, res) => {
   res.json(getPaperTradeStats());
 });
 
+// Macro context — current macro environment per symbol
+app.get('/api/macro-context', (req, res) => {
+  res.json(getMacroContext());
+});
+
+// Force macro context refresh
+app.post('/api/macro-refresh', async (req, res) => {
+  res.json({ ok: true, message: 'Macro refresh started' });
+  runMacroContextFetch(broadcast).catch(e => console.error('[Macro] Manual refresh error:', e.message));
+});
+
 // Mark a WATCH signal paper outcome manually (if auto-detection missed it)
 app.post('/api/paper-outcome', (req, res) => {
   const { signalId, paperOutcome } = req.body;
@@ -696,7 +720,93 @@ cron.schedule('0 * * * *', async () => {
   await runLearningCycle(broadcast);
 });
 
-// ── Health check cron — runs every 30 min, emails if degraded ────────────────
+// Daily session summary — fires at 17:00 UTC (end of London session)
+cron.schedule('0 17 * * *', async () => {
+  console.log('[Cron] Running daily session summary...');
+  await claudeLearner.dailySessionSummary(broadcast);
+});
+
+// Daily macro context — fires at 07:00 UTC (before London open)
+// Fetches current macro environment for each symbol via web search
+// Stored in DB and used by scorer as a macro alignment check
+cron.schedule('0 7 * * *', async () => {
+  console.log('[Cron] Running daily macro context fetch...');
+  await runMacroContextFetch(broadcast);
+});
+
+// ── Macro context store ───────────────────────────────────────────────────────
+// Keyed by symbol, refreshed daily at 07:00 UTC
+// { GOLD: { sentiment, summary, key_risks, supports_long, supports_short, ts } }
+const macroContext = {};
+
+async function runMacroContextFetch(broadcast) {
+  if (!process.env.ANTHROPIC_API_KEY) return;
+
+  const symbolQueries = {
+    GOLD:   'gold XAU price macro outlook DXY Fed rates today',
+    SILVER: 'silver XAG price macro outlook industrial demand today',
+    OILWTI:'crude oil WTI price OPEC supply demand outlook today',
+    BTCUSD:'bitcoin BTC macro outlook institutional flows today',
+    US30:  'Dow Jones US30 macro outlook earnings Fed today',
+    US100: 'Nasdaq US100 tech macro outlook Fed rates today'
+  };
+
+  for (const [symbol, query] of Object.entries(symbolQueries)) {
+    try {
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 400,
+          tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+          system: `You are a macro analyst. Search for current market conditions and return ONLY a JSON object. No markdown, no explanation.`,
+          messages: [{
+            role: 'user',
+            content: `Search: "${query}". Return ONLY this JSON:
+{
+  "sentiment": "BULLISH|BEARISH|NEUTRAL",
+  "strength": <1-10, how strong is the macro bias>,
+  "summary": "<one sentence, max 15 words>",
+  "key_risks": ["<risk 1>", "<risk 2>"],
+  "supports_long": <true|false>,
+  "supports_short": <true|false>,
+  "avoid_until": "<event or condition that would change this>"
+}`
+          }]
+        })
+      });
+
+      const data = await response.json();
+      const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+      const clean = text.replace(/```json|```/g, '').trim();
+
+      try {
+        const ctx = JSON.parse(clean);
+        macroContext[symbol] = { ...ctx, ts: Date.now() };
+        console.log(`[Macro] ${symbol}: ${ctx.sentiment} (${ctx.strength}/10) — ${ctx.summary}`);
+        if (broadcast) broadcast({ type: 'MACRO_UPDATE', symbol, context: macroContext[symbol], ts: Date.now() });
+      } catch(e) {
+        console.error(`[Macro] ${symbol} parse error:`, e.message);
+      }
+
+      // Small delay between symbols to avoid rate limiting
+      await new Promise(r => setTimeout(r, 1500));
+
+    } catch(e) {
+      console.error(`[Macro] ${symbol} fetch error:`, e.message);
+    }
+  }
+
+  console.log(`[Macro] Context refresh complete for ${Object.keys(macroContext).length} symbols`);
+}
+
+function getMacroContext() { return macroContext; }
+
 // Tracks last alert time per symbol to avoid spam (max 1 email per symbol per 2h)
 const healthAlertState = {}; // { symbol: lastAlertTs }
 const HEALTH_ALERT_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours between alerts per symbol
@@ -792,6 +902,10 @@ server.listen(PORT, () => {
   db.init().then(() => {
     dbReady = true;
     console.log('[DB] Initialised and ready');
+    // Expose macro context globally so scorer.js can access it in-process
+    global.atlasGetMacroContext = getMacroContext;
+    // Run macro fetch on startup if market hours
+    runMacroContextFetch(broadcast).catch(e => console.error('[Macro] Startup fetch error:', e.message));
   }).catch(e => {
     console.error('[DB] Init failed:', e.message);
   });

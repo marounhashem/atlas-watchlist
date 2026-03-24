@@ -63,7 +63,10 @@ TRADE RESULT: ${outcome}
 Symbol: ${signal.symbol} | Direction: ${signal.direction} | Score: ${signal.score}%
 Entry: ${signal.entry} | SL: ${signal.sl} | TP: ${signal.tp} | R:R: ${signal.rr}
 Session: ${signal.session} | PnL: ${signal.pnl_pct != null ? signal.pnl_pct + '%' : 'unknown'}
+Max Favorable Excursion: ${signal.mfe != null ? signal.mfe_pct + '% toward TP' : 'unknown'}
 Signal reasoning: ${signal.reasoning}
+
+${signal.mfe != null ? `MFE CONTEXT: Price moved ${signal.mfe_pct}% in the right direction before ${outcome === 'LOSS' ? 'reversing to hit SL' : 'hitting TP'}. ${outcome === 'LOSS' && signal.mfe_pct > 0.3 ? 'This suggests the direction was correct but SL was too tight.' : outcome === 'LOSS' && (signal.mfe_pct || 0) < 0.1 ? 'Price barely moved favorably — likely a wrong call entirely.' : ''}` : ''}
 
 MARKET CONDITIONS AT ENTRY:
 Pine bias score: ${marketData?.bias || 'N/A'} | RSI: ${marketData?.rsi || 'N/A'} | Structure: ${marketData?.structure || 'N/A'}
@@ -85,7 +88,8 @@ Analyse this trade and return ONLY this JSON (no markdown):
     "pine_bias_weight": <-0.1 to +0.1, how much to adjust this weight>,
     "fxssi_weight": <-0.1 to +0.1>,
     "ob_weight": <-0.1 to +0.1>,
-    "min_score_threshold": <-5 to +5, points to adjust>
+    "min_score_threshold": <-5 to +5, points to adjust>,
+    "sl_too_tight": <true if MFE > 0.3% but still lost — SL issue not direction issue, false otherwise>
   },
   "avoid_next_time": "<condition to avoid for next ${signal.symbol} ${signal.direction} signal>"
 }`;

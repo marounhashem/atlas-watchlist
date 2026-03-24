@@ -126,6 +126,10 @@ function initSchema() {
   try { db.run('ALTER TABLE signals ADD COLUMN paper_outcome TEXT DEFAULT NULL'); console.log('[DB] Migration: added paper_outcome column'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN paper_outcome_ts INTEGER DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN fxssi_stale INTEGER DEFAULT 0'); } catch(e) {}
+  // mfe = max favorable excursion — how far price moved toward TP before reversing
+  // used by Claude to distinguish "right direction, bad SL" from "wrong call entirely"
+  try { db.run('ALTER TABLE signals ADD COLUMN mfe REAL DEFAULT NULL'); console.log('[DB] Migration: added mfe column'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN mfe_pct REAL DEFAULT NULL'); } catch(e) {}
 
   console.log('[DB] Schema initialised, weights seeded');
 }
@@ -163,7 +167,8 @@ function upsertMarketData(symbol, data) {
        ob_absorption,ob_imbalance,ob_large_orders,
        fxssi_analysis,raw_payload)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [...baseParams, data.fxssiAnalysis || null, JSON.stringify(data)]
+      [...baseParams, data.fxssiAnalysis || null,
+        JSON.stringify({ ...data, ...(data.rawExtra || {}) })]
     );
   } else {
     run(`INSERT INTO market_data
@@ -172,7 +177,7 @@ function upsertMarketData(symbol, data) {
        fxssi_long_pct,fxssi_short_pct,fxssi_trapped,
        ob_absorption,ob_imbalance,ob_large_orders,raw_payload)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [...baseParams, JSON.stringify(data)]
+      [...baseParams, JSON.stringify({ ...data, ...(data.rawExtra || {}) })]
     );
   }
 }
@@ -247,10 +252,16 @@ function getLatestOpenSignal(symbol, direction) {
   );
 }
 
+// Update max favorable excursion for an ACTIVE signal
+function updateMFE(signalId, mfe, mfePct) {
+  run("UPDATE signals SET mfe=?, mfe_pct=? WHERE id=? AND (mfe IS NULL OR mfe < ?)",
+    [mfe, mfePct, signalId, mfe]);
+}
+
 module.exports = {
   init, isReady, persist, run,
   upsertMarketData, getLatestMarketData,
-  insertSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats,
+  insertSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,
   getWeights, updateWeights,
   insertLearningLog, getAllSignals, getLearningLog,
