@@ -598,12 +598,12 @@ function renderPredict(box, raw) {
       <div class="kelly-card"><div class="kelly-label">EDGE</div><div class="kelly-val" style="color:${edgeColor}">${(d.edge||0)>0?'+':''}${d.edge||0}%</div></div>
       <div class="kelly-card"><div class="kelly-label">CONFIDENCE</div><div class="kelly-val">${d.confidence||0}%</div></div>
     </div>
-    <div class="agent-verdict ${vcls}" style="margin-bottom:8px;">${d.verdict_label||d.verdict}</div>
+    <div class="agent-verdict ${vcls}" style="margin-bottom:8px;font-size:9px;white-space:normal;line-height:1.5;height:auto;word-break:break-word;">${d.verdict_label||d.verdict}</div>
     ${gates.length?`<div class="agent-section-title" style="color:${allPass?'var(--proceed)':'var(--short)'};margin-bottom:4px;">HARD GATES ${allPass?'✓ ALL PASS':'⚠ FAILED'}</div>
     ${gates.map(g=>`<div class="agent-row"><span style="color:${g.pass?'var(--proceed)':'var(--short)'}">${g.pass?'✓':'✗'} ${g.gate}</span><span style="color:var(--muted);font-size:8px;">${g.detail||''}</span></div>`).join('')}`:''}
-    ${d.scenario_main?`<div class="agent-section-title" style="color:var(--accent);margin-top:6px;">MAIN SCENARIO</div><div style="font-size:9px;color:var(--text);line-height:1.5;margin-bottom:4px;">${d.scenario_main}</div>`:''}
-    ${d.scenario_alt?`<div class="agent-section-title" style="color:var(--muted);margin-top:4px;">ALTERNATIVE</div><div style="font-size:9px;color:var(--muted);line-height:1.5;margin-bottom:4px;">${d.scenario_alt}</div>`:''}
-    ${d.management?`<div class="agent-section-title" style="color:var(--watch);margin-top:4px;">MANAGEMENT</div><div style="font-size:9px;color:var(--text);line-height:1.5;">${d.management}</div>`:''}`;
+    ${d.scenario_main?`<div class="agent-section-title" style="color:var(--accent);margin-top:6px;">MAIN SCENARIO</div><div style="font-size:9px;color:var(--text);line-height:1.6;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:7px 9px;word-break:break-word;margin-bottom:4px;">${d.scenario_main}</div>`:''}
+    ${d.scenario_alt?`<div class="agent-section-title" style="color:var(--muted);margin-top:4px;">ALTERNATIVE</div><div style="font-size:9px;color:var(--muted);line-height:1.6;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:7px 9px;word-break:break-word;margin-bottom:4px;">${d.scenario_alt}</div>`:''}
+    ${d.management?`<div class="agent-section-title" style="color:var(--watch);margin-top:4px;">MANAGEMENT</div><div style="font-size:9px;color:var(--text);line-height:1.6;background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:7px 9px;word-break:break-word;">${d.management}</div>`:''}`;
 }
 
 function renderText(box, text, type) {
@@ -656,58 +656,163 @@ function copyTradeDossier(cardId) {
   const pc = agentCache[sig.symbol+'_predict'];
   const rk = agentCache[sig.symbol+'_risk'];
 
-  function tryParse(d){ try{ return JSON.parse(d); }catch(e){ return d; } }
+  function tryParse(d){ try{ return JSON.parse((d||'').replace(/```json|```/g,'').trim()); }catch(e){ return null; } }
 
+  const res = rc ? tryParse(rc.data) : null;
+  const pred = pc ? tryParse(pc.data) : null;
+  const risk = rk ? tryParse(rk.data) : null;
+
+  // Raw JSON for clipboard
   const dossier = {
     source: 'ATLAS//WATCHLIST', timestamp: new Date().toISOString(), account: accountSize,
-    signal: { symbol:sig.symbol, label:sig.label, direction:sig.direction, score:sig.score,
-              verdict:sig.verdict, session:sig.session, entry:sig.entry, sl:sig.sl,
-              tp:sig.tp, rr:sig.rr, reasoning:sig.reasoning, breakdown:sig.breakdown },
-    research: rc ? tryParse(rc.data) : null,
-    predict:  pc ? tryParse(pc.data) : null,
-    risk:     rk ? tryParse(rk.data) : null
+    signal: { symbol:sig.symbol, direction:sig.direction, score:sig.score, verdict:sig.verdict,
+              session:sig.session, entry:sig.entry, sl:sig.sl, tp:sig.tp, rr:sig.rr, reasoning:sig.reasoning },
+    research: res, predict: pred, risk: risk
   };
+  const rawJson = JSON.stringify(dossier, null, 2);
 
-  const text = JSON.stringify(dossier, null, 2);
+  // Helpers
+  const dir = sig.direction;
+  const dirColor = dir==='LONG'?'var(--long)':'var(--short)';
+  const scoreColor = (sig.score||0)>=72?'var(--proceed)':(sig.score||0)>=55?'var(--watch)':'var(--muted)';
+  const bullet = (items, color) => (items||[]).map(s =>
+    `<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:10px;line-height:1.5;">
+       <span style="color:${color};flex-shrink:0;">·</span>
+       <span style="color:var(--text);flex:1;word-break:break-word;">${s}</span>
+     </div>`).join('');
+  const infoBox = (text, color) => text
+    ? `<div style="font-size:10px;line-height:1.6;background:var(--surface2);border-left:2px solid ${color};border-radius:0 4px 4px 0;padding:8px 10px;margin-top:4px;word-break:break-word;color:var(--text);">${text}</div>`
+    : '';
+  const sectionTitle = (label, color) =>
+    `<div style="font-size:9px;font-weight:700;letter-spacing:1.5px;color:${color};margin:12px 0 5px;text-transform:uppercase;">${label}</div>`;
 
+  // Build rendered HTML
+  let html = `
+    <div style="font-family:'SF Mono','Fira Code',monospace;">
+
+    <!-- SIGNAL HEADER -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:6px;margin-bottom:12px;">
+      <div class="kelly-card"><div class="kelly-label">SYMBOL</div><div class="kelly-val" style="font-size:13px;">${sig.symbol||'--'}</div></div>
+      <div class="kelly-card"><div class="kelly-label">DIRECTION</div><div class="kelly-val" style="color:${dirColor};font-size:13px;">${dir||'--'}</div></div>
+      <div class="kelly-card"><div class="kelly-label">SCORE</div><div class="kelly-val" style="color:${scoreColor}">${sig.score||0}%</div></div>
+      <div class="kelly-card"><div class="kelly-label">SESSION</div><div class="kelly-val" style="font-size:11px;">${(sig.session||'').toUpperCase()}</div></div>
+      <div class="kelly-card"><div class="kelly-label">R:R</div><div class="kelly-val">1:${sig.rr||'--'}</div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px;">
+      <div class="kelly-card"><div class="kelly-label">ENTRY</div><div class="kelly-val" style="font-size:12px;">${sig.entry||'--'}</div></div>
+      <div class="kelly-card"><div class="kelly-label">STOP LOSS</div><div class="kelly-val" style="font-size:12px;color:var(--short);">${sig.sl||'--'}</div></div>
+      <div class="kelly-card"><div class="kelly-label">TAKE PROFIT</div><div class="kelly-val" style="font-size:12px;color:var(--proceed);">${sig.tp||'--'}</div></div>
+    </div>
+    ${sig.reasoning ? `${sectionTitle('Signal Reasoning','var(--accent)')}${infoBox(sig.reasoning,'var(--accent)')}` : ''}`;
+
+  // RESEARCH section
+  if (res) {
+    const sentColor = res.sentiment==='BULLISH'?'var(--proceed)':res.sentiment==='BEARISH'?'var(--short)':'var(--watch)';
+    const score = res.score||0;
+    const scoreAbs = Math.min(100, Math.abs(score));
+    const sColor = score>0?'var(--proceed)':score<0?'var(--short)':'var(--watch)';
+    html += `
+    ${sectionTitle('Research','var(--text)')}
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px;">
+      <div class="kelly-card"><div class="kelly-label">SENTIMENT</div><div class="kelly-val" style="color:${sentColor};font-size:12px;">${res.sentiment||'--'}</div></div>
+      <div class="kelly-card"><div class="kelly-label">CONFIDENCE</div><div class="kelly-val">${res.confidence||0}%</div></div>
+      <div class="kelly-card"><div class="kelly-label">SIGNAL FIT</div><div class="kelly-val" style="font-size:10px;color:${res.supports_signal?'var(--proceed)':'var(--short)'};">${res.supports_signal?'YES':'NO'}</div></div>
+    </div>
+    <div style="margin-bottom:8px;"><div style="display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-bottom:3px;"><span>BEARISH</span><span>SCORE ${score>0?'+':''}${score}</span><span>BULLISH</span></div>
+    <div style="height:4px;background:var(--surface2);border-radius:2px;position:relative;"><div style="position:absolute;left:50%;top:0;width:1px;height:4px;background:var(--border);"></div>
+    <div style="position:absolute;height:4px;border-radius:2px;background:${sColor};${score>=0?'left:50%;width:'+scoreAbs/2+'%;':'left:'+(50-scoreAbs/2)+'%;width:'+scoreAbs/2+'%;'}"></div></div></div>
+    ${res.short_term_view ? infoBox(res.short_term_view,'var(--muted)') : ''}
+    ${res.key_levels ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;"><div class="kelly-card"><div class="kelly-label">SUPPORT</div><div class="kelly-val" style="font-size:11px;color:var(--proceed)">${res.key_levels.support||'--'}</div></div><div class="kelly-card"><div class="kelly-label">RESISTANCE</div><div class="kelly-val" style="font-size:11px;color:var(--short)">${res.key_levels.resistance||'--'}</div></div></div>` : ''}
+    ${(res.supports||[]).length ? sectionTitle('Supports Signal','var(--proceed)')+bullet(res.supports,'var(--proceed)') : ''}
+    ${(res.contradicts||[]).length ? sectionTitle('Contradicts Signal','var(--short)')+bullet(res.contradicts,'var(--short)') : ''}
+    ${(res.upcoming_events||[]).length ? sectionTitle('Upcoming Events','var(--watch)')+bullet(res.upcoming_events,'var(--watch)') : ''}`;
+  }
+
+  // PREDICT section
+  if (pred) {
+    const eColor = (pred.edge||0)>0?'var(--proceed)':(pred.edge||0)<0?'var(--short)':'var(--muted)';
+    const vColor = pred.verdict==='PROCEED'?'var(--proceed)':pred.verdict==='WATCH'?'var(--watch)':'var(--short)';
+    const gates = pred.hard_gates||[];
+    const allPass = gates.every(g=>g.pass);
+    html += `
+    ${sectionTitle('Prediction','var(--text)')}
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:8px;">
+      <div class="kelly-card"><div class="kelly-label">TRUE PROB</div><div class="kelly-val">${pred.true_prob||0}%</div></div>
+      <div class="kelly-card"><div class="kelly-label">IMPLIED PROB</div><div class="kelly-val">${pred.implied_prob||0}%</div></div>
+      <div class="kelly-card"><div class="kelly-label">EDGE</div><div class="kelly-val" style="color:${eColor}">${(pred.edge||0)>0?'+':''}${pred.edge||0}%</div></div>
+      <div class="kelly-card"><div class="kelly-label">CONFIDENCE</div><div class="kelly-val">${pred.confidence||0}%</div></div>
+    </div>
+    <div style="font-size:9px;color:${vColor};background:var(--surface2);border:1px solid ${vColor};border-radius:4px;padding:7px 10px;margin-bottom:8px;line-height:1.5;word-break:break-word;">${pred.verdict_label||pred.verdict}</div>
+    ${gates.length ? `${sectionTitle('Hard Gates', allPass?'var(--proceed)':'var(--short)')}${gates.map(g=>`<div style="display:flex;gap:8px;padding:5px 0;border-bottom:1px solid var(--border);font-size:9px;align-items:flex-start;"><span style="color:${g.pass?'var(--proceed)':'var(--short)'};flex-shrink:0;font-size:11px;">${g.pass?'✓':'✗'}</span><div style="flex:1;"><div style="color:var(--text);">${g.gate}</div><div style="color:var(--muted);font-size:8px;margin-top:1px;word-break:break-word;">${g.detail||''}</div></div></div>`).join('')}` : ''}
+    ${pred.scenario_main ? sectionTitle('Main Scenario','var(--accent)')+infoBox(pred.scenario_main,'var(--accent)') : ''}
+    ${pred.scenario_alt ? sectionTitle('Alternative Scenario','var(--muted)')+infoBox(pred.scenario_alt,'var(--border)') : ''}
+    ${pred.management ? sectionTitle('Trade Management','var(--watch)')+infoBox(pred.management,'var(--watch)') : ''}`;
+  }
+
+  // RISK section
+  if (risk) {
+    const vColor = risk.verdict==='PROCEED'?'var(--proceed)':risk.verdict==='CAUTION'?'var(--watch)':'var(--short)';
+    html += `
+    ${sectionTitle('Risk & Position Sizing','var(--text)')}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
+      <div class="kelly-card"><div class="kelly-label">KELLY (${risk.kelly_pct}%)</div><div class="kelly-val">$${Number(risk.kelly_usd||0).toLocaleString()}</div><div class="kelly-sub">${risk.kelly_units} units · Risk $${Number(risk.risk_per_trade_usd||0).toLocaleString()}</div></div>
+      <div class="kelly-card"><div class="kelly-label">HALF KELLY (${risk.half_kelly_pct}%)</div><div class="kelly-val">$${Number(risk.half_kelly_usd||0).toLocaleString()}</div><div class="kelly-sub">${risk.half_kelly_units} units · Max loss $${Number(risk.max_loss_kelly||0).toLocaleString()}</div></div>
+    </div>
+    <div style="font-size:9px;color:${vColor};background:var(--surface2);border:1px solid ${vColor};border-radius:4px;padding:6px 10px;margin-bottom:6px;">${risk.verdict}</div>
+    ${risk.reasoning ? infoBox(risk.reasoning,'var(--muted)') : ''}`;
+  }
+
+  html += `
+    <!-- COPY RAW JSON -->
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px;">
+      <button id="dossier-copy-btn" class="abtn" style="border-color:var(--accent);color:var(--accent);width:100%;font-size:9px;padding:6px;" onclick="
+        navigator.clipboard.writeText(document.getElementById('dossier-raw-json').value)
+          .then(()=>{ this.textContent='✓ COPIED'; setTimeout(()=>{ this.textContent='⊞ COPY RAW JSON'; },2000); })
+          .catch(()=>{ document.getElementById('dossier-raw-json').select(); document.execCommand('copy'); });
+      ">⊞ COPY RAW JSON</button>
+      <textarea id="dossier-raw-json" style="position:absolute;left:-9999px;opacity:0;" readonly>${rawJson.replace(/</g,'&lt;')}</textarea>
+    </div>
+    </div>`;
+
+  // Build modal
   const modal = document.createElement('div');
   modal.className = 'dossier-modal';
+  modal.onclick = function(e){ if(e.target===modal) modal.remove(); };
 
   const box = document.createElement('div');
   box.className = 'dossier-box';
+  box.style.cssText = 'max-width:760px;max-height:85vh;overflow-y:auto;';
 
   const hdr = document.createElement('div');
   hdr.className = 'dossier-header';
+  hdr.style.cssText = 'position:sticky;top:0;background:var(--surface);z-index:1;padding-bottom:8px;margin-bottom:4px;border-bottom:1px solid var(--border);';
 
   const ttl = document.createElement('span');
   ttl.className = 'dossier-title';
-  ttl.textContent = 'TRADE DOSSIER - ' + (sig.symbol||'') + ' ' + (sig.direction||'');
+  ttl.textContent = 'DOSSIER — ' + (sig.symbol||'') + ' ' + (sig.direction||'') + ' · ' + (sig.score||0) + '% · ' + (sig.verdict||'');
 
   const cls = document.createElement('button');
   cls.className = 'dossier-close';
-  cls.textContent = 'X';
+  cls.textContent = '✕';
   cls.onclick = function(){ modal.remove(); };
 
   hdr.appendChild(ttl);
   hdr.appendChild(cls);
 
-  const ta = document.createElement('textarea');
-  ta.className = 'dossier-ta';
-  ta.readOnly = true;
-  ta.value = text;
+  const content = document.createElement('div');
+  content.innerHTML = html;
 
   const hint = document.createElement('div');
   hint.className = 'dossier-hint';
-  hint.textContent = 'Ctrl+A to select all, Ctrl+C to copy, Esc to close';
+  hint.textContent = 'Click outside to close';
 
   box.appendChild(hdr);
-  box.appendChild(ta);
+  box.appendChild(content);
   box.appendChild(hint);
   modal.appendChild(box);
   document.body.appendChild(modal);
+}
 
-  ta.focus();
-  ta.select();
 
   modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
   document.addEventListener('keydown', function esc(e){
