@@ -1,6 +1,12 @@
 const { SYMBOLS, getSessionNow, sessionMultiplier } = require('./config');
 const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 
+// ── Scorer version ────────────────────────────────────────────────────────────
+// Bump this when scoring logic changes significantly
+// Signals saved with an older version get auto-expired on startup
+// Format: YYYYMMDD.N (date + daily increment)
+const SCORER_VERSION = '20260324.1';
+
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
   // v1: bias was -3 to +3
@@ -1143,19 +1149,25 @@ function saveSignal(scored) {
     }
 
     if (isBetterSignal(last, scored)) {
-      const newId = insertSignal(scored);
-      if (newId) {
-        updateOutcome(last.id, 'REPLACED', 0);
-        console.log(`[Scorer] ${scored.symbol} ${scored.direction} — refined (RR:${last.rr}→${scored.rr})`);
-        return newId;
-      }
+      const { refineSignal } = require('./db');
+      const count = refineSignal(last.id, {
+        score:         scored.score,
+        entry:         scored.entry,
+        sl:            scored.sl,
+        tp:            scored.tp,
+        rr:            scored.rr,
+        reasoning:     scored.reasoning,
+        scorerVersion: SCORER_VERSION
+      });
+      console.log(`[Scorer] ${scored.symbol} ${scored.direction} — refined ×${count} (RR:${last.rr}→${scored.rr})`);
+      return last.id; // same record, updated in place
     }
 
     console.log(`[Scorer] ${scored.symbol} ${scored.direction} — keeping existing signal`);
     return null;
   }
 
-  return insertSignal(scored);
+  return insertSignal({ ...scored, scorerVersion: SCORER_VERSION });
 }
 
-module.exports = { scoreSymbol, scoreAllPriority, saveSignal };
+module.exports = { scoreSymbol, scoreAllPriority, saveSignal, SCORER_VERSION };
