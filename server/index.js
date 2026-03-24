@@ -56,12 +56,8 @@ wss.on('connection', ws => {
   console.log('[WS] Client connected');
 
   function sendInit() {
-    if (!dbReady) {
-      // DB not ready yet — retry after 1s
-      setTimeout(sendInit, 1000);
-      return;
-    }
-    const signals     = getCurrentCycleSignals(100);
+    if (!dbReady) { setTimeout(sendInit, 500); return; }
+    const signals     = getAllSignals(100);
     const pastSignals = getPastCycleSignals(200);
     ws.send(JSON.stringify({ type: 'INIT', signals, pastSignals, symbols: Object.keys(SYMBOLS) }));
   }
@@ -249,7 +245,7 @@ app.post('/webhook/fxssi', (req, res) => {
 
 // ── REST API ─────────────────────────────────────────────────────────────────
 app.get('/api/signals', (req, res) => {
-  res.json(getCurrentCycleSignals(100));
+  res.json(getAllSignals(100));
 });
 
 app.get('/api/past-signals', (req, res) => {
