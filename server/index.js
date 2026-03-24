@@ -812,16 +812,9 @@ cron.schedule('1,21,41 * * * *', async () => {
   }
 });
 
-<<<<<<< HEAD
 // Retirement cron — fires at :03/:23/:43 (30s after outcome check at :02/:22/:42)
 // Sequence: FXSSI scrape (:01) → outcome check (:02) → retire (:03) → scoring (:05)
 cron.schedule('3,23,43 * * * *', async () => {
-=======
-// Retirement cron — fires at :02/:22/:42 (aligned with FXSSI scrape at :01/:21/:41)
-// FXSSI scrapes first, then 1 minute later we retire ACTIVE signals
-// Fresh FXSSI data is now in DB when new signals start scoring
-cron.schedule('2,22,42 * * * *', async () => {
->>>>>>> f92ac4a7511f9e1662ccbc79ebd7c9e227fa31af
   await runRetirementCycle(broadcast);
 });
 
