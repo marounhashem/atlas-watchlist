@@ -7,6 +7,7 @@ function scoreBias(data) {
   const raw = Math.abs(data.bias || 0);
   const maxBias = raw > 3 ? 8 : 3;
   const fvgBonus = data.fvg_present ? 0.10 : 0;
+  const direction = (data.bias || 0) > 0 ? 'LONG' : 'SHORT';
 
   let vwapBonus = 0;
   try {
@@ -31,7 +32,6 @@ function scoreBias(data) {
       }
 
       // ── Confluence bonus ───────────────────────────────────────────────────
-      // Independent sources agreeing = much higher conviction than raw bias alone
       const cc = raw3.confluenceCount;
       if (cc != null && !isNaN(cc)) {
         if      (cc >= 5) momBonus += 0.15;
@@ -51,6 +51,54 @@ function scoreBias(data) {
       // ── Opening range penalty ──────────────────────────────────────────────
       if (raw3.isOpeningRange === true || raw3.isOpeningRange === 'true') {
         momBonus -= 0.04;
+      }
+
+      // ── HTF range position check ───────────────────────────────────────────
+      // If price is near the TOP of the 20-bar range, LONGs are entering at resistance
+      // If price is near the BOTTOM of the range, SHORTs are entering at support
+      // Both are low-probability entries — price is likely to reverse
+      const rHigh = raw3.rangeHigh;
+      const rLow  = raw3.rangeLow;
+      const cp2   = raw3.price || data.close;
+      if (rHigh && rLow && cp2 && (rHigh - rLow) > 0) {
+        const rangePct = (cp2 - rLow) / (rHigh - rLow); // 0 = bottom, 1 = top
+        if (direction === 'LONG') {
+          if      (rangePct > 0.80) momBonus -= 0.18; // top 20% of range — strong resistance
+          else if (rangePct > 0.70) momBonus -= 0.10; // top 30% — elevated risk
+          else if (rangePct > 0.60) momBonus -= 0.05; // upper half — mild caution
+        } else { // SHORT
+          if      (rangePct < 0.20) momBonus -= 0.18; // bottom 20% — strong support
+          else if (rangePct < 0.30) momBonus -= 0.10; // bottom 30%
+          else if (rangePct < 0.40) momBonus -= 0.05; // lower half — mild caution
+        }
+      }
+
+      // ── RSI momentum gate ──────────────────────────────────────────────────
+      // EMAs are lagging — RSI reflects actual current momentum
+      // If RSI strongly opposes direction, EMAs are lying about current conditions
+      const rsi5m = raw3.rsi?.['5m'] || data.rsi || 50;
+      if (direction === 'LONG') {
+        if      (rsi5m < 30) momBonus -= 0.20; // deeply oversold = selling pressure, not reversal yet
+        else if (rsi5m < 40) momBonus -= 0.12; // momentum against LONG
+        else if (rsi5m < 45) momBonus -= 0.06; // weak momentum
+        else if (rsi5m > 70) momBonus -= 0.10; // overbought LONG = chasing
+      } else {
+        if      (rsi5m > 70) momBonus -= 0.20; // deeply overbought = buying pressure
+        else if (rsi5m > 60) momBonus -= 0.12; // momentum against SHORT
+        else if (rsi5m > 55) momBonus -= 0.06; // weak momentum
+        else if (rsi5m < 30) momBonus -= 0.10; // oversold SHORT = chasing
+      }
+
+      // ── Short-term price action check ──────────────────────────────────────
+      // If current close is below open (bearish bar) on a LONG signal,
+      // or above open (bullish bar) on SHORT, price action opposes bias
+      const barOpen  = raw3.open  || data.close;
+      const barClose = raw3.price || data.close;
+      if (barOpen && barClose) {
+        const barBearish = barClose < barOpen;
+        const barBullish = barClose > barOpen;
+        if (direction === 'LONG'  && barBearish) momBonus -= 0.06;
+        if (direction === 'SHORT' && barBullish) momBonus -= 0.06;
       }
     }
   } catch(e) {}
@@ -328,24 +376,36 @@ function scoreSymbol(symbol) {
                       (direction === 'SHORT' && shortPct >= 60);
   if (crowdWithUs) conflictMultiplier *= 0.85;
 
-  // Structure alignment check — Claude learned this from repeated losses
-  // Avoid counter-trend signals when Pine structure contradicts direction
-  const structure = data.structure || 'ranging';
-  const structureConflict =
-    (direction === 'SHORT' && structure === 'bullish') ||
-    (direction === 'LONG'  && structure === 'bearish');
-  const structureAlign =
-    (direction === 'SHORT' && structure === 'bearish') ||
-    (direction === 'LONG'  && structure === 'bullish');
-
-  if (structureConflict) {
-    if (!fxssiSentiment || fxssiSentiment === 'NEUTRAL') {
-      conflictMultiplier *= 0.75; // no FXSSI backup = high risk
-    } else {
-      conflictMultiplier *= 0.88; // FXSSI partially offsets structure conflict
+  // ── Multi-TF structure alignment ──────────────────────────────────────────
+  // structScore -5 to +5: all 5 TFs agreeing = much stronger than single 4h
+  let structScore = 0;
+  try {
+    if (data.raw_payload) {
+      const rawS = JSON.parse(data.raw_payload);
+      const st = rawS.structure;
+      if (st && typeof st.score === 'number') {
+        structScore = st.score;
+      } else {
+        structScore = (st?.['1m']||0) + (st?.['5m']||0) + (st?.['15m']||0) +
+                      (st?.['1h']||0) + (st?.['4h']||0);
+      }
     }
-  } else if (structureAlign) {
-    conflictMultiplier *= 1.05;
+  } catch(e) {}
+  if (structScore === 0) {
+    const structure = data.structure || 'ranging';
+    structScore = structure === 'bullish' ? 2 : structure === 'bearish' ? -2 : 0;
+  }
+
+  if (direction === 'LONG') {
+    if      (structScore >= 4)  conflictMultiplier *= 1.08;
+    else if (structScore >= 2)  conflictMultiplier *= 1.03;
+    else if (structScore <= -3) conflictMultiplier *= 0.72;
+    else if (structScore <= -1) conflictMultiplier *= 0.88;
+  } else {
+    if      (structScore <= -4) conflictMultiplier *= 1.08;
+    else if (structScore <= -2) conflictMultiplier *= 1.03;
+    else if (structScore >= 3)  conflictMultiplier *= 0.72;
+    else if (structScore >= 1)  conflictMultiplier *= 0.88;
   }
 
   // RSI momentum filter — Claude learned: RSI > 60 on SHORT or < 40 on LONG = momentum against trade
@@ -734,6 +794,37 @@ function scoreSymbol(symbol) {
     if (pineSl) sl = Math.round((sl * slFxssiW + pineSl * (1 - slFxssiW)) * 10000) / 10000;
     if (pineTp) tp = Math.round((tp * tpFxssiW + pineTp * (1 - tpFxssiW)) * 10000) / 10000;
 
+    // ── TP cap at HTF resistance/support ──────────────────────────────────────
+    // Don't set TP beyond the nearest significant S/R level — price won't pass it cleanly
+    // Use Pine's nearestResistance/nearestSupport and rangeHigh/rangeLow
+    try {
+      const raw6 = JSON.parse(data.raw_payload || '{}');
+      const sr   = raw6.sr || {};
+      if (direction === 'LONG' && tp) {
+        // Cap TP at nearest resistance (leave small buffer)
+        const res = sr.resistance;
+        const rHi = raw6.rangeHigh;
+        let cap = null;
+        if (res && res > entry && res < tp) cap = Math.round((res - atr * 0.3) * 10000) / 10000;
+        if (rHi && rHi > entry && rHi < tp && (!cap || rHi < cap)) cap = Math.round((rHi - atr * 0.2) * 10000) / 10000;
+        if (cap && cap > entry) {
+          tp = cap;
+          console.log(`[Scorer] ${symbol} LONG TP capped at resistance ${cap}`);
+        }
+      } else if (direction === 'SHORT' && tp) {
+        // Cap TP at nearest support (leave small buffer)
+        const sup = sr.support;
+        const rLo = raw6.rangeLow;
+        let cap = null;
+        if (sup && sup < entry && sup > tp) cap = Math.round((sup + atr * 0.3) * 10000) / 10000;
+        if (rLo && rLo < entry && rLo > tp && (!cap || rLo > cap)) cap = Math.round((rLo + atr * 0.2) * 10000) / 10000;
+        if (cap && cap < entry) {
+          tp = cap;
+          console.log(`[Scorer] ${symbol} SHORT TP capped at support ${cap}`);
+        }
+      }
+    } catch(e) {}
+
   } else {
     // No FXSSI levels — pure ATR fallback
     const atrSl = atr * 1.5 * regimeSlAdj;
@@ -800,9 +891,24 @@ function scoreSymbol(symbol) {
 
 function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, data, cfg, regimeNote, macroNote }) {
   const parts = [];
-  if (biasSc > 0.7) parts.push(`Strong ${direction} structure on Pine (${Math.round(biasSc * 100)}%)`);
-  else if (biasSc > 0.4) parts.push(`Moderate ${direction} bias`);
-  else parts.push(`Weak bias — treat with caution`);
+  // Multi-TF structure breakdown in reasoning
+  let structTag = '';
+  try {
+    if (data.raw_payload) {
+      const rawR = JSON.parse(data.raw_payload);
+      const st = rawR.structure;
+      if (st) {
+        const tfs = ['1m','5m','15m','1h','4h'];
+        const aligned = tfs.filter(tf => (direction==='LONG' ? st[tf]===1 : st[tf]===-1));
+        const opposed = tfs.filter(tf => (direction==='LONG' ? st[tf]===-1 : st[tf]===1));
+        const sc = typeof st.score === 'number' ? st.score : 0;
+        structTag = ` · Structure ${aligned.length}/5 aligned [${aligned.join(',') || '—'}]${opposed.length ? ' ⚠ opposed:'+opposed.join(',') : ''}`;
+      }
+    }
+  } catch(e) {}
+  if (biasSc > 0.7) parts.push(`Strong ${direction} structure on Pine (${Math.round(biasSc * 100)}%)${structTag}`);
+  else if (biasSc > 0.4) parts.push(`Moderate ${direction} bias${structTag}`);
+  else parts.push(`Weak bias — treat with caution${structTag}`);
 
   // Momentum score from v2 Pine
   try {
@@ -827,6 +933,15 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
       // Opening range
       if (parsed.isOpeningRange === true || parsed.isOpeningRange === 'true') {
         parts.push(`⚠ Opening range — wider spreads, stronger momentum`);
+      }
+      // HTF range position
+      const rHigh2 = parsed.rangeHigh;
+      const rLow2  = parsed.rangeLow;
+      const cp3    = parsed.price || data.close;
+      if (rHigh2 && rLow2 && cp3 && (rHigh2 - rLow2) > 0) {
+        const pos = Math.round(((cp3 - rLow2) / (rHigh2 - rLow2)) * 100);
+        if (direction === 'LONG' && pos > 70) parts.push(`⚠ Price at ${pos}% of range — near resistance`);
+        if (direction === 'SHORT' && pos < 30) parts.push(`⚠ Price at ${pos}% of range — near support`);
       }
     }
   } catch(e) {}
