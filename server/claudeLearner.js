@@ -319,6 +319,7 @@ function applyWeightAdjustment(symbol, adj) {
 
     // Normalise Pine + FXSSI + OB to leave room for session
     const total = newPine + newFxssi + newOB;
+    if (total <= 0) { console.error('[Claude] Weight normalisation error: total=0 for', symbol); return; }
     const scale = 0.85 / total; // session gets 0.15
 
     db.updateWeights(symbol, {
