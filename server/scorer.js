@@ -331,62 +331,156 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
-  // ── Entry price from FXSSI limit wall ─────────────────────────────────────
+  // ── Entry price from FXSSI limit wall — volume-weighted buffer ───────────────
+  // Buffer scales inversely with wall volume:
+  //   thick wall (ol≥2.0) → tight buffer (0.05% — enter close, wall likely holds)
+  //   medium wall (ol 1.0-2.0) → standard buffer (0.10%)
+  //   thin wall  (ol<1.0)  → wide buffer (0.20% — wall may break, give more room)
   let entry = close;
+  let entrySource = 'price'; // track what drove the entry for reasoning
   if (fxssiLevels && close > 0) {
-    const buffer = close * 0.001;
     if (direction === 'SHORT' && fxssiLevels.nearestLimitAbove?.price) {
-      const wall = fxssiLevels.nearestLimitAbove.price;
-      const dist = wall - close;
-      if (dist > 0 && dist < atr * 2) entry = Math.round((wall - buffer) * 10000) / 10000;
+      const wall    = fxssiLevels.nearestLimitAbove.price;
+      const wallVol = fxssiLevels.nearestLimitAbove.ol || 1.0;
+      const dist    = wall - close;
+      if (dist > 0 && dist < atr * 2) {
+        const bufferPct = wallVol >= 2.0 ? 0.0005 : wallVol >= 1.0 ? 0.001 : 0.002;
+        entry       = Math.round((wall - wall * bufferPct) * 10000) / 10000;
+        entrySource = `limit_wall_vol${wallVol.toFixed(1)}`;
+      }
     } else if (direction === 'LONG' && fxssiLevels.nearestLimitBelow?.price) {
-      const wall = fxssiLevels.nearestLimitBelow.price;
-      const dist = close - wall;
-      if (dist > 0 && dist < atr * 2) entry = Math.round((wall + buffer) * 10000) / 10000;
+      const wall    = fxssiLevels.nearestLimitBelow.price;
+      const wallVol = fxssiLevels.nearestLimitBelow.ol || 1.0;
+      const dist    = close - wall;
+      if (dist > 0 && dist < atr * 2) {
+        const bufferPct = wallVol >= 2.0 ? 0.0005 : wallVol >= 1.0 ? 0.001 : 0.002;
+        entry       = Math.round((wall + wall * bufferPct) * 10000) / 10000;
+        entrySource = `limit_wall_vol${wallVol.toFixed(1)}`;
+      }
     }
   }
   if (entry === close && data.fvg_mid && data.fvg_mid > 0) {
-    entry = Math.round(data.fvg_mid * 10000) / 10000;
+    entry       = Math.round(data.fvg_mid * 10000) / 10000;
+    entrySource = 'fvg_mid';
   }
 
   // ── SL/TP from order book ─────────────────────────────────────────────────
+  // SL: place beyond the NEXT level after the nearest cluster — not just 0.3 ATR past it.
+  //     This avoids getting stopped during a cluster sweep before the real move.
+  // TP: check for winning clusters between price and target — if one blocks >40%
+  //     of the move, set TP just before it instead of running into reversal risk.
   let sl, tp;
   if (fxssiLevels && close > 0) {
     const atrSl = atr * 1.5;
+
     if (direction === 'LONG') {
-      const tpLevel = fxssiLevels.nearestSLAbove?.price || fxssiLevels.gravity?.price;
-      tp = (tpLevel && tpLevel > close && (tpLevel - close) > atr * 0.5)
-        ? Math.round(tpLevel * 10000) / 10000
-        : Math.round((close + atr * 3.0) * 10000) / 10000;
+      // ── TP: nearest SL cluster above, but check for winning cluster obstruction ──
+      const tpTarget = fxssiLevels.nearestSLAbove?.price || fxssiLevels.gravity?.price;
 
-      const slClusterBelow = fxssiLevels.losingClusters?.filter(c => c.price < close)
-        .sort((a,b) => b.price - a.price)[0];
-      const limitBelow = fxssiLevels.nearestLimitBelow?.price;
-      if (slClusterBelow && slClusterBelow.price > close - atrSl * 2) {
-        sl = Math.round((slClusterBelow.price - atr * 0.3) * 10000) / 10000;
-      } else if (limitBelow && limitBelow > close - atrSl * 2) {
-        sl = Math.round((limitBelow - atr * 0.5) * 10000) / 10000;
+      // Find winning clusters between price and TP target — these are reversal risks
+      const winningObstacles = tpTarget
+        ? (fxssiLevels.winningClusters || []).filter(c => c.price > close && c.price < tpTarget)
+            .sort((a, b) => a.price - b.price)
+        : [];
+
+      if (winningObstacles.length > 0) {
+        const obstacle     = winningObstacles[0];
+        const moveToTarget = tpTarget ? tpTarget - close : 0;
+        const moveToBlock  = obstacle.price - close;
+        const blockPct     = moveToTarget > 0 ? moveToBlock / moveToTarget : 1;
+
+        if (blockPct < 0.4) {
+          // Obstacle very close — skip TP target entirely, use ATR fallback
+          tp = Math.round((close + atr * 3.0) * 10000) / 10000;
+        } else {
+          // Obstacle past 40% of move — set TP just before it (leave 0.2 ATR gap)
+          tp = Math.round((obstacle.price - atr * 0.2) * 10000) / 10000;
+        }
+      } else if (tpTarget && tpTarget > close && (tpTarget - close) > atr * 0.5) {
+        tp = Math.round(tpTarget * 10000) / 10000;
       } else {
-        sl = Math.round((close - atrSl) * 10000) / 10000;
+        tp = Math.round((close + atr * 3.0) * 10000) / 10000;
       }
-    } else {
-      const tpLevel = fxssiLevels.nearestSLBelow?.price || fxssiLevels.gravity?.price;
-      tp = (tpLevel && tpLevel < close && (close - tpLevel) > atr * 0.5)
-        ? Math.round(tpLevel * 10000) / 10000
-        : Math.round((close - atr * 3.0) * 10000) / 10000;
 
-      const slClusterAbove = fxssiLevels.losingClusters?.filter(c => c.price > close)
-        .sort((a,b) => a.price - b.price)[0];
-      const limitAbove = fxssiLevels.nearestLimitAbove?.price;
-      if (slClusterAbove && slClusterAbove.price < close + atrSl * 2) {
-        sl = Math.round((slClusterAbove.price + atr * 0.3) * 10000) / 10000;
-      } else if (limitAbove && limitAbove < close + atrSl * 2) {
-        sl = Math.round((limitAbove + atr * 0.5) * 10000) / 10000;
+      // ── SL: find the next level BEYOND the nearest losing cluster ────────────
+      const losingClustersBelow = (fxssiLevels.losingClusters || [])
+        .filter(c => c.price < close)
+        .sort((a, b) => b.price - a.price); // nearest first
+
+      if (losingClustersBelow.length >= 2) {
+        // Place SL between cluster[0] and cluster[1] — beyond the sweep zone
+        const nearCluster = losingClustersBelow[0];
+        const farCluster  = losingClustersBelow[1];
+        const gap         = nearCluster.price - farCluster.price;
+        sl = Math.round((nearCluster.price - gap * 0.5) * 10000) / 10000;
+      } else if (losingClustersBelow.length === 1) {
+        const cluster = losingClustersBelow[0];
+        if (cluster.price > close - atrSl * 2) {
+          // Only one cluster — go 0.3 ATR past it as before
+          sl = Math.round((cluster.price - atr * 0.3) * 10000) / 10000;
+        } else {
+          sl = Math.round((close - atrSl) * 10000) / 10000;
+        }
       } else {
-        sl = Math.round((close + atrSl) * 10000) / 10000;
+        // No losing clusters — fall back to limit wall or ATR
+        const limitBelow = fxssiLevels.nearestLimitBelow?.price;
+        sl = (limitBelow && limitBelow > close - atrSl * 2)
+          ? Math.round((limitBelow - atr * 0.5) * 10000) / 10000
+          : Math.round((close - atrSl) * 10000) / 10000;
+      }
+
+    } else { // SHORT
+      // ── TP: nearest SL cluster below, check for winning cluster obstruction ──
+      const tpTarget = fxssiLevels.nearestSLBelow?.price || fxssiLevels.gravity?.price;
+
+      const winningObstacles = tpTarget
+        ? (fxssiLevels.winningClusters || []).filter(c => c.price < close && c.price > tpTarget)
+            .sort((a, b) => b.price - a.price)
+        : [];
+
+      if (winningObstacles.length > 0) {
+        const obstacle     = winningObstacles[0];
+        const moveToTarget = tpTarget ? close - tpTarget : 0;
+        const moveToBlock  = close - obstacle.price;
+        const blockPct     = moveToTarget > 0 ? moveToBlock / moveToTarget : 1;
+
+        if (blockPct < 0.4) {
+          tp = Math.round((close - atr * 3.0) * 10000) / 10000;
+        } else {
+          tp = Math.round((obstacle.price + atr * 0.2) * 10000) / 10000;
+        }
+      } else if (tpTarget && tpTarget < close && (close - tpTarget) > atr * 0.5) {
+        tp = Math.round(tpTarget * 10000) / 10000;
+      } else {
+        tp = Math.round((close - atr * 3.0) * 10000) / 10000;
+      }
+
+      // ── SL: find the next level BEYOND the nearest losing cluster ────────────
+      const losingClustersAbove = (fxssiLevels.losingClusters || [])
+        .filter(c => c.price > close)
+        .sort((a, b) => a.price - b.price); // nearest first
+
+      if (losingClustersAbove.length >= 2) {
+        const nearCluster = losingClustersAbove[0];
+        const farCluster  = losingClustersAbove[1];
+        const gap         = farCluster.price - nearCluster.price;
+        sl = Math.round((nearCluster.price + gap * 0.5) * 10000) / 10000;
+      } else if (losingClustersAbove.length === 1) {
+        const cluster = losingClustersAbove[0];
+        if (cluster.price < close + atrSl * 2) {
+          sl = Math.round((cluster.price + atr * 0.3) * 10000) / 10000;
+        } else {
+          sl = Math.round((close + atrSl) * 10000) / 10000;
+        }
+      } else {
+        const limitAbove = fxssiLevels.nearestLimitAbove?.price;
+        sl = (limitAbove && limitAbove < close + atrSl * 2)
+          ? Math.round((limitAbove + atr * 0.5) * 10000) / 10000
+          : Math.round((close + atrSl) * 10000) / 10000;
       }
     }
   } else {
+    // No FXSSI levels — pure ATR fallback
     if (direction === 'LONG') {
       sl = Math.round((close - atr * 1.5) * 10000) / 10000;
       tp = Math.round((close + atr * 3.0) * 10000) / 10000;
@@ -459,7 +553,6 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
 
   if (data.ob_absorption) parts.push(`Order book absorption detected at level`);
   if (data.fvg_present)   parts.push(`FVG present — entry zone active`);
-
   try {
     const raw = data.fxssi_analysis || data.raw_payload;
     if (raw) {
@@ -469,11 +562,44 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
         : (parsed.longPct != null ? parsed : null);
       if (fx) {
         const cp = data.close || 0;
+
+        // Wall volume quality
+        const wall = direction === 'SHORT' ? fx.nearestLimitAbove : fx.nearestLimitBelow;
+        if (wall?.ol) {
+          if (wall.ol >= 2.0)      parts.push(`Strong limit wall (vol ${wall.ol.toFixed(1)}) — tight entry buffer`);
+          else if (wall.ol >= 1.0) parts.push(`Moderate limit wall (vol ${wall.ol.toFixed(1)}) — standard buffer`);
+          else                      parts.push(`⚠ Thin limit wall (vol ${wall.ol.toFixed(1)}) — wide buffer, may break`);
+        }
+
+        // Winning cluster obstruction between price and TP
+        const tpTarget = direction === 'LONG' ? fx.nearestSLAbove?.price : fx.nearestSLBelow?.price;
+        if (tpTarget) {
+          const obstacles = (fx.winningClusters || []).filter(c =>
+            direction === 'LONG'
+              ? c.price > cp && c.price < tpTarget
+              : c.price < cp && c.price > tpTarget
+          );
+          if (obstacles.length > 0) {
+            const nearest = obstacles.sort((a,b) =>
+              direction === 'LONG' ? a.price - b.price : b.price - a.price
+            )[0];
+            const movePct = tpTarget
+              ? Math.round(Math.abs(nearest.price - cp) / Math.abs(tpTarget - cp) * 100)
+              : 0;
+            parts.push(`⚠ Winning cluster at ${nearest.price} blocks ${movePct}% of TP move — TP adjusted`);
+          }
+        }
+
+        // Multi-cluster SL quality
+        const clusters = direction === 'LONG'
+          ? (fx.losingClusters || []).filter(c => c.price < cp).sort((a,b) => b.price - a.price)
+          : (fx.losingClusters || []).filter(c => c.price > cp).sort((a,b) => a.price - b.price);
+        if (clusters.length >= 2) parts.push(`SL placed between clusters — sweep zone cleared`);
+
+        // Gravity, trapped traders, volume midpoint
         if (fx.gravity?.price) parts.push(`SL gravity at ${fx.gravity.price} — price magnet`);
         if (fx.losingClusters?.some(c => direction === 'SHORT' ? c.price > cp : c.price < cp))
           parts.push(`Trapped ${direction === 'SHORT' ? 'buyers' : 'sellers'} — trampoline fuel`);
-        if (fx.winningClusters?.some(c => direction === 'SHORT' ? c.price < cp : c.price > cp))
-          parts.push(`⚠ Winning cluster — reversal risk`);
         if (fx.middleOfVolume) {
           const side = direction === 'SHORT' ? cp > fx.middleOfVolume : cp < fx.middleOfVolume;
           if (side) parts.push(`Price ${direction === 'SHORT' ? 'above' : 'below'} volume midpoint — overextension confirmed`);
