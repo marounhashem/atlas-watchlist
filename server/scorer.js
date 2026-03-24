@@ -211,6 +211,14 @@ function scoreSymbol(symbol) {
   const direction = inferDirection(data);
   if (!direction) return null;
 
+  // ── Hard FXSSI gate — no signal without FXSSI data ───────────────────────
+  // All 12 losses had fxssi_snapshot null = scored blind with no order book confirmation
+  const hasFXSSI = data.fxssi_long_pct != null && data.fxssi_long_pct > 0;
+  if (!hasFXSSI) {
+    console.log(`[Scorer] ${symbol} blocked — no FXSSI data`);
+    return null;
+  }
+
   // Sanitise corrupted ob_imbalance
   if (data.ob_imbalance && typeof data.ob_imbalance === 'string' && data.ob_imbalance.startsWith('{')) {
     data.ob_imbalance = 0;
@@ -294,7 +302,10 @@ function scoreSymbol(symbol) {
 
   const score = Math.round(rawScore * conflictMultiplier);
 
-  const verdict = score >= minScore ? 'PROCEED' : score >= 55 ? 'WATCH' : 'SKIP';
+  // WATCH threshold = minScore - 15 (not a flat 55)
+  // Prevents low-conviction signals on high-threshold symbols (SILVER min=88, OILWTI min=88)
+  const watchThreshold = Math.max(55, minScore - 15);
+  const verdict = score >= minScore ? 'PROCEED' : score >= watchThreshold ? 'WATCH' : 'SKIP';
   const reasoning = buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, data, cfg });
 
   const close = data.close || 0;
@@ -565,7 +576,22 @@ function saveSignal(scored) {
 
   let last = null;
   try {
-    const { getLatestOpenSignal, updateOutcome } = require('./db');
+    const { getLatestOpenSignal, updateOutcome, getOpenSignals } = require('./db');
+
+    // Hard dedup — if ANY open/active signal exists for this symbol+direction, skip
+    const openSignals = getOpenSignals();
+    const alreadyOpen = openSignals.find(s =>
+      s.symbol === scored.symbol && s.direction === scored.direction
+    );
+    if (alreadyOpen) {
+      // Only proceed if entry is meaningfully different (>0.3% away)
+      const entryDiff = Math.abs((alreadyOpen.entry - scored.entry) / alreadyOpen.entry);
+      if (entryDiff < 0.003) {
+        console.log(`[Scorer] ${scored.symbol} dedup — identical entry already open`);
+        return null;
+      }
+    }
+
     last = getLatestOpenSignal(scored.symbol, scored.direction);
   } catch(e) {
     console.error('[Scorer] dedup lookup error:', e.message);
