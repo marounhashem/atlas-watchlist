@@ -270,7 +270,7 @@ app.post('/api/agent', async (req, res) => {
     }] : undefined;
 
     const body = {
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-haiku-4-5-20251001', // Haiku — 20x cheaper for agents
       max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }]
     };
@@ -322,6 +322,106 @@ app.post('/api/reset-data', (req, res) => {
     db.run('DELETE FROM learning_log');
     console.log('[Reset] Signals, market data and learning log cleared');
     res.json({ ok: true, message: 'Signals, market data and learning log cleared. Weights preserved.' });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Manual extract — generates a human-readable trading session report
+// Paste the output into Claude for analysis and suggestions
+app.get('/api/extract', async (req, res) => {
+  try {
+    const db = require('./db');
+    const signals = db.getAllSignals(50);
+    const closed  = signals.filter(s => s.outcome === 'WIN' || s.outcome === 'LOSS');
+    const open    = signals.filter(s => s.outcome === 'OPEN' || s.outcome === 'ACTIVE');
+
+    const wins   = closed.filter(s => s.outcome === 'WIN').length;
+    const losses = closed.filter(s => s.outcome === 'LOSS').length;
+    const winRate = closed.length > 0 ? Math.round(wins / closed.length * 100) : 0;
+
+    // Build per-signal detail
+    const signalDetails = closed.slice(0, 20).map(s => {
+      let fxssi = null;
+      try {
+        const md = db.getLatestMarketData(s.symbol);
+        if (md?.fxssi_analysis) fxssi = JSON.parse(md.fxssi_analysis);
+      } catch(e) {}
+
+      return {
+        symbol:    s.symbol,
+        direction: s.direction,
+        outcome:   s.outcome,
+        score:     s.score,
+        verdict:   s.verdict,
+        session:   s.session,
+        entry:     s.entry,
+        sl:        s.sl,
+        tp:        s.tp,
+        rr:        s.rr,
+        pnl_pct:   s.pnl_pct,
+        reasoning: s.reasoning,
+        fxssi_snapshot: fxssi ? {
+          longPct:       fxssi.longPct,
+          shortPct:      fxssi.shortPct,
+          trapped:       fxssi.trapped,
+          inProfitPct:   fxssi.inProfitPct,
+          signalBias:    fxssi.signals?.bias,
+          gravity:       fxssi.gravity?.price,
+          slClusters:    fxssi.slClusters?.slice(0,3).map(c => c.price),
+          losingClusters: fxssi.losingClusters?.slice(0,3).map(c => c.price),
+          middleOfVolume: fxssi.middleOfVolume
+        } : null
+      };
+    });
+
+    // Current weights
+    const weights = {};
+    const { SYMBOLS } = require('./config');
+    for (const sym of Object.keys(SYMBOLS)) {
+      const w = db.getWeights(sym);
+      if (w) weights[sym] = {
+        pine_bias: w.pine_bias,
+        fxssi:     w.fxssi_sentiment,
+        ob:        w.order_book,
+        session:   w.session_quality,
+        min_score: w.min_score_proceed
+      };
+    }
+
+    // Learning log summary
+    const learningLog = db.getLearningLog(10);
+
+    // Open signals
+    const openDetails = open.slice(0, 10).map(s => ({
+      symbol: s.symbol, direction: s.direction,
+      score: s.score, verdict: s.verdict,
+      entry: s.entry, sl: s.sl, tp: s.tp, rr: s.rr,
+      session: s.session, reasoning: s.reasoning
+    }));
+
+    const extract = {
+      generated_at: new Date().toISOString(),
+      summary: {
+        total_closed: closed.length,
+        wins, losses, win_rate_pct: winRate,
+        total_open: open.length
+      },
+      current_weights: weights,
+      closed_signals: signalDetails,
+      open_signals:   openDetails,
+      learning_log:   learningLog.slice(0, 5).map(l => ({
+        ts:       new Date(l.ts).toISOString(),
+        symbol:   l.symbols_analysed,
+        outcomes: l.outcomes_used,
+        reasoning: l.reasoning
+      })),
+      instructions: 'Paste this into Claude and ask: analyse my trading performance and suggest specific changes to improve win rate'
+    };
+
+    // Return as pretty JSON
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(extract, null, 2));
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
