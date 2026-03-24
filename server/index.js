@@ -53,13 +53,19 @@ function broadcast(payload) {
 }
 
 wss.on('connection', ws => {
-  console.log('[WS] Client connected');
+  console.log('[WS] Client connected, dbReady=' + dbReady);
 
   function sendInit() {
     if (!dbReady) { setTimeout(sendInit, 500); return; }
-    const signals     = getAllSignals(100);
-    const pastSignals = getPastCycleSignals(200);
-    ws.send(JSON.stringify({ type: 'INIT', signals, pastSignals, symbols: Object.keys(SYMBOLS) }));
+    try {
+      const signals     = db.getAllSignals(100);
+      const pastSignals = db.getPastCycleSignals(200);
+      console.log('[WS] Sending INIT: signals=' + signals.length + ' past=' + pastSignals.length);
+      ws.send(JSON.stringify({ type: 'INIT', signals, pastSignals, symbols: Object.keys(SYMBOLS) }));
+    } catch(e) {
+      console.error('[WS] INIT error:', e.message);
+      ws.send(JSON.stringify({ type: 'INIT', signals: [], pastSignals: [], symbols: Object.keys(SYMBOLS) }));
+    }
   }
 
   sendInit();
@@ -245,7 +251,39 @@ app.post('/webhook/fxssi', (req, res) => {
 
 // ── REST API ─────────────────────────────────────────────────────────────────
 app.get('/api/signals', (req, res) => {
-  res.json(getAllSignals(100));
+  res.json(db.getAllSignals(100));
+});
+
+// Debug endpoint — shows exactly what is in the DB
+app.get('/api/debug', (req, res) => {
+  if (!dbReady) return res.json({ error: 'DB not ready' });
+  try {
+    const all        = db.getAllSignals(200);
+    const open       = db.getOpenSignals();
+    const cycleSigs  = db.getCurrentCycleSignals(100);
+    const outcomes   = {};
+    for (const s of all) outcomes[s.outcome] = (outcomes[s.outcome]||0) + 1;
+    const cycles     = {};
+    for (const s of all) {
+      const c = s.cycle === null ? 'NULL' : String(s.cycle === 0 ? '0' : 'retired');
+      cycles[c] = (cycles[c]||0) + 1;
+    }
+    res.json({
+      dbReady,
+      totalSignals:       all.length,
+      openActive:         open.length,
+      currentCycle:       cycleSigs.length,
+      outcomeBreakdown:   outcomes,
+      cycleBreakdown:     cycles,
+      latestSignal:       all[0] || null,
+      sampleSignals:      all.slice(0,3).map(s=>({
+        id: s.id, symbol: s.symbol, outcome: s.outcome,
+        verdict: s.verdict, cycle: s.cycle, ts: new Date(s.ts).toISOString()
+      }))
+    });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
 });
 
 app.get('/api/past-signals', (req, res) => {
