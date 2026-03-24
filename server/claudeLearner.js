@@ -14,9 +14,27 @@ let regimeCache            = null; // current market regime
 let sessionPatterns        = {};   // { 'GOLD_london': { wins, losses, patterns[] } }
 let postTradeInsights      = [];   // last 50 insights
 
+// Rate limiting — max 1 post-trade analysis per symbol per 30 minutes
+// Prevents API burn when multiple trades close in quick succession
+const lastAnalysisTs = {}; // { symbol: timestamp }
+const ANALYSIS_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+
 // ── Main entry point ─────────────────────────────────────────────────────────
 async function onOutcome(signal, outcome, broadcast) {
   if (outcome !== 'WIN' && outcome !== 'LOSS') return;
+
+  outcomesSinceLastRegime++;
+
+  // Rate limit post-trade analysis — skip if same symbol analysed recently
+  const now = Date.now();
+  const lastTs = lastAnalysisTs[signal.symbol] || 0;
+  if (now - lastTs < ANALYSIS_COOLDOWN_MS) {
+    const minsLeft = Math.round((ANALYSIS_COOLDOWN_MS - (now - lastTs)) / 60000);
+    console.log(`[Claude] ${signal.symbol} ${outcome} — post-trade skipped (cooldown ${minsLeft}m remaining)`);
+    updateSessionPattern(signal, outcome, null);
+    return;
+  }
+  lastAnalysisTs[signal.symbol] = now;
 
   outcomesSinceLastRegime++;
 

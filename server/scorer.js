@@ -253,11 +253,13 @@ function scoreSession(symbol) {
 
 function inferDirection(data) {
   if (!data) return null;
-  // Use bias_score (composite -8 to +8) not raw bias (just +/-1)
-  // Require minimum ±2 — a score of 1 is too weak to trade
-  const score = data.bias_score || data.bias || 0;
+  // Use bias column directly — it's the full composite score (-8 to +8)
+  // data.bias_score is normalized 0-1 (absolute value) — wrong scale for threshold check
+  // Require ±2 minimum — a score of 1 (barely one EMA agreeing) is not tradeable
+  const score = data.bias || 0;
   if (score >= 2)  return 'LONG';
   if (score <= -2) return 'SHORT';
+  // Fallback to structure if bias is weak/neutral
   if (data.structure === 'bullish') return 'LONG';
   if (data.structure === 'bearish') return 'SHORT';
   return null;
