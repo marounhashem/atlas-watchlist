@@ -258,7 +258,7 @@ function insertLearningLog(entry) {
 // Get latest signal for current cycle only — retired signals invisible to dedup
 function getLatestOpenSignal(symbol, direction) {
   return get(
-    "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='OPEN' AND COALESCE(cycle,0)=0 ORDER BY ts DESC LIMIT 1",
+    "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='OPEN' AND (cycle IS NULL OR cycle=0) ORDER BY ts DESC LIMIT 1",
     [symbol, direction]
   );
 }
@@ -267,12 +267,12 @@ function getLatestOpenSignal(symbol, direction) {
 function retireActiveCycle(symbol) {
   const now = Date.now();
   const affected = all(
-    "SELECT id FROM signals WHERE symbol=? AND outcome='ACTIVE' AND COALESCE(cycle,0)=0",
+    "SELECT id FROM signals WHERE symbol=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0)",
     [symbol]
   );
   if (affected.length === 0) return 0;
   run(
-    "UPDATE signals SET cycle=?, retired_at=? WHERE symbol=? AND outcome='ACTIVE' AND COALESCE(cycle,0)=0",
+    "UPDATE signals SET cycle=?, retired_at=? WHERE symbol=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0)",
     [now, now, symbol]
   );
   persist();
@@ -282,17 +282,17 @@ function retireActiveCycle(symbol) {
 
 // Get all signals for current cycle (main board)
 function getCurrentCycleSignals(n) {
-  return all("SELECT * FROM signals WHERE COALESCE(cycle,0)=0 ORDER BY ts DESC LIMIT ?", [n || 100]);
+  return all("SELECT * FROM signals WHERE (cycle IS NULL OR cycle=0) ORDER BY ts DESC LIMIT ?", [n || 100]);
 }
 
 // Get all retired/past cycle signals
 function getPastCycleSignals(n) {
-  return all("SELECT * FROM signals WHERE COALESCE(cycle,0)>0 ORDER BY ts DESC LIMIT ?", [n || 200]);
+  return all("SELECT * FROM signals WHERE (cycle IS NOT NULL AND cycle>0) ORDER BY ts DESC LIMIT ?", [n || 200]);
 }
 
 // Get open signals for current cycle only — used by dedup gate
 function getCurrentCycleOpenSignals() {
-  return all("SELECT * FROM signals WHERE outcome IN ('OPEN','ACTIVE') AND COALESCE(cycle,0)=0 ORDER BY ts DESC");
+  return all("SELECT * FROM signals WHERE outcome IN ('OPEN','ACTIVE') AND (cycle IS NULL OR cycle=0) ORDER BY ts DESC");
 }
 
 // Update MFE — works across both current and past cycles
