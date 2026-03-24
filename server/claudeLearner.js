@@ -3,7 +3,9 @@
 // Fires: after every WIN/LOSS + daily at 17:00 UTC (end London) + every 10 outcomes
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL = 'claude-sonnet-4-20250514';
+const MODEL_SONNET = 'claude-sonnet-4-20250514'; // exact levels only
+const MODEL_HAIKU  = 'claude-haiku-4-5-20251001';  // all other tasks — 20x cheaper
+const MODEL = MODEL_HAIKU; // default
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let outcomesSinceLastRegime = 0;
@@ -436,7 +438,7 @@ Return ONLY this JSON (no markdown):
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: MODEL,
+        model: MODEL_SONNET, // Sonnet for exact levels — quality matters here
         max_tokens: 500,
         messages: [{ role: 'user', content: prompt }]
       })
