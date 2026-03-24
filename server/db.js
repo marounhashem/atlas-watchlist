@@ -122,6 +122,10 @@ function initSchema() {
   try { db.run('ALTER TABLE market_data ADD COLUMN fvg_high REAL'); } catch(e) {}
   try { db.run('ALTER TABLE market_data ADD COLUMN fvg_low REAL'); } catch(e) {}
   try { db.run('ALTER TABLE market_data ADD COLUMN fvg_mid REAL'); } catch(e) {}
+  // paper_outcome tracks WATCH signals in simulation — does not affect real win rate
+  try { db.run('ALTER TABLE signals ADD COLUMN paper_outcome TEXT DEFAULT NULL'); console.log('[DB] Migration: added paper_outcome column'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN paper_outcome_ts INTEGER DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN fxssi_stale INTEGER DEFAULT 0'); } catch(e) {}
 
   console.log('[DB] Schema initialised, weights seeded');
 }
@@ -193,6 +197,26 @@ function updateOutcome(signalId, outcome, pnlPct) {
   persist();
 }
 
+// Paper trade outcome — only for WATCH signals, tracked separately
+function updatePaperOutcome(signalId, paperOutcome) {
+  run("UPDATE signals SET paper_outcome=?,paper_outcome_ts=? WHERE id=? AND verdict='WATCH'",
+    [paperOutcome, Date.now(), signalId]);
+  persist();
+}
+
+// Paper trade stats — how would WATCH signals have performed if taken?
+function getPaperTradeStats() {
+  const watchSignals = all("SELECT * FROM signals WHERE verdict='WATCH' AND paper_outcome IS NOT NULL ORDER BY ts DESC LIMIT 200");
+  const wins   = watchSignals.filter(s => s.paper_outcome === 'WIN').length;
+  const losses = watchSignals.filter(s => s.paper_outcome === 'LOSS').length;
+  const total  = wins + losses;
+  return {
+    total, wins, losses,
+    winRate: total > 0 ? Math.round((wins / total) * 100) : null,
+    sample: watchSignals.slice(0, 20)
+  };
+}
+
 function getOpenSignals()      { return all("SELECT * FROM signals WHERE outcome IN ('OPEN','ACTIVE') ORDER BY ts DESC"); }
 function getRecentOutcomes(n)  { return all("SELECT * FROM signals WHERE outcome!='OPEN' ORDER BY ts DESC LIMIT ?", [n||80]); }
 function getWeights(symbol)    { return get("SELECT * FROM weights WHERE symbol=? ORDER BY ts DESC LIMIT 1", [symbol]); }
@@ -226,7 +250,7 @@ function getLatestOpenSignal(symbol, direction) {
 module.exports = {
   init, isReady, persist, run,
   upsertMarketData, getLatestMarketData,
-  insertSignal, updateOutcome,
+  insertSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats,
   getOpenSignals, getRecentOutcomes,
   getWeights, updateWeights,
   insertLearningLog, getAllSignals, getLearningLog,
