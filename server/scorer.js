@@ -253,13 +253,11 @@ function scoreSession(symbol) {
 
 function inferDirection(data) {
   if (!data) return null;
-  // Use bias column directly — it's the full composite score (-8 to +8)
-  // data.bias_score is normalized 0-1 (absolute value) — wrong scale for threshold check
-  // Require ±2 minimum — a score of 1 (barely one EMA agreeing) is not tradeable
-  const score = data.bias || 0;
+  // Use bias_score (composite -8 to +8) not raw bias (just +/-1)
+  // Require minimum ±2 — a score of 1 is too weak to trade
+  const score = data.bias_score || data.bias || 0;
   if (score >= 2)  return 'LONG';
   if (score <= -2) return 'SHORT';
-  // Fallback to structure if bias is weak/neutral
   if (data.structure === 'bullish') return 'LONG';
   if (data.structure === 'bearish') return 'SHORT';
   return null;
@@ -882,13 +880,64 @@ function scoreSymbol(symbol) {
   // Claude exact levels are calculated on-demand via ANALYSE button in dashboard
   // Not fired here to avoid API costs — user triggers manually when needed
 
+  // ── Minimum R:R hard gate ─────────────────────────────────────────────────
+  // Below 1.5 R:R is not worth taking regardless of score
+  // Recalculate after all level adjustments are done
+  rr = calcRR(entry, sl, tp, direction);
+  if (!rr || rr < 1.5) {
+    console.log(`[Scorer] ${symbol} ${direction} — R:R ${rr} below minimum 1.5, skipping`);
+    return null;
+  }
+
+  // ── Minimum SL distance per asset class ──────────────────────────────────
+  // Prevents SL being placed within normal noise range — guaranteed stop-out
+  const minSlPct = { crypto: 0.008, commodity: 0.005, index: 0.003 }[cfg.assetClass] || 0.004;
+  const slDist = Math.abs(entry - sl) / entry;
+  if (slDist < minSlPct) {
+    // Widen SL to minimum distance, recalculate TP to maintain R:R
+    const minSlDist = entry * minSlPct;
+    if (direction === 'LONG') {
+      sl = Math.round((entry - minSlDist) * 10000) / 10000;
+      tp = Math.round((entry + minSlDist * (rr || 2.0)) * 10000) / 10000;
+    } else {
+      sl = Math.round((entry + minSlDist) * 10000) / 10000;
+      tp = Math.round((entry - minSlDist * (rr || 2.0)) * 10000) / 10000;
+    }
+    rr = calcRR(entry, sl, tp, direction);
+    console.log(`[Scorer] ${symbol} ${direction} — SL widened to min ${(minSlPct*100).toFixed(1)}% distance`);
+  }
+
+  // ── Macro context score adjustment ────────────────────────────────────────
+  // Apply macro backdrop to final score — not just reasoning text
+  // Bearish macro + LONG signal = lower score, Bullish macro + LONG = higher score
+  let macroScoreAdj = 0;
+  try {
+    const macro = global.atlasGetMacroContext?.()[symbol];
+    if (macro && macro.sentiment && (Date.now() - macro.ts) < 24 * 3600000) {
+      if (direction === 'LONG') {
+        if (macro.sentiment === 'BULLISH'  && macro.strength >= 6) macroScoreAdj = +3;
+        if (macro.sentiment === 'BULLISH'  && macro.strength >= 3) macroScoreAdj = +1;
+        if (macro.sentiment === 'BEARISH'  && macro.strength >= 6) macroScoreAdj = -5;
+        if (macro.sentiment === 'BEARISH'  && macro.strength >= 3) macroScoreAdj = -3;
+      } else {
+        if (macro.sentiment === 'BEARISH'  && macro.strength >= 6) macroScoreAdj = +3;
+        if (macro.sentiment === 'BEARISH'  && macro.strength >= 3) macroScoreAdj = +1;
+        if (macro.sentiment === 'BULLISH'  && macro.strength >= 6) macroScoreAdj = -5;
+        if (macro.sentiment === 'BULLISH'  && macro.strength >= 3) macroScoreAdj = -3;
+      }
+    }
+  } catch(e) {}
+  const macroAdjustedScore = Math.min(100, Math.max(0, finalScore + macroScoreAdj));
+  const macroVerdict = macroAdjustedScore >= adjustedMinScore ? 'PROCEED'
+    : macroAdjustedScore >= Math.max(55, adjustedMinScore - 15) ? 'WATCH' : 'SKIP';
+
   const fxssiStale = hasFxssi && fxssiAge > FXSSI_MAX_AGE_MS;
   const finalReasoning = fxssiStale
     ? `⚠ FXSSI stale (${Math.round(fxssiAge/60000)}m) — OB scoring neutral · ` + reasoning
     : reasoning;
 
   return {
-    symbol, label: cfg.label, direction, score: finalScore, verdict,
+    symbol, label: cfg.label, direction, score: macroAdjustedScore, verdict: macroVerdict,
     entry: Math.round(entry * 100) / 100,
     sl, tp, rr,
     session: getSessionNow(),
