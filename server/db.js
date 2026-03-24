@@ -274,20 +274,99 @@ function getLatestOpenSignal(symbol, direction) {
 }
 
 // Retire all ACTIVE signals for a symbol — moves them to past cycle
+// Check if two entry prices are within 1% of each other
+function entriesWithinPct(e1, e2, pct) {
+  if (!e1 || !e2) return false;
+  return Math.abs(e1 - e2) / e1 <= (pct / 100);
+}
+
+// Merge signal B into signal A — averaged entry/SL/TP, keep A's id and outcome
+function mergeSignals(keepId, absorbId) {
+  const keep    = get('SELECT * FROM signals WHERE id=?', [keepId]);
+  const absorb  = get('SELECT * FROM signals WHERE id=?', [absorbId]);
+  if (!keep || !absorb) return false;
+
+  const avg = (a, b) => (a && b) ? Math.round(((a + b) / 2) * 10000) / 10000 : (a || b);
+
+  const newEntry = avg(keep.entry, absorb.entry);
+  const newSl    = avg(keep.sl,    absorb.sl);
+  const newTp    = avg(keep.tp,    absorb.tp);
+
+  // Recalculate R:R from merged levels
+  let newRr = keep.rr;
+  if (newEntry && newSl && newTp) {
+    const risk   = Math.abs(newEntry - newSl);
+    const reward = Math.abs(newTp    - newEntry);
+    newRr = risk > 0 ? Math.round((reward / risk) * 10) / 10 : keep.rr;
+  }
+
+  run('UPDATE signals SET entry=?, sl=?, tp=?, rr=?, reasoning=? WHERE id=?',
+    [newEntry, newSl, newTp, newRr,
+     `[MERGED] ${keep.reasoning || ''}`,
+     keepId]);
+
+  // Mark absorbed signal as REPLACED so it disappears from all views
+  run("UPDATE signals SET outcome='REPLACED', outcome_ts=? WHERE id=?",
+    [Date.now(), absorbId]);
+
+  persist();
+  console.log(`[DB] Merged signal ${absorbId} into ${keepId} (${keep.symbol} ${keep.direction}) entry ${keep.entry}→${newEntry} sl ${keep.sl}→${newSl} tp ${keep.tp}→${newTp}`);
+  return true;
+}
+
 function retireActiveCycle(symbol) {
   const now = Date.now();
-  const affected = all(
-    "SELECT id FROM signals WHERE symbol=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0)",
+
+  // Only ACTIVE signals (entry touched) are candidates for merging
+  const retiring = all(
+    "SELECT * FROM signals WHERE symbol=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0)",
     [symbol]
   );
-  if (affected.length === 0) return 0;
-  run(
-    "UPDATE signals SET cycle=?, retired_at=? WHERE symbol=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0)",
-    [now, now, symbol]
+  if (retiring.length === 0) return 0;
+
+  // Past ACTIVE signals still monitoring TP/SL
+  const monitoring = all(
+    "SELECT * FROM signals WHERE symbol=? AND outcome='ACTIVE' AND (cycle IS NOT NULL AND cycle>0)",
+    [symbol]
   );
+
+  let merged = 0;
+  const toRetire = [];
+
+  for (const ret of retiring) {
+    let mergedThis = false;
+
+    // Only merge if both signals had entry touched (both ACTIVE)
+    for (const mon of monitoring) {
+      if (ret.direction !== mon.direction) continue;
+      if (!entriesWithinPct(ret.entry, mon.entry, 1.0)) continue;
+
+      mergeSignals(mon.id, ret.id);
+      merged++;
+      mergedThis = true;
+      break;
+    }
+
+    if (!mergedThis) {
+      toRetire.push(ret.id);
+    }
+  }
+
+  // Retire non-merged ACTIVE signals to past cycle
+  if (toRetire.length > 0) {
+    const placeholders = toRetire.map(() => '?').join(',');
+    run(
+      `UPDATE signals SET cycle=?, retired_at=? WHERE id IN (${placeholders})`,
+      [now, now, ...toRetire]
+    );
+  }
+
   persist();
-  console.log(`[DB] Retired ${affected.length} ACTIVE signal(s) for ${symbol}`);
-  return affected.length;
+  const retired = toRetire.length;
+  if (retired > 0 || merged > 0) {
+    console.log(`[DB] ${symbol} — retired: ${retired}, merged: ${merged}`);
+  }
+  return retired + merged;
 }
 
 // Get all signals for current cycle (main board)
