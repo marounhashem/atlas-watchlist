@@ -256,21 +256,22 @@ async function runFXSSIScrape(broadcast) {
         if (raw) {
           const analysed = analyseOrderBook(raw);
 
-          // Check if this is genuinely new data vs same snapshot
+          // Check freshness BEFORE updating cache
+          // prevSnap must be read from old cache value
           const prevSnap = cache[symbol]?.analysed?.snapshotTime;
-          const newSnap  = raw.time; // Unix seconds
+          const newSnap  = raw.time; // Unix seconds from FXSSI API
           const isNewData = !prevSnap || newSnap !== prevSnap;
 
+          // Always update cache with latest fetch
           cache[symbol] = { raw, analysed, ts: now };
+
           if (isNewData) {
             const snapAge = Math.round((Date.now() / 1000 - newSnap) / 60);
             console.log(`[FXSSI] ${symbol} — NEW snapshot (${snapAge}m old). long:${analysed?.longPct}% short:${analysed?.shortPct}% trapped:${analysed?.trapped||'—'} bias:${analysed?.signals?.bias} levels:${raw.levels?.length}`);
           } else {
-            console.log(`[FXSSI] ${symbol} — same snapshot repeated, skipping DB write`);
+            console.log(`[FXSSI] ${symbol} — same snapshot, skipping DB write`);
+            continue; // skip DB write, data unchanged
           }
-
-          // Only write to DB if data is actually new
-          if (!isNewData) continue;
         } else {
           console.log(`[FXSSI] ${symbol} — fetch returned null`);
         }
