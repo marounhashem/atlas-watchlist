@@ -99,9 +99,13 @@ function initSchema() {
 
   db.run(`CREATE TABLE IF NOT EXISTS weights (
     id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL, ts INTEGER NOT NULL,
-    pine_bias REAL DEFAULT 0.35, fxssi_sentiment REAL DEFAULT 0.25,
-    order_book REAL DEFAULT 0.25, session_quality REAL DEFAULT 0.15,
-    min_score_proceed REAL DEFAULT 70, win_rate REAL, sample_size INTEGER)`);
+    pine REAL DEFAULT 0.40, fxssi REAL DEFAULT 0.45,
+    session REAL DEFAULT 0.15,
+    min_score_proceed REAL DEFAULT 70,
+    entry_fxssi_weight REAL DEFAULT 0.50,
+    sl_fxssi_weight REAL DEFAULT 0.50,
+    tp_fxssi_weight REAL DEFAULT 0.50,
+    win_rate REAL, sample_size INTEGER)`);
 
   db.run(`CREATE TABLE IF NOT EXISTS learning_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL,
@@ -113,10 +117,21 @@ function initSchema() {
     const existing = get("SELECT id FROM weights WHERE symbol=? ORDER BY ts DESC LIMIT 1", [sym]);
     if (!existing) {
       const w = cfg.scoringWeights;
-      run("INSERT INTO weights (symbol,ts,pine_bias,fxssi_sentiment,order_book,session_quality,min_score_proceed) VALUES (?,?,?,?,?,?,?)",
-        [sym, Date.now(), w.pineBias, w.fxssiSentiment, w.orderBook, w.sessionQuality, cfg.minScoreProceed]);
+      run("INSERT INTO weights (symbol,ts,pine,fxssi,session,min_score_proceed,entry_fxssi_weight,sl_fxssi_weight,tp_fxssi_weight) VALUES (?,?,?,?,?,?,?,?,?)",
+        [sym, Date.now(), w.pine, w.fxssi, w.session, cfg.minScoreProceed, 0.50, 0.50, 0.50]);
     }
   }
+  // Migrate old 4-column weights table to new 3-column schema
+  try { db.run('ALTER TABLE weights ADD COLUMN pine REAL DEFAULT 0.40'); } catch(e) {}
+  try { db.run('ALTER TABLE weights ADD COLUMN fxssi REAL DEFAULT 0.45'); } catch(e) {}
+  try { db.run('ALTER TABLE weights ADD COLUMN session REAL DEFAULT 0.15'); } catch(e) {}
+  try { db.run('ALTER TABLE weights ADD COLUMN entry_fxssi_weight REAL DEFAULT 0.50'); } catch(e) {}
+  try { db.run('ALTER TABLE weights ADD COLUMN sl_fxssi_weight REAL DEFAULT 0.50'); } catch(e) {}
+  try { db.run('ALTER TABLE weights ADD COLUMN tp_fxssi_weight REAL DEFAULT 0.50'); } catch(e) {}
+  // Backfill pine/fxssi/session from old columns if they exist
+  try {
+    db.run('UPDATE weights SET pine=COALESCE(pine_bias,0.40), fxssi=COALESCE(pine_bias,0.45), session=COALESCE(session_quality,0.15) WHERE pine IS NULL OR pine=0');
+  } catch(e) {}
   // Run migrations for new columns
   try { db.run('ALTER TABLE market_data ADD COLUMN fxssi_analysis TEXT'); console.log('[DB] Migration: added fxssi_analysis column'); } catch(e) {}
   try { db.run('ALTER TABLE market_data ADD COLUMN fvg_high REAL'); } catch(e) {}
@@ -230,10 +245,14 @@ function getAllSignals(n)       { return all("SELECT * FROM signals ORDER BY ts 
 function getLearningLog(n)     { return all("SELECT * FROM learning_log ORDER BY ts DESC LIMIT ?", [n||20]); }
 
 function updateWeights(symbol, weights, winRate, sampleSize) {
-  run(`INSERT INTO weights (symbol,ts,pine_bias,fxssi_sentiment,order_book,session_quality,min_score_proceed,win_rate,sample_size)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
-    [symbol, Date.now(), weights.pineBias, weights.fxssiSentiment,
-     weights.orderBook, weights.sessionQuality, weights.minScoreProceed,
+  run(`INSERT INTO weights (symbol,ts,pine,fxssi,session,min_score_proceed,
+       entry_fxssi_weight,sl_fxssi_weight,tp_fxssi_weight,win_rate,sample_size)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [symbol, Date.now(),
+     weights.pine, weights.fxssi, weights.session, weights.minScoreProceed,
+     weights.entryFxssiWeight ?? 0.50,
+     weights.slFxssiWeight   ?? 0.50,
+     weights.tpFxssiWeight   ?? 0.50,
      winRate, sampleSize]);
   persist();
 }

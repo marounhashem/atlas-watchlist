@@ -85,11 +85,12 @@ Analyse this trade and return ONLY this JSON (no markdown):
   "what_failed": ["<factor that hurt outcome>"],
   "key_pattern": "<most important pattern to remember for this symbol/session>",
   "score_adjustment": {
-    "pine_bias_weight": <-0.1 to +0.1, how much to adjust this weight>,
-    "fxssi_weight": <-0.1 to +0.1>,
-    "ob_weight": <-0.1 to +0.1>,
+    "pine_weight": <-0.1 to +0.1, adjust pine scoring weight>,
+    "fxssi_weight": <-0.1 to +0.1, adjust combined FXSSI+OB weight>,
     "min_score_threshold": <-5 to +5, points to adjust>,
-    "sl_too_tight": <true if MFE > 0.3% but still lost — SL issue not direction issue, false otherwise>
+    "sl_too_tight": <true if MFE > 0.3% but still lost>,
+    "entry_fxssi_shift": <-0.1 to +0.1, shift entry toward FXSSI(+) or Pine(-)>,
+    "tp_fxssi_shift": <-0.1 to +0.1, shift TP toward FXSSI(+) or Pine(-)>
   },
   "avoid_next_time": "<condition to avoid for next ${signal.symbol} ${signal.direction} signal>"
 }`;
@@ -314,27 +315,48 @@ function applyWeightAdjustment(symbol, adj) {
     const cfg = SYMBOLS[symbol];
     if (!cfg) return;
 
-    // Apply adjustments with bounds
     const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-    const newPine  = clamp((w.pine_bias      || 0.35) + (adj.pine_bias_weight || 0), 0.15, 0.60);
-    const newFxssi = clamp((w.fxssi_sentiment|| 0.25) + (adj.fxssi_weight    || 0), 0.10, 0.50);
-    const newOB    = clamp((w.order_book     || 0.25) + (adj.ob_weight        || 0), 0.10, 0.40);
+
+    // New 3-weight schema: pine, fxssi (OB+sentiment combined), session fixed at 0.15
+    const newPine  = clamp((w.pine  || 0.40) + (adj.pine_weight  || 0), 0.15, 0.65);
+    const newFxssi = clamp((w.fxssi || 0.45) + (adj.fxssi_weight || 0), 0.20, 0.70);
     const newMin   = clamp((w.min_score_proceed || cfg.minScoreProceed) + (adj.min_score_threshold || 0), 55, 90);
 
-    // Normalise Pine + FXSSI + OB to leave room for session
-    const total = newPine + newFxssi + newOB;
-    if (total <= 0) { console.error('[Claude] Weight normalisation error: total=0 for', symbol); return; }
-    const scale = 0.85 / total; // session gets 0.15
+    // Normalise pine + fxssi to leave 0.15 for session
+    const total = newPine + newFxssi;
+    if (total <= 0) return;
+    const scale = 0.85 / total;
+
+    // Level blend weights — how much FXSSI vs Pine for entry/SL/TP
+    // sl_too_tight = true means SL was wrong (Pine or FXSSI placement issue)
+    // Claude learns to shift weight toward whichever source gave better levels
+    const curEntryW = w.entry_fxssi_weight ?? 0.50;
+    const curSlW    = w.sl_fxssi_weight    ?? 0.50;
+    const curTpW    = w.tp_fxssi_weight    ?? 0.50;
+
+    let newEntryW = curEntryW;
+    let newSlW    = curSlW;
+    let newTpW    = curTpW;
+
+    if (adj.sl_too_tight === true) {
+      // SL was too tight — shift SL weight away from whichever source was tighter
+      // Can't know which without more data, so widen both slightly toward FXSSI clusters
+      newSlW = clamp(curSlW + 0.05, 0.20, 0.80);
+    }
+    if (adj.entry_fxssi_shift) newEntryW = clamp(curEntryW + adj.entry_fxssi_shift, 0.20, 0.80);
+    if (adj.tp_fxssi_shift)    newTpW    = clamp(curTpW    + adj.tp_fxssi_shift,    0.20, 0.80);
 
     db.updateWeights(symbol, {
-      pine_bias:         Math.round(newPine  * scale * 100) / 100,
-      fxssi_sentiment:   Math.round(newFxssi * scale * 100) / 100,
-      order_book:        Math.round(newOB    * scale * 100) / 100,
-      session_quality:   0.15,
-      min_score_proceed: Math.round(newMin)
+      pine:              Math.round(newPine  * scale * 100) / 100,
+      fxssi:             Math.round(newFxssi * scale * 100) / 100,
+      session:           0.15,
+      minScoreProceed:   Math.round(newMin),
+      entryFxssiWeight:  Math.round(newEntryW * 100) / 100,
+      slFxssiWeight:     Math.round(newSlW    * 100) / 100,
+      tpFxssiWeight:     Math.round(newTpW    * 100) / 100
     });
 
-    console.log(`[Claude] Weights updated for ${symbol}: pine=${(newPine*scale).toFixed(2)} fxssi=${(newFxssi*scale).toFixed(2)} ob=${(newOB*scale).toFixed(2)} minScore=${Math.round(newMin)}`);
+    console.log(`[Claude] Weights updated for ${symbol}: pine=${(newPine*scale).toFixed(2)} fxssi=${(newFxssi*scale).toFixed(2)} minScore=${Math.round(newMin)} entry=${newEntryW.toFixed(2)} sl=${newSlW.toFixed(2)} tp=${newTpW.toFixed(2)}`);
   } catch(e) {
     console.error('[Claude] Weight adjustment error:', e.message);
   }

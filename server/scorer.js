@@ -257,12 +257,22 @@ function scoreSymbol(symbol) {
   }
 
   const w = getWeights(symbol);
-  const weights = w ? {
-    pineBias:       w.pine_bias,
-    fxssiSentiment: w.fxssi_sentiment,
-    orderBook:      w.order_book,
-    sessionQuality: w.session_quality
-  } : cfg.scoringWeights;
+  // New 3-weight schema: pine, fxssi (covers both sentiment + OB), session
+  const weights = w && w.pine ? {
+    pine:    w.pine,
+    fxssi:   w.fxssi,
+    session: w.session
+  } : {
+    pine:    cfg.scoringWeights.pine    || 0.40,
+    fxssi:   cfg.scoringWeights.fxssi   || 0.45,
+    session: cfg.scoringWeights.session || 0.15
+  };
+
+  // Learned entry/SL/TP blend weights (how much FXSSI vs Pine for each level)
+  // Start 50/50, Claude learns to adjust based on what actually works
+  const entryFxssiW = w?.entry_fxssi_weight ?? 0.50;
+  const slFxssiW    = w?.sl_fxssi_weight    ?? 0.50;
+  const tpFxssiW    = w?.tp_fxssi_weight    ?? 0.50;
 
   const minScore  = w ? w.min_score_proceed : cfg.minScoreProceed;
   const direction = inferDirection(data);
@@ -371,11 +381,13 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
+  // Combined FXSSI score = average of sentiment + order book (same source, two perspectives)
+  const fxssiCombined = (fxssiSc + obSc) / 2;
+
   const rawScore = (
-    biasSc   * weights.pineBias +
-    fxssiSc  * weights.fxssiSentiment +
-    obSc     * weights.orderBook +
-    sessionSc * weights.sessionQuality
+    biasSc       * weights.pine +
+    fxssiCombined * weights.fxssi +
+    sessionSc    * weights.session
   ) * 100;
 
   const score = Math.round(rawScore * conflictMultiplier);
@@ -458,25 +470,30 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
-  // ── Entry price — Pine optimal > FXSSI limit wall > FVG mid > close ─────────
-  // Pine now sends its own calculated optimal pullback entry level
-  // Cross-reference with FXSSI limit wall and pick the level closest to close
+  // ── Entry price — 50% OB (FXSSI limit wall) + 50% Pine (FVG/swing/VWAP) ────
+  // Average the two sources when both available — neither dominates
   let entry = close;
   let entrySource = 'price';
 
-  // First check Pine's optimal entry suggestion
   let pineOptimalEntry = null;
+  let obEntry = null;
+
+  // Pine optimal entry
   try {
     if (data.raw_payload) {
       const raw4 = JSON.parse(data.raw_payload);
       const pe = raw4.entry;
       if (pe) {
         pineOptimalEntry = direction === 'LONG' ? pe.longOptimal : pe.shortOptimal;
-        if (pineOptimalEntry) entrySource = `pine_${direction === 'LONG' ? pe.longSource : pe.shortSource}`;
       }
     }
   } catch(e) {}
+  // FVG mid fallback for Pine
+  if (!pineOptimalEntry && data.fvg_mid && data.fvg_mid > 0) {
+    pineOptimalEntry = data.fvg_mid;
+  }
 
+  // OB entry — FXSSI limit wall with volume-weighted buffer
   if (fxssiLevels && close > 0) {
     if (direction === 'SHORT' && fxssiLevels.nearestLimitAbove?.price) {
       const wall    = fxssiLevels.nearestLimitAbove.price;
@@ -484,15 +501,7 @@ function scoreSymbol(symbol) {
       const dist    = wall - close;
       if (dist > 0 && dist < atr * 2) {
         const bufferPct = wallVol >= 2.0 ? 0.0005 : wallVol >= 1.0 ? 0.001 : 0.002;
-        const fxssiEntry = Math.round((wall - wall * bufferPct) * 10000) / 10000;
-        // Pick the better entry: FXSSI wall vs Pine optimal (closer to close = better fill)
-        if (pineOptimalEntry && pineOptimalEntry > close && Math.abs(pineOptimalEntry - close) < Math.abs(fxssiEntry - close)) {
-          entry = pineOptimalEntry;
-          entrySource = `pine_fvg_vs_wall`;
-        } else {
-          entry = fxssiEntry;
-          entrySource = `limit_wall_vol${wallVol.toFixed(1)}`;
-        }
+        obEntry = Math.round((wall - wall * bufferPct) * 10000) / 10000;
       }
     } else if (direction === 'LONG' && fxssiLevels.nearestLimitBelow?.price) {
       const wall    = fxssiLevels.nearestLimitBelow.price;
@@ -500,26 +509,22 @@ function scoreSymbol(symbol) {
       const dist    = close - wall;
       if (dist > 0 && dist < atr * 2) {
         const bufferPct = wallVol >= 2.0 ? 0.0005 : wallVol >= 1.0 ? 0.001 : 0.002;
-        const fxssiEntry = Math.round((wall + wall * bufferPct) * 10000) / 10000;
-        if (pineOptimalEntry && pineOptimalEntry < close && Math.abs(pineOptimalEntry - close) < Math.abs(fxssiEntry - close)) {
-          entry = pineOptimalEntry;
-          entrySource = `pine_fvg_vs_wall`;
-        } else {
-          entry = fxssiEntry;
-          entrySource = `limit_wall_vol${wallVol.toFixed(1)}`;
-        }
+        obEntry = Math.round((wall + wall * bufferPct) * 10000) / 10000;
       }
     }
   }
 
-  // Fallback: use Pine optimal if no FXSSI wall found
-  if (entry === close && pineOptimalEntry && pineOptimalEntry !== close) {
+  // 50/50 blend — average when both available, use whichever is available otherwise
+  // Weights learned by claudeLearner from outcomes: entryFxssiW adjusts over time
+  if (obEntry && pineOptimalEntry) {
+    entry = Math.round((obEntry * entryFxssiW + pineOptimalEntry * (1 - entryFxssiW)) * 10000) / 10000;
+    entrySource = `fxssi${Math.round(entryFxssiW*100)}_pine${Math.round((1-entryFxssiW)*100)}`;
+  } else if (obEntry) {
+    entry = obEntry;
+    entrySource = 'fxssi_wall';
+  } else if (pineOptimalEntry && pineOptimalEntry !== close) {
     entry = Math.round(pineOptimalEntry * 10000) / 10000;
-  }
-  // Final fallback: FVG mid
-  if (entry === close && data.fvg_mid && data.fvg_mid > 0) {
-    entry = Math.round(data.fvg_mid * 10000) / 10000;
-    entrySource = 'fvg_mid';
+    entrySource = 'pine_level';
   }
 
   // ── SL/TP from order book ─────────────────────────────────────────────────
@@ -669,6 +674,57 @@ function scoreSymbol(symbol) {
       if (!sl || sl <= close) sl = Math.round((close + atrSl) * 10000) / 10000;
       if (!tp || tp >= close) tp = Math.round((close - atr * 3.0) * 10000) / 10000;
     }
+
+    // ── Pine-based SL/TP (50% weight) ────────────────────────────────────────
+    // Pine sends swing levels and VWAP bands — use as independent SL/TP source
+    let pineSl = null, pineTp = null;
+    try {
+      const raw5 = JSON.parse(data.raw_payload || '{}');
+      const sr = raw5.sr || raw5.structure || {};
+      const vwap = raw5.vwap || {};
+
+      if (direction === 'LONG') {
+        // Pine SL: nearest swing low below close, or VWAP lower2
+        const swingL = sr.swingL1 || sr.swingL2;
+        const vwapL  = vwap.lower2 || vwap.lower1;
+        if (swingL && swingL < close && swingL > close - atr * 4) {
+          pineSl = Math.round((swingL - atr * 0.2) * 10000) / 10000;
+        } else if (vwapL && vwapL < close) {
+          pineSl = Math.round((vwapL - atr * 0.1) * 10000) / 10000;
+        }
+        // Pine TP: nearest swing high above close, or VWAP upper2
+        const swingH = sr.swingH1 || sr.swingH2;
+        const vwapU  = vwap.upper2 || vwap.upper1;
+        if (swingH && swingH > close && swingH < close + atr * 6) {
+          pineTp = Math.round((swingH - atr * 0.1) * 10000) / 10000;
+        } else if (vwapU && vwapU > close) {
+          pineTp = Math.round((vwapU - atr * 0.1) * 10000) / 10000;
+        }
+      } else {
+        // Pine SL: nearest swing high above close
+        const swingH = sr.swingH1 || sr.swingH2;
+        const vwapU  = vwap.upper2 || vwap.upper1;
+        if (swingH && swingH > close && swingH < close + atr * 4) {
+          pineSl = Math.round((swingH + atr * 0.2) * 10000) / 10000;
+        } else if (vwapU && vwapU > close) {
+          pineSl = Math.round((vwapU + atr * 0.1) * 10000) / 10000;
+        }
+        // Pine TP: nearest swing low below close
+        const swingL = sr.swingL1 || sr.swingL2;
+        const vwapL  = vwap.lower2 || vwap.lower1;
+        if (swingL && swingL < close && swingL > close - atr * 6) {
+          pineTp = Math.round((swingL + atr * 0.1) * 10000) / 10000;
+        } else if (vwapL && vwapL < close) {
+          pineTp = Math.round((vwapL + atr * 0.1) * 10000) / 10000;
+        }
+      }
+    } catch(e) {}
+
+    // Blend OB and Pine using learned weights for SL/TP
+    // slFxssiW and tpFxssiW start at 0.50 and Claude adjusts from outcomes
+    if (pineSl) sl = Math.round((sl * slFxssiW + pineSl * (1 - slFxssiW)) * 10000) / 10000;
+    if (pineTp) tp = Math.round((tp * tpFxssiW + pineTp * (1 - tpFxssiW)) * 10000) / 10000;
+
   } else {
     // No FXSSI levels — pure ATR fallback
     const atrSl = atr * 1.5 * regimeSlAdj;

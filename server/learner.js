@@ -89,10 +89,9 @@ async function runLearningCycle(broadcast, force = false) {
   for (const sym of Object.keys(symbolStats)) {
     const w = getWeights(sym);
     if (w) currentWeights[sym] = {
-      pineBias: w.pine_bias,
-      fxssiSentiment: w.fxssi_sentiment,
-      orderBook: w.order_book,
-      sessionQuality: w.session_quality,
+      pine: w.pine || 0.40,
+      fxssi: w.fxssi || 0.45,
+      session: w.session || 0.15,
       minScoreProceed: w.min_score_proceed
     };
   }
@@ -113,13 +112,14 @@ async function runLearningCycle(broadcast, force = false) {
         system: `You are a quantitative trading system optimizer.
 Analyze trade outcomes and return ONLY a JSON object with updated weights.
 Rules:
-- Weights (pineBias + fxssiSentiment + orderBook + sessionQuality) must sum to exactly 1.0
+- Weights (pine + fxssi + session) must sum to exactly 1.0
+- pine = technical analysis weight, fxssi = order book weight (covers both sentiment and OB), session = fixed at 0.15
 - minScoreProceed must be between 62 and 88
 - If win rate > 65%: slightly increase weights of strongest factors, lower minScore by 1-2
 - If win rate < 45%: increase minScore by 3-5, reduce weights of weakest session
 - If win rate 45-65%: minimal changes only
 - Never change any single weight by more than 0.08 in one cycle
-Return format: { "SYMBOL": { "pineBias": 0.xx, "fxssiSentiment": 0.xx, "orderBook": 0.xx, "sessionQuality": 0.xx, "minScoreProceed": xx } }
+Return format: { "SYMBOL": { "pine": 0.xx, "fxssi": 0.xx, "session": 0.15, "minScoreProceed": xx } }
 No explanation, no markdown, pure JSON only.`,
         messages: [{ role: 'user', content: prompt }]
       })
@@ -144,19 +144,18 @@ No explanation, no markdown, pure JSON only.`,
       if (!stats) continue;
 
       // Validate weights sum to 1.0
-      const sum = newW.pineBias + newW.fxssiSentiment + newW.orderBook + newW.sessionQuality;
+      const sum = (newW.pine || 0) + (newW.fxssi || 0) + (newW.session || 0.15);
       if (sum < 0.97 || sum > 1.03) {
         console.warn(`[Learner] Invalid weights for ${sym} (sum=${sum.toFixed(3)}), skipping`);
         continue;
       }
 
-      updateWeights(sym, newW, stats.winRate, stats.total);
+      updateWeights(sym, { pine: newW.pine, fxssi: newW.fxssi, session: newW.session || 0.15, minScoreProceed: newW.minScoreProceed }, stats.winRate, stats.total);
 
       if (old) {
         const diffs = [];
-        if (Math.abs(newW.pineBias        - old.pineBias)        > 0.005) diffs.push(`pineBias ${old.pineBias.toFixed(2)}→${newW.pineBias.toFixed(2)}`);
-        if (Math.abs(newW.fxssiSentiment  - old.fxssiSentiment)  > 0.005) diffs.push(`fxssi ${old.fxssiSentiment.toFixed(2)}→${newW.fxssiSentiment.toFixed(2)}`);
-        if (Math.abs(newW.orderBook       - old.orderBook)        > 0.005) diffs.push(`orderBook ${old.orderBook.toFixed(2)}→${newW.orderBook.toFixed(2)}`);
+        if (Math.abs((newW.pine||0)  - (old.pine||0))  > 0.005) diffs.push(`pine ${(old.pine||0).toFixed(2)}→${(newW.pine||0).toFixed(2)}`);
+        if (Math.abs((newW.fxssi||0) - (old.fxssi||0)) > 0.005) diffs.push(`fxssi ${(old.fxssi||0).toFixed(2)}→${(newW.fxssi||0).toFixed(2)}`);
         if (Math.abs(newW.minScoreProceed - old.minScoreProceed)  > 0.5)   diffs.push(`minScore ${old.minScoreProceed}→${newW.minScoreProceed}`);
         if (diffs.length > 0) changes.push({ symbol: sym, winRate: stats.winRate, total: stats.total, diffs });
       }
@@ -216,7 +215,7 @@ function buildLearnerPrompt(symbolStats, currentWeights) {
     lines.push(`  Losses by score band: ${JSON.stringify(stats.lossByScoreBand)}`);
     if (currentWeights[sym]) {
       const w = currentWeights[sym];
-      lines.push(`  Current weights: pineBias=${w.pineBias}, fxssi=${w.fxssiSentiment}, orderBook=${w.orderBook}, session=${w.sessionQuality}, minScore=${w.minScoreProceed}`);
+      lines.push(`  Current weights: pine=${w.pine||0.40}, fxssi=${w.fxssi||0.45}, session=${w.session||0.15}, minScore=${w.minScoreProceed}`);
     }
     lines.push('');
   }

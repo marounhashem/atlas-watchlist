@@ -6,7 +6,7 @@ const SYMBOLS = {
     assetClass: 'commodity',
     sessions: { london: true, newYork: true, asia: false },
     peakSession: 'london',
-    scoringWeights: { pineBias: 0.30, fxssiSentiment: 0.35, orderBook: 0.20, sessionQuality: 0.15 },
+    scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['FOMC', 'CPI', 'NFP', 'DXY'],
     minScoreProceed: 72
   },
@@ -17,7 +17,7 @@ const SYMBOLS = {
     assetClass: 'commodity',
     sessions: { london: true, newYork: true, asia: false },
     peakSession: 'london',
-    scoringWeights: { pineBias: 0.28, fxssiSentiment: 0.37, orderBook: 0.20, sessionQuality: 0.15 },
+    scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['FOMC', 'CPI', 'NFP', 'DXY'],
     minScoreProceed: 72
   },
@@ -28,7 +28,7 @@ const SYMBOLS = {
     assetClass: 'commodity',
     sessions: { london: true, newYork: true, asia: false },
     peakSession: 'newYork',
-    scoringWeights: { pineBias: 0.32, fxssiSentiment: 0.28, orderBook: 0.25, sessionQuality: 0.15 },
+    scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['EIA_CRUDE', 'OPEC', 'API_REPORT'],
     minScoreProceed: 70
   },
@@ -39,7 +39,7 @@ const SYMBOLS = {
     assetClass: 'crypto',
     sessions: { london: true, newYork: true, asia: true },
     peakSession: 'newYork',
-    scoringWeights: { pineBias: 0.35, fxssiSentiment: 0.25, orderBook: 0.25, sessionQuality: 0.15 },
+    scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['FOMC'],
     minScoreProceed: 68
   },
@@ -50,7 +50,7 @@ const SYMBOLS = {
     assetClass: 'index',
     sessions: { london: false, newYork: true, asia: false },
     peakSession: 'newYork',
-    scoringWeights: { pineBias: 0.35, fxssiSentiment: 0.25, orderBook: 0.15, sessionQuality: 0.25 },
+    scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['FOMC', 'CPI', 'NFP', 'EARNINGS'],
     minScoreProceed: 70
   },
@@ -61,7 +61,7 @@ const SYMBOLS = {
     assetClass: 'index',
     sessions: { london: false, newYork: true, asia: false },
     peakSession: 'newYork',
-    scoringWeights: { pineBias: 0.35, fxssiSentiment: 0.25, orderBook: 0.15, sessionQuality: 0.25 },
+    scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['FOMC', 'CPI', 'NFP', 'EARNINGS'],
     minScoreProceed: 70
   }
