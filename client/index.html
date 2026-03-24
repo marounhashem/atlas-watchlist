@@ -558,27 +558,29 @@ function parseJSON(raw) {
 
 function renderResearch(box, raw) {
   const d = parseJSON(raw);
-  if(!d) { box.innerHTML=`<div style="font-size:9px;color:var(--muted);line-height:1.7;">${raw||'No data'}</div>`; return; }
+  if(!d) { box.innerHTML=`<div style="font-size:9px;color:var(--muted);line-height:1.7;white-space:pre-wrap;">${raw||'No data'}</div>`; return; }
   const sentColor = d.sentiment==='BULLISH'?'var(--proceed)':d.sentiment==='BEARISH'?'var(--short)':'var(--watch)';
   const supportsSignal = d.supports_signal;
-  const vcls = supportsSignal ? 'av-proceed' : 'av-caution';
-  const vtext = supportsSignal ? 'SUPPORTS SIGNAL' : 'CONTRADICTS SIGNAL';
-
+  const vcls  = supportsSignal ? 'av-proceed' : 'av-caution';
+  const vtext = supportsSignal ? '\u2713 SUPPORTS SIGNAL' : '\u2717 CONTRADICTS SIGNAL';
+  const score    = d.score || 0;
+  const scoreAbs = Math.min(100, Math.abs(score));
+  const scoreColor = score > 0 ? 'var(--proceed)' : score < 0 ? 'var(--short)' : 'var(--watch)';
+  const scoreBar = `<div style="margin-bottom:8px;"><div style="display:flex;justify-content:space-between;font-size:8px;color:var(--muted);margin-bottom:3px;"><span>BEARISH</span><span>SCORE ${score>0?'+':''}${score}</span><span>BULLISH</span></div><div style="height:4px;background:var(--surface2);border-radius:2px;position:relative;"><div style="position:absolute;left:50%;top:0;width:1px;height:4px;background:var(--border);"></div><div style="position:absolute;height:4px;border-radius:2px;background:${scoreColor};${score>=0?'left:50%;width:'+scoreAbs/2+'%;':'left:'+(50-scoreAbs/2)+'%;width:'+scoreAbs/2+'%;'}" ></div></div></div>`;
+  const bullet = (items, color) => items.map(s => `<div style="display:flex;gap:6px;padding:5px 0;border-bottom:1px solid var(--border);font-size:9px;line-height:1.5;"><span style="color:${color};flex-shrink:0;">\u00b7</span><span style="color:var(--text);flex:1;word-break:break-word;">${s}</span></div>`).join('');
   box.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px;">
-      <div class="kelly-card"><div class="kelly-label">SENTIMENT</div><div class="kelly-val" style="color:${sentColor};font-size:13px;">${d.sentiment||'—'}</div></div>
-      <div class="kelly-card"><div class="kelly-label">SCORE</div><div class="kelly-val" style="color:${sentColor}">${d.score>0?'+':''}${d.score||0}</div></div>
+      <div class="kelly-card"><div class="kelly-label">SENTIMENT</div><div class="kelly-val" style="color:${sentColor};font-size:12px;">${d.sentiment||'--'}</div></div>
       <div class="kelly-card"><div class="kelly-label">CONFIDENCE</div><div class="kelly-val">${d.confidence||0}%</div></div>
+      <div class="kelly-card"><div class="kelly-label">SIGNAL FIT</div><div class="kelly-val" style="font-size:9px;color:${supportsSignal?'var(--proceed)':'var(--short)'};">${supportsSignal?'YES':'NO'}</div></div>
     </div>
-    ${d.key_levels?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
-      <div class="kelly-card"><div class="kelly-label">SUPPORT</div><div class="kelly-val" style="font-size:11px;color:var(--proceed)">${d.key_levels.support||'—'}</div></div>
-      <div class="kelly-card"><div class="kelly-label">RESISTANCE</div><div class="kelly-val" style="font-size:11px;color:var(--short)">${d.key_levels.resistance||'—'}</div></div>
-    </div>`:''}
-    ${d.short_term_view?`<div style="font-size:9px;color:var(--text);margin-bottom:6px;line-height:1.5;">${d.short_term_view}</div>`:''}
-    ${(d.supports||[]).length?`<div class="agent-section-title" style="color:var(--proceed)">SUPPORTS SIGNAL</div>${d.supports.map(s=>`<div class="agent-row"><span class="agent-val-good">· ${s}</span></div>`).join('')}`:''}
-    ${(d.contradicts||[]).length?`<div class="agent-section-title" style="color:var(--short);margin-top:6px;">CONTRADICTS</div>${d.contradicts.map(s=>`<div class="agent-row"><span class="agent-val-warn">· ${s}</span></div>`).join('')}`:''}
-    ${(d.upcoming_events||[]).length?`<div class="agent-section-title" style="color:var(--watch);margin-top:6px;">UPCOMING EVENTS</div>${d.upcoming_events.map(s=>`<div class="agent-row">· ${s}</div>`).join('')}`:''}
-    <div class="agent-verdict ${vcls}" style="margin-top:8px;">${vtext}</div>`;
+    ${scoreBar}
+    ${d.key_levels?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;"><div class="kelly-card"><div class="kelly-label">SUPPORT</div><div class="kelly-val" style="font-size:11px;color:var(--proceed)">${d.key_levels.support||'--'}</div></div><div class="kelly-card"><div class="kelly-label">RESISTANCE</div><div class="kelly-val" style="font-size:11px;color:var(--short)">${d.key_levels.resistance||'--'}</div></div></div>`:''}
+    ${d.short_term_view?`<div style="font-size:9px;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:7px 9px;margin-bottom:8px;line-height:1.6;word-break:break-word;">${d.short_term_view}</div>`:''}
+    ${(d.supports||[]).length?`<div class="agent-section-title" style="color:var(--proceed);margin-bottom:3px;">SUPPORTS SIGNAL</div>${bullet(d.supports,'var(--proceed)')}` :''}
+    ${(d.contradicts||[]).length?`<div class="agent-section-title" style="color:var(--short);margin-top:8px;margin-bottom:3px;">CONTRADICTS SIGNAL</div>${bullet(d.contradicts,'var(--short)')}` :''}
+    ${(d.upcoming_events||[]).length?`<div class="agent-section-title" style="color:var(--watch);margin-top:8px;margin-bottom:3px;">UPCOMING EVENTS</div>${bullet(d.upcoming_events,'var(--watch)')}` :''}
+    <div class="agent-verdict ${vcls}" style="margin-top:10px;width:100%;text-align:center;">${vtext}</div>`;
 }
 
 function renderPredict(box, raw) {
