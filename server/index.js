@@ -758,25 +758,17 @@ async function runHealthCheck() {
   ].join('\n');
 
   try {
-    const nodemailer = require('nodemailer');
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: parseInt(process.env.SMTP_PORT || '587'),
-      secure: false, // TLS via STARTTLS
-      auth: {
-        user: process.env.SMTP_USER, // your Gmail address
-        pass: process.env.SMTP_PASS  // Gmail App Password (not your login password)
-      }
-    });
+    const { Resend } = require('resend');
+    const resend = new Resend(process.env.RESEND_API_KEY);
 
-    await transporter.sendMail({
-      from: `"ATLAS//WATCHLIST" <${process.env.SMTP_USER}>`,
+    await resend.emails.send({
+      from: 'ATLAS//WATCHLIST <onboarding@resend.dev>',
       to: 'marounhashem@gmail.com',
       subject,
       text: body
     });
 
-    console.log(`[Health] Alert email sent — ${problems.map(p => p.symbol).join(', ')}`);
+    console.log(`[Health] Alert email sent via Resend — ${problems.map(p => p.symbol).join(', ')}`);
 
     // Mark alert sent for all affected symbols
     for (const p of problems) {
