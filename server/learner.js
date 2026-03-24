@@ -107,7 +107,7 @@ async function runLearningCycle(broadcast, force = false) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-haiku-4-5-20251001', // Haiku — batch weight learning doesn't need Sonnet quality
         max_tokens: 1000,
         system: `You are a quantitative trading system optimizer.
 Analyze trade outcomes and return ONLY a JSON object with updated weights.
