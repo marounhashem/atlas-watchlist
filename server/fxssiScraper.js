@@ -56,15 +56,28 @@ function analyseOrderBook(data) {
   const buyPositionsPct  = totalPos > 0 ? Math.round(totalBuyPos  / totalPos * 1000) / 10 : 50;
   const sellPositionsPct = totalPos > 0 ? Math.round(totalSellPos / totalPos * 1000) / 10 : 50;
 
-  // In profit/loss — winning (ol, pl orange) vs losing (os, ps blue)
-  let totalWinning = 0, totalLosing = 0;
+  // In profit/loss calculation
+  // pl = long positions (orange, below price) — in profit if price moved up from their entry
+  // ps = short positions (blue, above price) — in profit if price moved down from their entry
+  // ol = pending long orders (orange, above price) — not yet filled, not in profit/loss
+  // os = pending short orders (blue, below price) — not yet filled, not in profit/loss
+  // "In profit" = pl (longs below current price, price went up) + ps (shorts above current price, price went down)
+  // "In loss"   = reverse — longs above price (bought high, now underwater) + shorts below price
+  let totalInProfit = 0, totalInLoss = 0;
   for (const l of levels) {
-    totalWinning += (l.ol || 0) + (l.pl || 0);
-    totalLosing  += (l.os || 0) + (l.ps || 0);
+    if (l.price < cp) {
+      // Below current price: long positions (pl) are in profit, short positions (ps) are in loss
+      totalInProfit += (l.pl || 0);
+      totalInLoss   += (l.ps || 0);
+    } else {
+      // Above current price: short positions (ps) are in profit, long positions (pl) are in loss
+      totalInProfit += (l.ps || 0);
+      totalInLoss   += (l.pl || 0);
+    }
   }
-  const totalPL = totalWinning + totalLosing;
-  const inProfitPct = totalPL > 0 ? Math.round(totalWinning / totalPL * 1000) / 10 : 50;
-  const inLossPct   = totalPL > 0 ? Math.round(totalLosing  / totalPL * 1000) / 10 : 50;
+  const totalPL     = totalInProfit + totalInLoss;
+  const inProfitPct = totalPL > 0 ? Math.round(totalInProfit / totalPL * 1000) / 10 : 50;
+  const inLossPct   = totalPL > 0 ? Math.round(totalInLoss   / totalPL * 1000) / 10 : 50;
 
   const above = levels.filter(l => l.price > cp).sort((a,b) => a.price - b.price);
   const below = levels.filter(l => l.price < cp).sort((a,b) => b.price - a.price);
