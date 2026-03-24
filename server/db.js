@@ -144,6 +144,9 @@ function initSchema() {
   try { db.run('ALTER TABLE signals ADD COLUMN mfe_pct REAL DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN cycle INTEGER DEFAULT 0'); console.log('[DB] Migration: added cycle column'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN retired_at INTEGER DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN scorer_version TEXT DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN refine_count INTEGER DEFAULT 0'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN refine_ts INTEGER DEFAULT NULL'); } catch(e) {}
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
   try { db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL'); } catch(e) { console.error('[DB] Backfill error:', e.message); }
 
@@ -203,12 +206,13 @@ function getLatestMarketData(symbol) {
 }
 
 function insertSignal(signal) {
-  run(`INSERT INTO signals (symbol,ts,direction,score,verdict,entry,sl,tp,rr,session,reasoning)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+  run(`INSERT INTO signals (symbol,ts,direction,score,verdict,entry,sl,tp,rr,session,reasoning,scorer_version)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     [signal.symbol, Date.now(), signal.direction, signal.score, signal.verdict,
-     signal.entry, signal.sl, signal.tp, signal.rr, signal.session, signal.reasoning]);
+     signal.entry, signal.sl, signal.tp, signal.rr, signal.session, signal.reasoning,
+     signal.scorerVersion || null]);
   const row = get("SELECT last_insert_rowid() as id");
-  persist(); // save immediately after signal
+  persist();
   return row ? row.id : null;
 }
 
@@ -268,12 +272,27 @@ function insertLearningLog(entry) {
 // Get latest signal for current cycle only — retired signals invisible to dedup
 function getLatestOpenSignal(symbol, direction) {
   // Block new signals if ACTIVE already exists for this symbol+direction
-  // Can't take two concurrent trades on the same instrument
   const active = get(
     "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0) ORDER BY ts DESC LIMIT 1",
     [symbol, direction]
   );
   if (active) return active;
+
+  // Check for ACTIVE signal in OPPOSITE direction — can't have SHORT and LONG open simultaneously
+  // If opposite ACTIVE exists, expire it so the new direction can proceed
+  const oppositeDir = direction === 'LONG' ? 'SHORT' : 'LONG';
+  const oppositeActive = get(
+    "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0) ORDER BY ts DESC LIMIT 1",
+    [symbol, oppositeDir]
+  );
+  if (oppositeActive) {
+    // Opposite direction is ACTIVE — expire it, the market has changed direction
+    run("UPDATE signals SET outcome='EXPIRED', outcome_ts=? WHERE id=?",
+      [Date.now(), oppositeActive.id]);
+    persist();
+    console.log(`[DB] ${symbol} — expired opposite ${oppositeDir} ACTIVE (id:${oppositeActive.id}) — new ${direction} signal taking over`);
+  }
+
   return get(
     "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='OPEN' AND (cycle IS NULL OR cycle=0) ORDER BY ts DESC LIMIT 1",
     [symbol, direction]
@@ -281,7 +300,24 @@ function getLatestOpenSignal(symbol, direction) {
 }
 
 // Retire all ACTIVE signals for a symbol — moves them to past cycle
-// Check if two entry prices are within 1% of each other
+// Expire OPEN signals saved with an older scorer version
+// ACTIVE signals (entry touched = real trade) are NEVER auto-expired
+// Called on startup — cleans up stale setups after a deploy
+function expireOldVersionSignals(currentVersion) {
+  if (!currentVersion) return 0;
+  const stale = all(
+    "SELECT id FROM signals WHERE outcome='OPEN' AND (scorer_version IS NULL OR scorer_version != ?)",
+    [currentVersion]
+  );
+  if (stale.length === 0) return 0;
+  const ids = stale.map(s => s.id);
+  const placeholders = ids.map(() => '?').join(',');
+  run(`UPDATE signals SET outcome='EXPIRED', outcome_ts=? WHERE id IN (${placeholders})`,
+    [Date.now(), ...ids]);
+  persist();
+  console.log(`[DB] Expired ${stale.length} OPEN signal(s) from old scorer version — ACTIVE trades untouched`);
+  return stale.length;
+}
 function entriesWithinPct(e1, e2, pct) {
   if (!e1 || !e2) return false;
   return Math.abs(e1 - e2) / e1 <= (pct / 100);
@@ -413,13 +449,31 @@ function updateMFE(signalId, mfe, mfePct) {
     [mfe, mfePct, signalId, mfe]);
 }
 
+// Refine an existing OPEN signal in place — update levels, bump refine_count
+// No new DB record, no REPLACED record — just update the existing one
+function refineSignal(signalId, updates) {
+  const now = Date.now();
+  const current = get('SELECT refine_count FROM signals WHERE id=?', [signalId]);
+  const newCount = (current?.refine_count || 0) + 1;
+  run(`UPDATE signals SET
+    score=?, entry=?, sl=?, tp=?, rr=?,
+    reasoning=?, scorer_version=?,
+    refine_count=?, refine_ts=?
+    WHERE id=?`,
+    [updates.score, updates.entry, updates.sl, updates.tp, updates.rr,
+     updates.reasoning, updates.scorerVersion || null,
+     newCount, now, signalId]);
+  persist();
+  return newCount;
+}
+
 module.exports = {
   init, isReady, persist, run,
   upsertMarketData, getLatestMarketData,
-  insertSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
+  insertSignal, refineSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,
   getWeights, updateWeights,
   insertLearningLog, getAllSignals, getLearningLog,
-  getLatestOpenSignal,
+  getLatestOpenSignal, expireOldVersionSignals,
   retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals
 };
