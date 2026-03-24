@@ -771,10 +771,6 @@ app.post('/api/paper-outcome', (req, res) => {
 // ── Cron jobs ─────────────────────────────────────────────────────────────────
 // Score all priority symbols every 5 minutes
 cron.schedule('*/5 * * * *', async () => {
-  if (!dbReady) return;
-  const { isMarketOpen } = require('./marketHours');
-  const anyOpen = Object.keys(SYMBOLS).some(s => isMarketOpen(s));
-  if (!anyOpen) return;
   console.log('[Cron] Running 5m scoring cycle...');
   const results = await scoreAllPriority();
   const proceeds = results.filter(r => r.verdict === 'PROCEED');
@@ -798,23 +794,10 @@ cron.schedule('2,7,12,17,22,27,32,37,42,47,52,57 * * * *', () => {
   checkOutcomes(broadcast);
 });
 
-// FXSSI auto-scrape — fires at :01/:21/:41 every hour during market hours
-// Aligned with FXSSI 20-minute data refresh cycle
-cron.schedule('1,21,41 * * * *', async () => {
-  if (!dbReady) return;
-  const { isMarketOpen } = require('./marketHours');
-  const anyOpen = Object.keys(SYMBOLS).some(s => isMarketOpen(s));
-  if (!anyOpen) return;
-  try {
-    await runFXSSIScrape(broadcast);
-  } catch(e) {
-    console.error('[FXSSI Cron] Error:', e.message);
-  }
-});
-
-// Retirement cron — fires at :03/:23/:43 (30s after outcome check at :02/:22/:42)
-// Sequence: FXSSI scrape (:01) → outcome check (:02) → retire (:03) → scoring (:05)
-cron.schedule('3,23,43 * * * *', async () => {
+// Retirement cron — fires at :02/:22/:42 (aligned with FXSSI scrape at :01/:21/:41)
+// FXSSI scrapes first, then 1 minute later we retire ACTIVE signals
+// Fresh FXSSI data is now in DB when new signals start scoring
+cron.schedule('2,22,42 * * * *', async () => {
   await runRetirementCycle(broadcast);
 });
 
@@ -1044,6 +1027,13 @@ server.listen(PORT, () => {
   db.init().then(() => {
     dbReady = true;
     console.log('[DB] Initialised and ready');
+    // Expire OPEN signals from old scorer versions — keeps board clean after deploys
+    // ACTIVE signals (real trades) are never auto-expired
+    try {
+      const { SCORER_VERSION } = require('./scorer');
+      const expired = db.expireOldVersionSignals(SCORER_VERSION);
+      if (expired > 0) console.log(`[Startup] Expired ${expired} stale OPEN signal(s) from old scorer version`);
+    } catch(e) { console.error('[Startup] Version expiry error:', e.message); }
     // Expose macro context globally so scorer.js can access it in-process
     global.atlasGetMacroContext = getMacroContext;
     // Macro fetch runs on schedule (07:00 UTC) only — not on startup to save API costs
