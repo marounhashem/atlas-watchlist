@@ -56,15 +56,22 @@ function analyseOrderBook(data) {
   const buyPositionsPct  = totalPos > 0 ? Math.round(totalBuyPos  / totalPos * 1000) / 10 : 50;
   const sellPositionsPct = totalPos > 0 ? Math.round(totalSellPos / totalPos * 1000) / 10 : 50;
 
-  // In profit/loss — winning (ol, pl orange) vs losing (os, ps blue)
-  let totalWinning = 0, totalLosing = 0;
+  // In profit/loss — based on price position relative to each level
+  // pl (longs below price) = in profit | ps (shorts above price) = in profit
+  // pl (longs above price) = in loss   | ps (shorts below price) = in loss
+  let totalInProfit = 0, totalInLoss = 0;
   for (const l of levels) {
-    totalWinning += (l.ol || 0) + (l.pl || 0);
-    totalLosing  += (l.os || 0) + (l.ps || 0);
+    if (l.price < cp) {
+      totalInProfit += (l.pl || 0); // longs below price = in profit
+      totalInLoss   += (l.ps || 0); // shorts below price = in loss
+    } else {
+      totalInProfit += (l.ps || 0); // shorts above price = in profit
+      totalInLoss   += (l.pl || 0); // longs above price = in loss
+    }
   }
-  const totalPL = totalWinning + totalLosing;
-  const inProfitPct = totalPL > 0 ? Math.round(totalWinning / totalPL * 1000) / 10 : 50;
-  const inLossPct   = totalPL > 0 ? Math.round(totalLosing  / totalPL * 1000) / 10 : 50;
+  const totalPL     = totalInProfit + totalInLoss;
+  const inProfitPct = totalPL > 0 ? Math.round(totalInProfit / totalPL * 1000) / 10 : 50;
+  const inLossPct   = totalPL > 0 ? Math.round(totalInLoss   / totalPL * 1000) / 10 : 50;
 
   const above = levels.filter(l => l.price > cp).sort((a,b) => a.price - b.price);
   const below = levels.filter(l => l.price < cp).sort((a,b) => b.price - a.price);
