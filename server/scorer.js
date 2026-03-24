@@ -297,7 +297,11 @@ function scoreSymbol(symbol) {
     if (data.fxssi_analysis) {
       const fa = typeof data.fxssi_analysis === 'string'
         ? JSON.parse(data.fxssi_analysis) : data.fxssi_analysis;
-      if (fa?.snapshotTime) fxssiAge = Date.now() - fa.snapshotTime;
+      if (fa?.snapshotTime) {
+        // snapshotTime is Unix seconds from FXSSI API — convert to ms
+        const snapMs = fa.snapshotTime > 1e10 ? fa.snapshotTime : fa.snapshotTime * 1000;
+        fxssiAge = Date.now() - snapMs;
+      }
     }
   } catch(e) {}
   if (fxssiAge === Infinity && data.ts) fxssiAge = Date.now() - data.ts;
