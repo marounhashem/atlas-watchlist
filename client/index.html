@@ -813,12 +813,6 @@ function copyTradeDossier(cardId) {
   document.body.appendChild(modal);
 }
 
-
-  modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
-  document.addEventListener('keydown', function esc(e){
-    if(e.key==='Escape'){ modal.remove(); document.removeEventListener('keydown', esc); }
-  });
-}
 async function logOutcome(signalId, outcome) {
   if(!signalId) return;
   await fetch('/api/outcome',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({signalId,outcome})});
