@@ -700,33 +700,16 @@ function togglePastGroup(btn) {
 
 function renderSignals() {
   if(activeFilter==='PAST'){ renderPastTrades(); return; }
-  // Collapse to one card per symbol+direction — latest OPEN wins, count refinements
+  // No more REPLACED records — refinements are stored directly on the signal
+  // Just deduplicate by symbol+direction, take the latest
   const seen = {};
-  const refineCounts = {};
-  const refineTs = {};
-
-  // Sort all signals newest first
   const sorted = [...allSignals].sort((a,b)=>(b.ts||0)-(a.ts||0));
   for (const s of sorted) {
+    if(s.outcome==='REPLACED') continue; // legacy records only
     const key = s.symbol+'_'+(s.direction||s.verdict||'');
-    if (s.outcome==='REPLACED') {
-      // Count refinements but don't show as primary card
-      const rkey = s.symbol+'_'+(s.direction||'');
-      refineCounts[rkey] = (refineCounts[rkey]||0) + 1;
-      if (!refineTs[rkey]) refineTs[rkey] = s.outcome_ts || s.ts;
-      // Only use REPLACED as fallback if no OPEN exists for this key
-      if (!seen[key]) seen[key] = s;
-      continue;
-    }
-    // OPEN or WIN/LOSS always wins over REPLACED
-    if (!seen[key] || seen[key].outcome==='REPLACED') seen[key] = s;
+    if (!seen[key]) seen[key] = s;
   }
-
-  // Attach refinement info to each signal
-  const deduped = Object.values(seen).map(s => {
-    const key = s.symbol+'_'+(s.direction||'');
-    return { ...s, _refineCount: refineCounts[key]||0, _refineTs: refineTs[key]||null };
-  });
+  const deduped = Object.values(seen);
 
   let filtered = deduped.filter(s=>{
     // Never show REPLACED signals
@@ -774,8 +757,8 @@ function renderCard(sig, isPast=false) {
     : '';
 
   // Refined tag — only show on open signals
-  const refineHtml = (sig._refineCount>0 && isOpen)
-    ? `<span style="font-size:8px;color:var(--accent);border:1px solid var(--accent);border-radius:3px;padding:1px 5px;letter-spacing:.5px;">↑ REFINED ×${sig._refineCount} · ${new Date(sig._refineTs).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>`
+  const refineHtml = (sig.refine_count>0 && isOpen)
+    ? `<span style="font-size:8px;color:var(--accent);border:1px solid var(--accent);border-radius:3px;padding:1px 5px;letter-spacing:.5px;">↑ REFINED ×${sig.refine_count} · ${new Date(sig.refine_ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>`
     : '';
 
   // Time ago label for closed signals
@@ -787,8 +770,7 @@ function renderCard(sig, isPast=false) {
   const displayV = isActive ? 'ACTIVE' : v;
   const vcls = isActive ? 'vA' : v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
   const scls=isActive?'sbW':v==='PROCEED'?'sbP':v==='WATCH'?'sbW':'sbS';
-  const showAgents  = v==='PROCEED';          // ANALYSE only for PROCEED
-  const showCopyBtn = v==='PROCEED' || v==='WATCH'; // copy button for all
+  const showAgents = v==='PROCEED' || v==='WATCH';
   const pastBadge = isPast ? '<span style="font-size:9px;color:var(--dim);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-right:3px;">PAST</span>' : '';
 
   return `<div class="card ${v.toLowerCase()} ${outcomeClass}" id="card-${sig.id||sig.symbol}">
@@ -812,7 +794,7 @@ function renderCard(sig, isPast=false) {
     <div class="card-actions">
       ${sig.outcome==='ACTIVE'?`<span style="font-size:9px;color:#ffd740;letter-spacing:.5px;">● MONITORING TP/SL</span>`:''}
       ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
-      ${showCopyBtn?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')" title="Copy full trade dossier">⊞</div>`:''}
+      ${showAgents?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')" title="Copy full trade dossier">⊞</div>`:''}
     </div>
     ${showAgents?`<div class="agents-panel" id="agents-${sig.id||sig.symbol}">
       <div class="agent-tabs">
