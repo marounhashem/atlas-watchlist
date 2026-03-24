@@ -55,6 +55,46 @@
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 
   /* ── SCROLLBAR ── */
+  /* ── Past Trades grouped view ── */
+  .past-group{display:flex;flex-direction:column;gap:0;}
+  .past-group-header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:8px 14px 6px;
+    background:var(--surface2);
+    border:1px solid var(--border);
+    border-radius:8px 8px 0 0;
+    border-bottom:none;
+  }
+  .past-group + .past-group { margin-top:12px; }
+  .past-group .card { border-radius:0; border-top:none; }
+  .past-group .card:last-child { border-radius:0 0 8px 8px; }
+  .past-group-header + .card { border-top:1px solid var(--border); }
+  .past-sym{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:13px;font-weight:700;color:var(--text);letter-spacing:1px;
+  }
+  .past-trade-count{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10px;color:var(--dim);
+    background:var(--surface3);border:1px solid var(--border);
+    border-radius:3px;padding:1px 7px;
+  }
+  .past-expand-btn{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10px;font-weight:600;letter-spacing:.5px;
+    padding:4px 12px;border-radius:4px;
+    border:1px solid var(--accent-border);color:var(--accent);
+    background:var(--accent-bg);cursor:pointer;
+    transition:all .15s;
+  }
+  .past-expand-btn:hover{background:rgba(129,140,248,.15);}
+  .past-badge{
+    font-size:9px;color:var(--dim);
+    background:var(--surface2);border:1px solid var(--border);
+    border-radius:3px;padding:1px 6px;margin-right:4px;
+    font-family:'IBM Plex Mono',monospace;letter-spacing:.5px;
+  }
+
   ::-webkit-scrollbar{width:4px;height:4px;}
   ::-webkit-scrollbar-track{background:transparent;}
   ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px;}
@@ -466,6 +506,7 @@
       <div class="fbtn" onclick="setFilter('WATCH')">WATCH</div>
       <div class="fbtn" onclick="setFilter('LONG')">LONG</div>
       <div class="fbtn" onclick="setFilter('SHORT')">SHORT</div>
+      <div class="fbtn" id="past-tab-btn" onclick="setFilter('PAST')" style="border-color:var(--accent);color:var(--accent);">PAST <span id="past-count" style="opacity:.6;font-size:9px;"></span></div>
     </div>
   </div>
   <div id="signals-container"><div class="empty">Waiting for signals...<br>Pine Script alerts will appear here.</div></div>
@@ -500,7 +541,7 @@
 
 <script>
 const WS_URL = `${location.protocol==='https:'?'wss':'ws'}://${location.host}`;
-let allSignals=[], activeFilter='ALL', ws;
+let allSignals=[], pastSignals=[], activeFilter='ALL', ws;
 
 
 const agentCache = {};
@@ -543,7 +584,9 @@ function connect() {
 
 function handleMessage(msg) {
   if (msg.type==='INIT') {
-    allSignals = msg.signals||[];
+    allSignals  = msg.signals||[];
+    pastSignals = msg.pastSignals||[];
+    updatePastCount();
     renderSignals(); fetchStats(); fetchLearningLog(); fetchMarketStatus(); fetchRegime();
     document.getElementById('symbol-count').textContent=(msg.symbols||[]).length+' symbols';
   } else if (msg.type==='SCORES') {
@@ -560,6 +603,18 @@ function handleMessage(msg) {
     const s=allSignals.find(x=>x.id===msg.signalId);
     if(s){s.outcome=msg.outcome;s.pnlPct=msg.pnlPct;}
     renderSignals(); fetchStats();
+  } else if (msg.type==='CYCLE_RETIRED') {
+    // Fetch fresh past signals after retirement
+    fetch('/api/past-signals').then(r=>r.json()).then(data=>{
+      pastSignals = data||[];
+      updatePastCount();
+      // Remove retired symbols from main board (they were ACTIVE, now cycle>0)
+      msg.retired.forEach(r => {
+        allSignals = allSignals.filter(s => !(s.symbol===r.symbol && s.outcome==='ACTIVE'));
+      });
+      renderSignals();
+      showToast('↻ Cycle retired — ' + msg.retired.map(r=>r.symbol).join(', ') + ' fresh');
+    }).catch(()=>{});
   } else if (msg.type==='LEARNING_UPDATE') {
     fetchLearningLog();
     showToast('↺ Weights updated for '+msg.changes.map(c=>c.symbol).join(', '));
@@ -577,11 +632,73 @@ function handleMessage(msg) {
 
 function setFilter(f) {
   activeFilter=f;
+  document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('on'));
+  const btn = f==='ALL' ? document.querySelector('.fbtn') :
+    [...document.querySelectorAll('.fbtn')].find(b=>b.textContent.trim().startsWith(f));
+  if(btn) btn.classList.add('on');
   document.querySelectorAll('.fbtn').forEach(b=>b.classList.toggle('on',b.textContent===f));
   renderSignals();
 }
 
+function updatePastCount() {
+  const el = document.getElementById('past-count');
+  if(el) el.textContent = pastSignals.length > 0 ? '('+pastSignals.length+')' : '';
+}
+
+function renderPastTrades() {
+  const c = document.getElementById('signals-container');
+  if(!c) return;
+  if(!pastSignals.length) {
+    c.innerHTML='<div class="empty">No past trades yet.<br>Trades retire at :02/:22/:42 when market is open.</div>';
+    return;
+  }
+  // Group by symbol, newest first within each group
+  const groups = {};
+  for (const s of pastSignals) {
+    if(!groups[s.symbol]) groups[s.symbol]=[];
+    groups[s.symbol].push(s);
+  }
+  for (const sym of Object.keys(groups)) {
+    groups[sym].sort((a,b)=>(b.ts||0)-(a.ts||0));
+  }
+  // Sort symbols by latest signal
+  const symOrder = Object.keys(groups).sort((a,b)=>
+    (groups[b][0].ts||0)-(groups[a][0].ts||0)
+  );
+  let html = '';
+  for (const sym of symOrder) {
+    const trades  = groups[sym];
+    const latest  = trades[0];
+    const rest    = trades.slice(1);
+    const groupId = 'past-group-'+sym;
+    html += '<div class="past-group">'
+      + '<div class="past-group-header">'
+      +   '<div style="display:flex;align-items:center;gap:8px;">'
+      +     '<span class="past-sym">'+sym+'</span>'
+      +     '<span class="past-trade-count">'+trades.length+' trade'+(trades.length!==1?'s':'')+'</span>'
+      +   '</div>'
+      +   (rest.length>0 ? '<button class="past-expand-btn" data-group="'+groupId+'" onclick="togglePastGroup(this)" id="btn-'+groupId+'">+'+rest.length+' more</button>' : '')
+      + '</div>'
+      + renderCard(latest, true)
+      + (rest.length>0 ? '<div class="past-group-rest" id="'+groupId+'" style="display:none;flex-direction:column;gap:8px;">'+rest.map(s=>renderCard(s,true)).join('')+'</div>' : '')
+      + '</div>';
+  }
+  c.innerHTML = html;
+}
+
+function togglePastGroup(btn) {
+  const groupId = btn.dataset.group;
+  const el = document.getElementById(groupId);
+  if(!el) return;
+  const isOpen = el.style.display !== 'none';
+  el.style.display = isOpen ? 'none' : 'flex';
+  el.style.flexDirection = 'column';
+  el.style.gap = '8px';
+  btn.textContent = isOpen ? '+'+el.children.length+' more' : '− hide';
+}
+
 function renderSignals() {
+  if(activeFilter==='PAST'){ renderPastTrades(); return; }
   // Collapse to one card per symbol+direction — latest OPEN wins, count refinements
   const seen = {};
   const refineCounts = {};
@@ -638,7 +755,7 @@ function renderSignals() {
   c.innerHTML=filtered.slice(0,30).map(renderCard).join('');
 }
 
-function renderCard(sig) {
+function renderCard(sig, isPast=false) {
   const v=sig.verdict||'SKIP';
   if(v==='CLOSED') return `<div class="card closed"><div class="ctop"><div><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span></div><span class="verdict vC">CLOSED</span></div><div style="font-size:9px;color:var(--muted)">${sig.reasoning||'Market closed'}</div></div>`;
 
@@ -674,7 +791,7 @@ function renderCard(sig) {
   return `<div class="card ${v.toLowerCase()} ${outcomeClass}" id="card-${sig.id||sig.symbol}">
     <div class="ctop">
       <div><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span></div>
-      <div style="display:flex;align-items:center;gap:6px;">${refineHtml}${outcomeHtml}${timeAgo?`<span style="font-size:8px;color:var(--muted)">${timeAgo}</span>`:''}<span class="verdict ${vcls}">${v}</span></div>
+      <div style="display:flex;align-items:center;gap:6px;">${pastBadge}${refineHtml}${outcomeHtml}${timeAgo?`<span style="font-size:8px;color:var(--muted)">${timeAgo}</span>`:''}<span class="verdict ${vcls}">${v}</span></div>
     </div>
     <div class="sbar"><div class="sbfill ${scls}" style="width:${sig.score||0}%"></div></div>
     <div class="cmid">

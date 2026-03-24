@@ -1,6 +1,9 @@
 const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, updateMFE, run } = require('./db');
 const claudeLearner = require('./claudeLearner');
 
+// checkOutcomes runs across ALL cycles — retired signals still get WIN/LOSS detected
+// Only dedup (saveSignal) uses getCurrentCycleOpenSignals
+
 // Signal lifecycle:
 // OPEN (entry not touched) → ACTIVE (entry touched, TP/SL not yet) → WIN / LOSS
 // OPEN can also be REPLACED (better signal superseded it)

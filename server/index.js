@@ -6,7 +6,7 @@ const cron = require('node-cron');
 const path = require('path');
 
 const db = require('./db');
-const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome, updatePaperOutcome, getPaperTradeStats } = db;
+const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome, updatePaperOutcome, getPaperTradeStats, retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals } = db;
 const { isMarketOpen, getMarketStatus, minutesUntilOpen } = require('./marketHours');
 const { scoreAllPriority, saveSignal } = require('./scorer');
 const { checkOutcomes } = require('./outcome');
@@ -54,9 +54,10 @@ function broadcast(payload) {
 
 wss.on('connection', ws => {
   console.log('[WS] Client connected');
-  // Send current state on connect
-  const signals = getAllSignals(50);
-  ws.send(JSON.stringify({ type: 'INIT', signals, symbols: Object.keys(SYMBOLS) }));
+  // Send current cycle signals on connect
+  const signals     = getCurrentCycleSignals(100);
+  const pastSignals = getPastCycleSignals(200);
+  ws.send(JSON.stringify({ type: 'INIT', signals, pastSignals, symbols: Object.keys(SYMBOLS) }));
 });
 
 // ── Webhook: TradingView Pine Script alerts ──────────────────────────────────
@@ -239,7 +240,17 @@ app.post('/webhook/fxssi', (req, res) => {
 
 // ── REST API ─────────────────────────────────────────────────────────────────
 app.get('/api/signals', (req, res) => {
-  res.json(getAllSignals(100));
+  res.json(getCurrentCycleSignals(100));
+});
+
+app.get('/api/past-signals', (req, res) => {
+  res.json(getPastCycleSignals(200));
+});
+
+// Manual retirement trigger
+app.post('/api/retire-now', async (req, res) => {
+  await runRetirementCycle(broadcast);
+  res.json({ ok: true, message: 'Retirement cycle complete' });
 });
 
 app.get('/api/weights', (req, res) => {
@@ -714,6 +725,13 @@ cron.schedule('2,7,12,17,22,27,32,37,42,47,52,57 * * * *', () => {
   checkOutcomes(broadcast);
 });
 
+// Retirement cron — fires at :02/:22/:42 (aligned with FXSSI scrape at :01/:21/:41)
+// FXSSI scrapes first, then 1 minute later we retire ACTIVE signals
+// Fresh FXSSI data is now in DB when new signals start scoring
+cron.schedule('2,22,42 * * * *', async () => {
+  await runRetirementCycle(broadcast);
+});
+
 // Learning engine — checks every hour, runs only when thresholds met
 // Minimum 30 closed trades per symbol + 30 new outcomes since last cycle + 6h gap
 cron.schedule('0 * * * *', async () => {
@@ -734,7 +752,33 @@ cron.schedule('0 7 * * *', async () => {
   await runMacroContextFetch(broadcast);
 });
 
-// ── Macro context store ───────────────────────────────────────────────────────
+// ── Signal retirement ─────────────────────────────────────────────────────────
+// At :02/:22/:42 — after fresh FXSSI data arrives — retire ACTIVE signals
+// for all open-market symbols. Retired signals move to Past Trades tab but
+// continue to be tracked for WIN/LOSS. Dedup gate ignores them completely.
+async function runRetirementCycle(broadcast) {
+  if (!dbReady) return;
+  const { isMarketOpen } = require('./marketHours');
+  const retired = [];
+
+  for (const symbol of Object.keys(SYMBOLS)) {
+    if (!isMarketOpen(symbol)) {
+      console.log(`[Retire] ${symbol} — market closed, skipping`);
+      continue;
+    }
+    const count = retireActiveCycle(symbol);
+    if (count > 0) {
+      retired.push({ symbol, count });
+    }
+  }
+
+  if (retired.length > 0) {
+    console.log(`[Retire] Cycle complete — retired: ${retired.map(r => `${r.symbol}(${r.count})`).join(', ')}`);
+    broadcast({ type: 'CYCLE_RETIRED', retired, ts: Date.now() });
+  }
+}
+
+
 // Keyed by symbol, refreshed daily at 07:00 UTC
 // { GOLD: { sentiment, summary, key_risks, supports_long, supports_short, ts } }
 const macroContext = {};

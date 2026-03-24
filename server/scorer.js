@@ -937,6 +937,9 @@ function entryTouched(signal, currentPrice) {
 function saveSignal(scored) {
   if (scored.verdict !== 'PROCEED' && scored.verdict !== 'WATCH') return null;
 
+  // Dedup only checks CURRENT CYCLE signals (cycle=0)
+  // Retired ACTIVE signals (cycle>0) are completely invisible here —
+  // a fresh signal can fire immediately after retirement for same symbol+direction
   let last = null;
   try {
     const { getLatestOpenSignal, updateOutcome } = require('./db');
