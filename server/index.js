@@ -54,10 +54,19 @@ function broadcast(payload) {
 
 wss.on('connection', ws => {
   console.log('[WS] Client connected');
-  // Send current cycle signals on connect
-  const signals     = getCurrentCycleSignals(100);
-  const pastSignals = getPastCycleSignals(200);
-  ws.send(JSON.stringify({ type: 'INIT', signals, pastSignals, symbols: Object.keys(SYMBOLS) }));
+
+  function sendInit() {
+    if (!dbReady) {
+      // DB not ready yet — retry after 1s
+      setTimeout(sendInit, 1000);
+      return;
+    }
+    const signals     = getCurrentCycleSignals(100);
+    const pastSignals = getPastCycleSignals(200);
+    ws.send(JSON.stringify({ type: 'INIT', signals, pastSignals, symbols: Object.keys(SYMBOLS) }));
+  }
+
+  sendInit();
 });
 
 // ── Webhook: TradingView Pine Script alerts ──────────────────────────────────
