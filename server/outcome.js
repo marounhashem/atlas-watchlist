@@ -1,4 +1,4 @@
-const { getOpenSignals, updateOutcome, getLatestMarketData, run } = require('./db');
+const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, run } = require('./db');
 const claudeLearner = require('./claudeLearner');
 
 // Signal lifecycle:
@@ -65,6 +65,17 @@ function checkOutcomes(broadcast) {
           console.error('[Claude] Auto-learning error:', e.message)
         );
       }
+
+      // ── Expire ACTIVE signals older than 24h ────────────────────────────────
+      // An ACTIVE signal stuck for 24h means price is going nowhere — treat as EXPIRED
+      if (currentState === 'ACTIVE' && !outcome) {
+        const ageHours = (Date.now() - sig.ts) / 3600000;
+        if (ageHours > 24) {
+          updateOutcome(id, 'EXPIRED', 0);
+          console.log(`[Outcome] ${sig.symbol} ${direction} → EXPIRED (ACTIVE 24h timeout)`);
+          if (broadcast) broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction, outcome: 'EXPIRED', ts: Date.now() });
+        }
+      }
     }
 
     // ── Expire OPEN signals older than 48h ────────────────────────────────────
@@ -74,6 +85,25 @@ function checkOutcomes(broadcast) {
         updateOutcome(id, 'EXPIRED', 0);
         console.log(`[Outcome] ${sig.symbol} ${direction} → EXPIRED (48h)`);
         if (broadcast) broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction, outcome: 'EXPIRED', ts: Date.now() });
+      }
+    }
+
+    // ── WATCH paper trade tracking ────────────────────────────────────────────
+    // WATCH signals are never traded but we track where price would have gone
+    // This feeds the learner to evaluate if lowering min_score would help
+    if (sig.verdict === 'WATCH' && !sig.paper_outcome && entry && sl && tp) {
+      let paperOutcome = null;
+      if (direction === 'LONG') {
+        if (price >= tp) paperOutcome = 'WIN';
+        else if (price <= sl) paperOutcome = 'LOSS';
+      } else {
+        if (price <= tp) paperOutcome = 'WIN';
+        else if (price >= sl) paperOutcome = 'LOSS';
+      }
+      if (paperOutcome) {
+        updatePaperOutcome(id, paperOutcome);
+        console.log(`[Outcome] ${sig.symbol} ${direction} WATCH → paper ${paperOutcome}`);
+        if (broadcast) broadcast({ type: 'PAPER_OUTCOME', signalId: id, symbol: sig.symbol, direction, paperOutcome, ts: Date.now() });
       }
     }
   }
