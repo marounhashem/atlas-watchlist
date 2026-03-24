@@ -809,10 +809,6 @@ function renderCard(sig, isPast=false) {
     </div>`:''}
     ${sig.reasoning?`<div class="reason">${sig.reasoning}</div>`:''}
     <div class="card-actions">
-      ${sig.outcome==='OPEN'&&v!=='SKIP'?`
-      <div class="abtn aW" onclick="logOutcome(${sig.id||'null'},'WIN')">WIN</div>
-      <div class="abtn aL" onclick="logOutcome(${sig.id||'null'},'LOSS')">LOSS</div>
-      <div class="abtn aI" onclick="logOutcome(${sig.id||'null'},'IGNORED')">IGNORE</div>`:''}
       ${sig.outcome==='ACTIVE'?`<span style="font-size:9px;color:#ffd740;letter-spacing:.5px;">● MONITORING TP/SL</span>`:''}
       ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
       ${showAgents?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')" title="Copy full trade dossier">⊞</div>`:''}
