@@ -774,7 +774,7 @@ cron.schedule('*/5 * * * *', async () => {
   if (!dbReady) return;
   const { isMarketOpen } = require('./marketHours');
   const anyOpen = Object.keys(SYMBOLS).some(s => isMarketOpen(s));
-  if (!anyOpen) return; // skip entirely outside market hours
+  if (!anyOpen) return;
   console.log('[Cron] Running 5m scoring cycle...');
   const results = await scoreAllPriority();
   const proceeds = results.filter(r => r.verdict === 'PROCEED');
@@ -799,7 +799,7 @@ cron.schedule('2,7,12,17,22,27,32,37,42,47,52,57 * * * *', () => {
 });
 
 // FXSSI auto-scrape — fires at :01/:21/:41 every hour during market hours
-// This is the core data feed for order book scoring — must run automatically
+// This is the primary data feed for order book scoring
 cron.schedule('1,21,41 * * * *', async () => {
   if (!dbReady) return;
   const { isMarketOpen } = require('./marketHours');
@@ -823,7 +823,7 @@ cron.schedule('2,22,42 * * * *', async () => {
 // Minimum 30 closed trades per symbol + 30 new outcomes since last cycle + 6h gap
 cron.schedule('0 * * * *', async () => {
   await runLearningCycle(broadcast);
-  // Entry level optimisation — runs after learning cycle for each symbol with data
+  // Entry level optimisation — runs for each open-market symbol with trade history
   const { isMarketOpen } = require('./marketHours');
   for (const symbol of Object.keys(SYMBOLS)) {
     if (isMarketOpen(symbol)) {

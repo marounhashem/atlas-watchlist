@@ -105,14 +105,12 @@ function checkOutcomes(broadcast) {
     }
 
     // ── WATCH paper trade tracking ────────────────────────────────────────────
-    // Only track paper outcome if entry was actually touched first
-    // Otherwise we're measuring signals that were never realistically enterable
+    // Only record paper outcome if entry was actually touched first
+    // Prevents inflated stats from signals that were never realistically enterable
     if (sig.verdict === 'WATCH' && !sig.paper_outcome && entry && sl && tp) {
-      // Check entry was touched (same tolerance as real entry detection)
       const watchEntryTouched = direction === 'LONG'
         ? price <= entry + tolerance
         : price >= entry - tolerance;
-
       if (watchEntryTouched) {
         let paperOutcome = null;
         if (direction === 'LONG') {
