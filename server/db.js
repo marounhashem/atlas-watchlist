@@ -132,6 +132,14 @@ function initSchema() {
   // outcome stays ACTIVE/WIN/LOSS — cycle is purely a display/dedup flag
   try { db.run('ALTER TABLE signals ADD COLUMN cycle INTEGER DEFAULT 0'); console.log('[DB] Migration: added cycle column'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN retired_at INTEGER DEFAULT NULL'); } catch(e) {}
+  // Backfill: existing signals have cycle=NULL — treat as 0 (current cycle)
+  try {
+    const nullCount = db.exec("SELECT COUNT(*) as n FROM signals WHERE cycle IS NULL")[0]?.values?.[0]?.[0] || 0;
+    if (nullCount > 0) {
+      db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL');
+      console.log(`[DB] Migration: backfilled ${nullCount} signals with cycle=0`);
+    }
+  } catch(e) { console.error('[DB] Backfill error:', e.message); }
 
   console.log('[DB] Schema initialised, weights seeded');
 }
@@ -247,26 +255,24 @@ function insertLearningLog(entry) {
 }
 
 // Get latest signal for current cycle only — retired signals invisible to dedup
+// Get latest signal for current cycle only — retired signals invisible to dedup
 function getLatestOpenSignal(symbol, direction) {
   return get(
-    "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='OPEN' AND cycle=0 ORDER BY ts DESC LIMIT 1",
+    "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='OPEN' AND COALESCE(cycle,0)=0 ORDER BY ts DESC LIMIT 1",
     [symbol, direction]
   );
 }
 
 // Retire all ACTIVE signals for a symbol — moves them to past cycle
-// Called at :02/:22/:42 when FXSSI data arrives and market is open
-// Retired signals: cycle set to timestamp, invisible to dedup, still tracked for WIN/LOSS
 function retireActiveCycle(symbol) {
   const now = Date.now();
-  // Only retire ACTIVE signals — OPEN signals stay on main board
   const affected = all(
-    "SELECT id FROM signals WHERE symbol=? AND outcome='ACTIVE' AND cycle=0",
+    "SELECT id FROM signals WHERE symbol=? AND outcome='ACTIVE' AND COALESCE(cycle,0)=0",
     [symbol]
   );
   if (affected.length === 0) return 0;
   run(
-    "UPDATE signals SET cycle=?, retired_at=? WHERE symbol=? AND outcome='ACTIVE' AND cycle=0",
+    "UPDATE signals SET cycle=?, retired_at=? WHERE symbol=? AND outcome='ACTIVE' AND COALESCE(cycle,0)=0",
     [now, now, symbol]
   );
   persist();
@@ -274,20 +280,19 @@ function retireActiveCycle(symbol) {
   return affected.length;
 }
 
-// Get all signals for current cycle (main board) — cycle=0 only
+// Get all signals for current cycle (main board)
 function getCurrentCycleSignals(n) {
-  return all("SELECT * FROM signals WHERE cycle=0 ORDER BY ts DESC LIMIT ?", [n || 100]);
+  return all("SELECT * FROM signals WHERE COALESCE(cycle,0)=0 ORDER BY ts DESC LIMIT ?", [n || 100]);
 }
 
 // Get all retired/past cycle signals
 function getPastCycleSignals(n) {
-  return all("SELECT * FROM signals WHERE cycle>0 ORDER BY ts DESC LIMIT ?", [n || 200]);
+  return all("SELECT * FROM signals WHERE COALESCE(cycle,0)>0 ORDER BY ts DESC LIMIT ?", [n || 200]);
 }
 
 // Get open signals for current cycle only — used by dedup gate
-// Retired ACTIVE signals (cycle>0) are invisible here
 function getCurrentCycleOpenSignals() {
-  return all("SELECT * FROM signals WHERE outcome IN ('OPEN','ACTIVE') AND cycle=0 ORDER BY ts DESC");
+  return all("SELECT * FROM signals WHERE outcome IN ('OPEN','ACTIVE') AND COALESCE(cycle,0)=0 ORDER BY ts DESC");
 }
 
 // Update MFE — works across both current and past cycles
