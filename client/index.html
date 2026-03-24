@@ -592,9 +592,9 @@ function handleMessage(msg) {
   } else if (msg.type==='SCORES') {
     for (const r of msg.results) {
       if (r.verdict==='CLOSED'||r.verdict==='SKIP') continue;
-      const idx = allSignals.findIndex(s=>s.symbol===r.symbol&&s.outcome==='OPEN');
+      const idx = allSignals.findIndex(s=>s.symbol===r.symbol&&s.direction===r.direction&&(s.outcome==='OPEN'||s.outcome==='ACTIVE'));
       if (idx>=0) allSignals[idx]={...allSignals[idx],...r};
-      else allSignals.unshift({...r,outcome:'OPEN'});
+      else if(r.verdict==='PROCEED'||r.verdict==='WATCH') allSignals.unshift({...r,outcome:'OPEN'});
     }
     renderSignals();
   } else if (msg.type==='ALERT') {
@@ -731,7 +731,6 @@ function renderSignals() {
   let filtered = deduped.filter(s=>{
     // Never show REPLACED signals
     if(s.outcome==='REPLACED') return false;
-    // Hide only IGNORED — show WIN/LOSS/EXPIRED as dimmed history cards
     if(s.outcome==='IGNORED') return false;
     // CLOSED = market closed cards, only in ALL
     if(s.verdict==='CLOSED') return activeFilter==='ALL';
