@@ -731,8 +731,8 @@ function renderSignals() {
   let filtered = deduped.filter(s=>{
     // Never show REPLACED signals
     if(s.outcome==='REPLACED') return false;
-    // Hide WIN/LOSS/IGNORED/EXPIRED from dashboard — DB only
-    if(['WIN','LOSS','IGNORED','EXPIRED'].includes(s.outcome)) return false;
+    // Hide IGNORED/REPLACED only — show WIN/LOSS/EXPIRED as dimmed history
+    if(['IGNORED'].includes(s.outcome)) return false;
     // CLOSED = market closed cards, only in ALL
     if(s.verdict==='CLOSED') return activeFilter==='ALL';
     // Active filters
