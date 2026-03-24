@@ -200,8 +200,7 @@ function analyseOrderBook(data) {
     // Signal counts
     signals: { buy: buySig, sell: sellSig, bias: signalBias },
 
-    // snapshotTime: FXSSI API's own timestamp (seconds) — falls back to now if missing
-    snapshotTime: data.time || Math.floor(Date.now() / 1000)
+    snapshotTime: data.time
   };
 }
 
@@ -249,25 +248,38 @@ async function runFXSSIScrape(broadcast) {
         raw = await fetchSymbol(pair);
         if (raw) {
           const analysed = analyseOrderBook(raw);
-          cache[symbol]  = { raw, analysed, ts: now, fetchedAt: now };
-          console.log(`[FXSSI] ${symbol} — fetched. long:${analysed?.longPct}% short:${analysed?.shortPct}% trapped:${analysed?.trapped||'—'} bias:${analysed?.signals?.bias} levels:${raw.levels?.length}`);
+
+          // Check if this is genuinely new data vs same snapshot
+          const prevSnap = cache[symbol]?.analysed?.snapshotTime;
+          const newSnap  = raw.time; // Unix seconds
+          const isNewData = !prevSnap || newSnap !== prevSnap;
+
+          cache[symbol] = { raw, analysed, ts: now };
+          if (isNewData) {
+            const snapAge = Math.round((Date.now() / 1000 - newSnap) / 60);
+            console.log(`[FXSSI] ${symbol} — NEW snapshot (${snapAge}m old). long:${analysed?.longPct}% short:${analysed?.shortPct}% trapped:${analysed?.trapped||'—'} bias:${analysed?.signals?.bias} levels:${raw.levels?.length}`);
+          } else {
+            console.log(`[FXSSI] ${symbol} — same snapshot repeated, skipping DB write`);
+          }
+
+          // Only write to DB if data is actually new
+          if (!isNewData) continue;
         } else {
           console.log(`[FXSSI] ${symbol} — fetch returned null`);
         }
       } else {
         raw = cached?.raw;
-        console.log(`[FXSSI] ${symbol} — using cache (${Math.round(cacheAge)}m old)`);
+        console.log(`[FXSSI] ${symbol} — using cache (${Math.round(cacheAge)}m old), skipping DB write`);
+        continue; // cache is fresh, no need to re-write DB
       }
 
       const analysed = cache[symbol]?.analysed;
       if (!analysed) { console.log(`[FXSSI] ${symbol} — no analysed data, skipping`); continue; }
 
-      // Merge into existing market data
+      // Merge into existing market data — only reached when data is genuinely new
       const existing = getLatestMarketData(symbol);
-      console.log(`[FXSSI] ${symbol} — existing market data: ${existing ? 'yes' : 'NO — skipping write'}`);
-      if (existing) {
-        console.log(`[FXSSI] ${symbol} — writing longPct:${analysed.longPct} shortPct:${analysed.shortPct}`);
-        upsertMarketData(symbol, {
+      if (!existing) { console.log(`[FXSSI] ${symbol} — no Pine data yet, skipping write`); continue; }
+      upsertMarketData(symbol, {
           close:         existing.close,
           high:          existing.high,
           low:           existing.low,
@@ -291,7 +303,6 @@ async function runFXSSIScrape(broadcast) {
           obLargeOrders: analysed.largeOrders,
           fxssiAnalysis: JSON.stringify(analysed)
         });
-      }
 
       if (broadcast) broadcast({ type: 'FXSSI_UPDATE', symbol, analysed, ts: now });
 
