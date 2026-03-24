@@ -592,9 +592,9 @@ function handleMessage(msg) {
   } else if (msg.type==='SCORES') {
     for (const r of msg.results) {
       if (r.verdict==='CLOSED'||r.verdict==='SKIP') continue;
-      const idx = allSignals.findIndex(s=>s.symbol===r.symbol&&s.direction===r.direction&&(s.outcome==='OPEN'||s.outcome==='ACTIVE'));
+      const idx = allSignals.findIndex(s=>s.symbol===r.symbol&&s.outcome==='OPEN');
       if (idx>=0) allSignals[idx]={...allSignals[idx],...r};
-      else if(r.verdict==='PROCEED'||r.verdict==='WATCH') allSignals.unshift({...r,outcome:'OPEN'});
+      else allSignals.unshift({...r,outcome:'OPEN'});
     }
     renderSignals();
   } else if (msg.type==='ALERT') {
@@ -731,7 +731,8 @@ function renderSignals() {
   let filtered = deduped.filter(s=>{
     // Never show REPLACED signals
     if(s.outcome==='REPLACED') return false;
-    if(s.outcome==='IGNORED') return false;
+    // Hide WIN/LOSS/IGNORED/EXPIRED from dashboard — DB only
+    if(['WIN','LOSS','IGNORED','EXPIRED'].includes(s.outcome)) return false;
     // CLOSED = market closed cards, only in ALL
     if(s.verdict==='CLOSED') return activeFilter==='ALL';
     // Active filters
@@ -787,6 +788,7 @@ function renderCard(sig, isPast=false) {
   const vcls = isActive ? 'vA' : v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
   const scls=isActive?'sbW':v==='PROCEED'?'sbP':v==='WATCH'?'sbW':'sbS';
   const showAgents = v==='PROCEED' || v==='WATCH';
+  const pastBadge = isPast ? '<span style="font-size:9px;color:var(--dim);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-right:3px;">PAST</span>' : '';
 
   return `<div class="card ${v.toLowerCase()} ${outcomeClass}" id="card-${sig.id||sig.symbol}">
     <div class="ctop">
