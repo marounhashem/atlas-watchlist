@@ -506,7 +506,7 @@
       <div class="fbtn" onclick="setFilter('WATCH')">WATCH</div>
       <div class="fbtn" onclick="setFilter('LONG')">LONG</div>
       <div class="fbtn" onclick="setFilter('SHORT')">SHORT</div>
-      <div class="fbtn" id="past-tab-btn" onclick="setFilter('PAST')" style="border-color:var(--accent);color:var(--accent);">PAST <span id="past-count" style="opacity:.6;font-size:9px;"></span></div>
+      <div class="fbtn" id="past-tab-btn" onclick="setFilter('PAST')">PAST <span id="past-count" style="opacity:.6;font-size:9px;"></span></div>
     </div>
   </div>
   <div id="signals-container"><div class="empty">Waiting for signals...<br>Pine Script alerts will appear here.</div></div>
@@ -632,11 +632,12 @@ function handleMessage(msg) {
 
 function setFilter(f) {
   activeFilter=f;
+  // Remove 'on' from all filter buttons, then add to the matching one
   document.querySelectorAll('.fbtn').forEach(b=>b.classList.remove('on'));
-  const btn = f==='ALL' ? document.querySelector('.fbtn') :
-    [...document.querySelectorAll('.fbtn')].find(b=>b.textContent.trim().startsWith(f));
+  const btn = f==='ALL'
+    ? document.querySelector('.fbtn')
+    : [...document.querySelectorAll('.fbtn')].find(b=>b.textContent.trim().toUpperCase().startsWith(f));
   if(btn) btn.classList.add('on');
-  document.querySelectorAll('.fbtn').forEach(b=>b.classList.toggle('on',b.textContent===f));
   renderSignals();
 }
 
