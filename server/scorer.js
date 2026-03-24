@@ -191,6 +191,8 @@ function estimateATR(data, assetClass) {
   return fallbacks[assetClass] || 5;
 }
 
+const FXSSI_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
+
 function scoreSymbol(symbol) {
   let data;
   try { data = getLatestMarketData(symbol); } catch(e) { return null; }
@@ -198,6 +200,23 @@ function scoreSymbol(symbol) {
 
   const cfg = SYMBOLS[symbol];
   if (!cfg) return null;
+
+  // ── FXSSI staleness gate ───────────────────────────────────────────────────
+  // Reject scoring if FXSSI data is older than 30 minutes — stale order book
+  // produces misleading signals, especially after Railway restarts
+  const fxssiAge = data.ts ? (Date.now() - data.ts) : Infinity;
+  const hasFxssi = data.fxssi_long_pct != null;
+  if (hasFxssi && fxssiAge > FXSSI_MAX_AGE_MS) {
+    const ageMin = Math.round(fxssiAge / 60000);
+    console.log(`[Scorer] ${symbol} — FXSSI data stale (${ageMin}m old), scoring without order book`);
+    // Nullify FXSSI fields so scoreFXSSI and scoreOrderBook fall back to neutral
+    data = { ...data,
+      fxssi_long_pct: null, fxssi_short_pct: null,
+      fxssi_trapped: null, ob_absorption: 0,
+      ob_imbalance: 0, ob_large_orders: 0,
+      fxssi_analysis: null
+    };
+  }
 
   const w = getWeights(symbol);
   const weights = w ? {
@@ -210,14 +229,6 @@ function scoreSymbol(symbol) {
   const minScore  = w ? w.min_score_proceed : cfg.minScoreProceed;
   const direction = inferDirection(data);
   if (!direction) return null;
-
-  // ── Hard FXSSI gate — no signal without FXSSI data ───────────────────────
-  // All 12 losses had fxssi_snapshot null = scored blind with no order book confirmation
-  const hasFXSSI = data.fxssi_long_pct != null && data.fxssi_long_pct > 0;
-  if (!hasFXSSI) {
-    console.log(`[Scorer] ${symbol} blocked — no FXSSI data`);
-    return null;
-  }
 
   // Sanitise corrupted ob_imbalance
   if (data.ob_imbalance && typeof data.ob_imbalance === 'string' && data.ob_imbalance.startsWith('{')) {
@@ -302,10 +313,7 @@ function scoreSymbol(symbol) {
 
   const score = Math.round(rawScore * conflictMultiplier);
 
-  // WATCH threshold = minScore - 15 (not a flat 55)
-  // Prevents low-conviction signals on high-threshold symbols (SILVER min=88, OILWTI min=88)
-  const watchThreshold = Math.max(55, minScore - 15);
-  const verdict = score >= minScore ? 'PROCEED' : score >= watchThreshold ? 'WATCH' : 'SKIP';
+  const verdict = score >= minScore ? 'PROCEED' : score >= 55 ? 'WATCH' : 'SKIP';
   const reasoning = buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, data, cfg });
 
   const close = data.close || 0;
@@ -421,13 +429,19 @@ function scoreSymbol(symbol) {
   // Claude exact levels are calculated on-demand via ANALYSE button in dashboard
   // Not fired here to avoid API costs — user triggers manually when needed
 
+  const fxssiStale = hasFxssi && fxssiAge > FXSSI_MAX_AGE_MS;
+  const finalReasoning = fxssiStale
+    ? `⚠ FXSSI stale (${Math.round(fxssiAge/60000)}m) — OB scoring neutral · ` + reasoning
+    : reasoning;
+
   return {
     symbol, label: cfg.label, direction, score, verdict,
     entry: Math.round(entry * 100) / 100,
     sl, tp, rr,
     session: getSessionNow(),
     breakdown: { bias: biasSc, fxssi: fxssiSc, ob: obSc, session: sessionSc },
-    reasoning,
+    reasoning: finalReasoning,
+    fxssiStale: fxssiStale || false,
     ts: Date.now()
   };
 }
@@ -576,22 +590,7 @@ function saveSignal(scored) {
 
   let last = null;
   try {
-    const { getLatestOpenSignal, updateOutcome, getOpenSignals } = require('./db');
-
-    // Hard dedup — if ANY open/active signal exists for this symbol+direction, skip
-    const openSignals = getOpenSignals();
-    const alreadyOpen = openSignals.find(s =>
-      s.symbol === scored.symbol && s.direction === scored.direction
-    );
-    if (alreadyOpen) {
-      // Only proceed if entry is meaningfully different (>0.3% away)
-      const entryDiff = Math.abs((alreadyOpen.entry - scored.entry) / alreadyOpen.entry);
-      if (entryDiff < 0.003) {
-        console.log(`[Scorer] ${scored.symbol} dedup — identical entry already open`);
-        return null;
-      }
-    }
-
+    const { getLatestOpenSignal, updateOutcome } = require('./db');
     last = getLatestOpenSignal(scored.symbol, scored.direction);
   } catch(e) {
     console.error('[Scorer] dedup lookup error:', e.message);
