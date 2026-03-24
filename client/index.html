@@ -792,7 +792,7 @@ function renderCard(sig, isPast=false) {
 
   return `<div class="card ${v.toLowerCase()} ${outcomeClass}" id="card-${sig.id||sig.symbol}">
     <div class="ctop">
-      <div><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span></div>
+      <div style="display:flex;align-items:baseline;gap:8px;"><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--dim);">${new Date(sig.ts).toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) + ' ' + new Date(sig.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span></div>
       <div style="display:flex;align-items:center;gap:6px;">${pastBadge}${refineHtml}${outcomeHtml}${timeAgo?`<span style="font-size:8px;color:var(--muted)">${timeAgo}</span>`:''}<span class="verdict ${vcls}">${v}</span></div>
     </div>
     <div class="sbar"><div class="sbfill ${scls}" style="width:${sig.score||0}%"></div></div>
