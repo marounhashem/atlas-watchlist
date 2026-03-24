@@ -18,21 +18,39 @@ function scoreBias(data) {
   } catch(e) {}
 
   // ── Momentum alignment bonus (v2 Pine only) ───────────────────────────────
-  // momScore (0-100) measures whether momentum is ACCELERATING in bias direction:
-  // RSI trending, MACD accelerating, price accelerating, volume confirming
-  // High momScore = conviction entry. Low momScore = present but weak.
   let momBonus = 0;
   try {
     if (data.raw_payload) {
       const raw3 = JSON.parse(data.raw_payload);
       const mom = raw3.momScore;
       if (mom != null && !isNaN(mom)) {
-        // Scale: 0-30 = no bonus, 30-60 = small bonus, 60-80 = medium, 80+ = strong
         if      (mom >= 80) momBonus = 0.15;
         else if (mom >= 60) momBonus = 0.10;
         else if (mom >= 30) momBonus = 0.05;
-        // Negative momentum against bias direction = penalty
-        else if (mom < 15 && raw >= 3) momBonus = -0.08; // bias strong but momentum weak
+        else if (mom < 15 && raw >= 3) momBonus = -0.08;
+      }
+
+      // ── Confluence bonus ───────────────────────────────────────────────────
+      // Independent sources agreeing = much higher conviction than raw bias alone
+      const cc = raw3.confluenceCount;
+      if (cc != null && !isNaN(cc)) {
+        if      (cc >= 5) momBonus += 0.15;
+        else if (cc >= 4) momBonus += 0.10;
+        else if (cc >= 3) momBonus += 0.05;
+        else if (cc <= 1) momBonus -= 0.08;
+      }
+
+      // ── FVG quality ────────────────────────────────────────────────────────
+      const fvg = raw3.fvg;
+      if (fvg) {
+        const bq = fvg.bullQuality; const brq = fvg.bearQuality;
+        if (bq === 'stale' || brq === 'stale')   momBonus -= 0.06;
+        if (bq === 'fresh' || brq === 'fresh')   momBonus += 0.04;
+      }
+
+      // ── Opening range penalty ──────────────────────────────────────────────
+      if (raw3.isOpeningRange === true || raw3.isOpeningRange === 'true') {
+        momBonus -= 0.04;
       }
     }
   } catch(e) {}
@@ -440,13 +458,25 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
-  // ── Entry price from FXSSI limit wall — volume-weighted buffer ───────────────
-  // Buffer scales inversely with wall volume:
-  //   thick wall (ol≥2.0) → tight buffer (0.05% — enter close, wall likely holds)
-  //   medium wall (ol 1.0-2.0) → standard buffer (0.10%)
-  //   thin wall  (ol<1.0)  → wide buffer (0.20% — wall may break, give more room)
+  // ── Entry price — Pine optimal > FXSSI limit wall > FVG mid > close ─────────
+  // Pine now sends its own calculated optimal pullback entry level
+  // Cross-reference with FXSSI limit wall and pick the level closest to close
   let entry = close;
-  let entrySource = 'price'; // track what drove the entry for reasoning
+  let entrySource = 'price';
+
+  // First check Pine's optimal entry suggestion
+  let pineOptimalEntry = null;
+  try {
+    if (data.raw_payload) {
+      const raw4 = JSON.parse(data.raw_payload);
+      const pe = raw4.entry;
+      if (pe) {
+        pineOptimalEntry = direction === 'LONG' ? pe.longOptimal : pe.shortOptimal;
+        if (pineOptimalEntry) entrySource = `pine_${direction === 'LONG' ? pe.longSource : pe.shortSource}`;
+      }
+    }
+  } catch(e) {}
+
   if (fxssiLevels && close > 0) {
     if (direction === 'SHORT' && fxssiLevels.nearestLimitAbove?.price) {
       const wall    = fxssiLevels.nearestLimitAbove.price;
@@ -454,8 +484,15 @@ function scoreSymbol(symbol) {
       const dist    = wall - close;
       if (dist > 0 && dist < atr * 2) {
         const bufferPct = wallVol >= 2.0 ? 0.0005 : wallVol >= 1.0 ? 0.001 : 0.002;
-        entry       = Math.round((wall - wall * bufferPct) * 10000) / 10000;
-        entrySource = `limit_wall_vol${wallVol.toFixed(1)}`;
+        const fxssiEntry = Math.round((wall - wall * bufferPct) * 10000) / 10000;
+        // Pick the better entry: FXSSI wall vs Pine optimal (closer to close = better fill)
+        if (pineOptimalEntry && pineOptimalEntry > close && Math.abs(pineOptimalEntry - close) < Math.abs(fxssiEntry - close)) {
+          entry = pineOptimalEntry;
+          entrySource = `pine_fvg_vs_wall`;
+        } else {
+          entry = fxssiEntry;
+          entrySource = `limit_wall_vol${wallVol.toFixed(1)}`;
+        }
       }
     } else if (direction === 'LONG' && fxssiLevels.nearestLimitBelow?.price) {
       const wall    = fxssiLevels.nearestLimitBelow.price;
@@ -463,13 +500,25 @@ function scoreSymbol(symbol) {
       const dist    = close - wall;
       if (dist > 0 && dist < atr * 2) {
         const bufferPct = wallVol >= 2.0 ? 0.0005 : wallVol >= 1.0 ? 0.001 : 0.002;
-        entry       = Math.round((wall + wall * bufferPct) * 10000) / 10000;
-        entrySource = `limit_wall_vol${wallVol.toFixed(1)}`;
+        const fxssiEntry = Math.round((wall + wall * bufferPct) * 10000) / 10000;
+        if (pineOptimalEntry && pineOptimalEntry < close && Math.abs(pineOptimalEntry - close) < Math.abs(fxssiEntry - close)) {
+          entry = pineOptimalEntry;
+          entrySource = `pine_fvg_vs_wall`;
+        } else {
+          entry = fxssiEntry;
+          entrySource = `limit_wall_vol${wallVol.toFixed(1)}`;
+        }
       }
     }
   }
+
+  // Fallback: use Pine optimal if no FXSSI wall found
+  if (entry === close && pineOptimalEntry && pineOptimalEntry !== close) {
+    entry = Math.round(pineOptimalEntry * 10000) / 10000;
+  }
+  // Final fallback: FVG mid
   if (entry === close && data.fvg_mid && data.fvg_mid > 0) {
-    entry       = Math.round(data.fvg_mid * 10000) / 10000;
+    entry = Math.round(data.fvg_mid * 10000) / 10000;
     entrySource = 'fvg_mid';
   }
 
@@ -483,8 +532,16 @@ function scoreSymbol(symbol) {
     const atrSl = atr * 1.5 * regimeSlAdj; // regime widens/tightens SL
 
     if (direction === 'LONG') {
-      // ── TP: nearest SL cluster above, winning cluster obstruction check ──────
-      const tpTarget = fxssiLevels.nearestSLAbove?.price || fxssiLevels.gravity?.price;
+      // ── TP: liquidity void above > SL cluster above ───────────────────────
+      let voidAbove = null;
+      try {
+        const raw5 = JSON.parse(data.raw_payload || '{}');
+        if (raw5.liquidity?.voidAbove && raw5.liquidity.voidAbove > close) {
+          voidAbove = raw5.liquidity.voidAbove;
+        }
+      } catch(e) {}
+
+      const tpTarget = voidAbove || fxssiLevels.nearestSLAbove?.price || fxssiLevels.gravity?.price;
 
       // Only use tpTarget if it's actually above close (gravity can be below)
       const validTpTarget = tpTarget && tpTarget > close && (tpTarget - close) > atr * 0.5;
@@ -546,8 +603,16 @@ function scoreSymbol(symbol) {
       if (!tp || tp <= close) tp = Math.round((close + atr * 3.0) * 10000) / 10000;
 
     } else { // SHORT
-      // ── TP: nearest SL cluster below, winning cluster obstruction check ──────
-      const tpTarget = fxssiLevels.nearestSLBelow?.price || fxssiLevels.gravity?.price;
+      // ── TP: liquidity void below > SL cluster below ───────────────────────
+      let voidBelow = null;
+      try {
+        const raw5 = JSON.parse(data.raw_payload || '{}');
+        if (raw5.liquidity?.voidBelow && raw5.liquidity.voidBelow < close) {
+          voidBelow = raw5.liquidity.voidBelow;
+        }
+      } catch(e) {}
+
+      const tpTarget = voidBelow || fxssiLevels.nearestSLBelow?.price || fxssiLevels.gravity?.price;
 
       // Only use tpTarget if it's actually below close
       const validTpTarget = tpTarget && tpTarget < close && (close - tpTarget) > atr * 0.5;
@@ -685,6 +750,18 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
         else if (mom >= 60) parts.push(`Momentum ${mom}% — confirming`);
         else if (mom >= 30) parts.push(`Momentum ${mom}% — moderate`);
         else                parts.push(`⚠ Momentum ${mom}% — weak, bias unconfirmed`);
+      }
+      // Confluence count
+      const cc = parsed.confluenceCount;
+      if (cc != null && !isNaN(cc)) {
+        if      (cc >= 5) parts.push(`✓ Confluence ${cc}/6 — maximum alignment`);
+        else if (cc >= 4) parts.push(`✓ Confluence ${cc}/6 — high conviction`);
+        else if (cc >= 3) parts.push(`Confluence ${cc}/6 — moderate`);
+        else              parts.push(`⚠ Confluence ${cc}/6 — weak, sources disagree`);
+      }
+      // Opening range
+      if (parsed.isOpeningRange === true || parsed.isOpeningRange === 'true') {
+        parts.push(`⚠ Opening range — wider spreads, stronger momentum`);
       }
     }
   } catch(e) {}
