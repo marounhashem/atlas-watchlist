@@ -122,24 +122,15 @@ function initSchema() {
   try { db.run('ALTER TABLE market_data ADD COLUMN fvg_high REAL'); } catch(e) {}
   try { db.run('ALTER TABLE market_data ADD COLUMN fvg_low REAL'); } catch(e) {}
   try { db.run('ALTER TABLE market_data ADD COLUMN fvg_mid REAL'); } catch(e) {}
-  // paper_outcome tracks WATCH signals in simulation — does not affect real win rate
   try { db.run('ALTER TABLE signals ADD COLUMN paper_outcome TEXT DEFAULT NULL'); console.log('[DB] Migration: added paper_outcome column'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN paper_outcome_ts INTEGER DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN fxssi_stale INTEGER DEFAULT 0'); } catch(e) {}
-  // cycle tracks signal generation window — retired signals move to past cycles
-  // cycle = 0 (default) = current cycle, visible on main board
-  // cycle > 0 = retired, visible only in Past Trades tab
-  // outcome stays ACTIVE/WIN/LOSS — cycle is purely a display/dedup flag
+  try { db.run('ALTER TABLE signals ADD COLUMN mfe REAL DEFAULT NULL'); console.log('[DB] Migration: added mfe column'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN mfe_pct REAL DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN cycle INTEGER DEFAULT 0'); console.log('[DB] Migration: added cycle column'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN retired_at INTEGER DEFAULT NULL'); } catch(e) {}
-  // Backfill: existing signals have cycle=NULL — treat as 0 (current cycle)
-  try {
-    const nullCount = db.exec("SELECT COUNT(*) as n FROM signals WHERE cycle IS NULL")[0]?.values?.[0]?.[0] || 0;
-    if (nullCount > 0) {
-      db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL');
-      console.log(`[DB] Migration: backfilled ${nullCount} signals with cycle=0`);
-    }
-  } catch(e) { console.error('[DB] Backfill error:', e.message); }
+  // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
+  try { db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL'); } catch(e) { console.error('[DB] Backfill error:', e.message); }
 
   console.log('[DB] Schema initialised, weights seeded');
 }
