@@ -421,6 +421,9 @@
   .dossier-hint{font-size:10px;color:var(--dim);margin-top:8px;text-align:center;}
 
   /* Toast */
+  .toast-active{background:#ffd740!important;color:#000!important;font-weight:700;border:none;}
+  .toast-win{background:#00c853!important;color:#000!important;font-weight:700;border:none;}
+  .toast-loss{background:#ff1744!important;color:#fff!important;font-weight:700;border:none;}
   .toast{
     position:fixed;bottom:24px;right:24px;
     background:var(--surface2);border:1px solid var(--proceed-border);
@@ -603,6 +606,18 @@ function handleMessage(msg) {
     const s=allSignals.find(x=>x.id===msg.signalId);
     if(s){s.outcome=msg.outcome;s.pnlPct=msg.pnlPct;}
     renderSignals(); fetchStats();
+    // Notify when entry is touched — ACTIVE = real trade now open
+    if (msg.outcome==='ACTIVE') {
+      const sig = allSignals.find(x=>x.id===msg.signalId)||{};
+      const txt = `🔔 ENTRY TOUCHED — ${msg.symbol} ${msg.direction} @ ${sig.entry||''} · Monitoring TP/SL`;
+      showToast(txt, 'active');
+      // Browser notification if tab is not focused
+      if (document.hidden && Notification.permission === 'granted') {
+        new Notification('ATLAS // ENTRY TOUCHED', { body: `${msg.symbol} ${msg.direction} — trade is now ACTIVE`, icon: '/favicon.ico' });
+      }
+    }
+    if (msg.outcome==='WIN') showToast(`✅ WIN — ${msg.symbol} ${msg.direction} +${msg.pnlPct}%`, 'win');
+    if (msg.outcome==='LOSS') showToast(`❌ LOSS — ${msg.symbol} ${msg.direction} ${msg.pnlPct}%`, 'loss');
   } else if (msg.type==='CYCLE_RETIRED') {
     // Fetch fresh past signals after retirement
     fetch('/api/past-signals').then(r=>r.json()).then(data=>{
@@ -770,8 +785,7 @@ function renderCard(sig, isPast=false) {
   const displayV = isActive ? 'ACTIVE' : v;
   const vcls = isActive ? 'vA' : v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
   const scls=isActive?'sbW':v==='PROCEED'?'sbP':v==='WATCH'?'sbW':'sbS';
-  const showAgents  = v==='PROCEED';           // ANALYSE only for PROCEED
-  const showCopyBtn = v==='PROCEED' || v==='WATCH'; // copy button for PROCEED+WATCH
+  const showAgents = v==='PROCEED' || v==='WATCH';
   const pastBadge = isPast ? '<span style="font-size:9px;color:var(--dim);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-right:3px;">PAST</span>' : '';
 
   return `<div class="card ${v.toLowerCase()} ${outcomeClass}" id="card-${sig.id||sig.symbol}">
@@ -795,7 +809,7 @@ function renderCard(sig, isPast=false) {
     <div class="card-actions">
       ${sig.outcome==='ACTIVE'?`<span style="font-size:9px;color:#ffd740;letter-spacing:.5px;">● MONITORING TP/SL</span>`:''}
       ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
-      ${showCopyBtn?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')" title="Copy full trade dossier">⊞</div>`:''}
+      ${showAgents?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')" title="Copy full trade dossier">⊞</div>`:''}
     </div>
     ${showAgents?`<div class="agents-panel" id="agents-${sig.id||sig.symbol}">
       <div class="agent-tabs">
@@ -1255,10 +1269,21 @@ async function fetchMarketStatus() {
   c.innerHTML=entries.map(([sym,s])=>`<div class="mhrow ${s.open?'mhO':'mhC'}"><span class="mhsym">${sym}</span><span class="${s.open?'mhopen':'mhclosed'}">${s.open?'OPEN':s.minutesUntilOpen?s.minutesUntilOpen+'m':'CLOSED'}</span></div>`).join('');
 }
 
-function showToast(msg) {
-  const t=document.createElement('div');t.className='toast';t.textContent=msg;
-  document.body.appendChild(t);setTimeout(()=>t.remove(),5000);
+function showToast(msg, type) {
+  const t=document.createElement('div');
+  t.className='toast'+(type?' toast-'+type:'');
+  t.textContent=msg;
+  document.body.appendChild(t);
+  setTimeout(()=>t.remove(), type==='active'?8000:5000);
 }
+
+// Request browser notification permission on load
+function requestNotificationPermission() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+}
+requestNotificationPermission();
 
 function updateClock() {
   const uae=new Date(Date.now()+4*3600000);
