@@ -6,7 +6,7 @@ const cron = require('node-cron');
 const path = require('path');
 
 const db = require('./db');
-const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome } = db;
+const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome, updatePaperOutcome, getPaperTradeStats } = db;
 const { isMarketOpen, getMarketStatus, minutesUntilOpen } = require('./marketHours');
 const { scoreAllPriority, saveSignal } = require('./scorer');
 const { checkOutcomes } = require('./outcome');
@@ -590,6 +590,80 @@ app.get('/api/status', (req, res) => {
   });
 });
 
+// ── Health check — Pine alert + FXSSI freshness per symbol ───────────────────
+// Flags symbols where no Pine data received >2h during market hours,
+// or FXSSI data is stale. Use this to detect TradingView alert failures.
+app.get('/api/health', (req, res) => {
+  const { isMarketOpen } = require('./marketHours');
+  const db2 = require('./db');
+  const PINE_STALE_MS  = 2 * 60 * 60 * 1000;  // 2 hours
+  const FXSSI_STALE_MS = 30 * 60 * 1000;       // 30 minutes
+
+  const now = Date.now();
+  const symbolHealth = {};
+
+  for (const sym of Object.keys(SYMBOLS)) {
+    const data    = db2.getLatestMarketData(sym);
+    const isOpen  = isMarketOpen(sym);
+    const lastSeen = data?.ts || null;
+    const pineAge  = lastSeen ? (now - lastSeen) : null;
+    const fxssiAge = lastSeen ? (now - lastSeen) : null;
+
+    const pineStale  = isOpen && pineAge != null && pineAge > PINE_STALE_MS;
+    const fxssiStale = data?.fxssi_long_pct != null && fxssiAge != null && fxssiAge > FXSSI_STALE_MS;
+    const noData     = isOpen && !data;
+
+    symbolHealth[sym] = {
+      ok:          !pineStale && !fxssiStale && !noData,
+      marketOpen:  isOpen,
+      lastPineTs:  lastSeen ? new Date(lastSeen).toISOString() : null,
+      pineAgeMin:  pineAge != null ? Math.round(pineAge / 60000) : null,
+      pineStale,
+      fxssiPresent: data?.fxssi_long_pct != null,
+      fxssiAgeMin:  fxssiAge != null ? Math.round(fxssiAge / 60000) : null,
+      fxssiStale,
+      alerts: [
+        ...(noData     ? ['NO_DATA — no Pine alert received yet']          : []),
+        ...(pineStale  ? [`PINE_STALE — last alert ${Math.round(pineAge/60000)}m ago (>${PINE_STALE_MS/60000}m threshold)`] : []),
+        ...(fxssiStale ? [`FXSSI_STALE — order book ${Math.round(fxssiAge/60000)}m old`] : [])
+      ]
+    };
+  }
+
+  const allOk    = Object.values(symbolHealth).every(s => s.ok || !s.marketOpen);
+  const problems = Object.entries(symbolHealth)
+    .filter(([, s]) => !s.ok && s.marketOpen)
+    .map(([sym, s]) => ({ symbol: sym, alerts: s.alerts }));
+
+  // Also fire email check on manual health poll if degraded
+  if (!allOk) {
+    runHealthCheck().catch(e => console.error('[Health] Manual trigger error:', e.message));
+  }
+
+  res.json({
+    status:    allOk ? 'OK' : 'DEGRADED',
+    checkedAt: new Date().toISOString(),
+    problems,
+    symbols:   symbolHealth
+  });
+});
+
+// Paper trade stats — WATCH signal win rate if they had been taken
+app.get('/api/paper-trades', (req, res) => {
+  res.json(getPaperTradeStats());
+});
+
+// Mark a WATCH signal paper outcome manually (if auto-detection missed it)
+app.post('/api/paper-outcome', (req, res) => {
+  const { signalId, paperOutcome } = req.body;
+  if (!signalId || !['WIN', 'LOSS'].includes(paperOutcome)) {
+    return res.status(400).json({ error: 'signalId and paperOutcome (WIN|LOSS) required' });
+  }
+  updatePaperOutcome(signalId, paperOutcome);
+  broadcast({ type: 'PAPER_OUTCOME', signalId, paperOutcome, ts: Date.now() });
+  res.json({ ok: true });
+});
+
 // ── Cron jobs ─────────────────────────────────────────────────────────────────
 // Score all priority symbols every 5 minutes
 cron.schedule('*/5 * * * *', async () => {
@@ -622,7 +696,101 @@ cron.schedule('0 * * * *', async () => {
   await runLearningCycle(broadcast);
 });
 
-// ── Start ─────────────────────────────────────────────────────────────────────
+// ── Health check cron — runs every 30 min, emails if degraded ────────────────
+// Tracks last alert time per symbol to avoid spam (max 1 email per symbol per 2h)
+const healthAlertState = {}; // { symbol: lastAlertTs }
+const HEALTH_ALERT_COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours between alerts per symbol
+
+async function runHealthCheck() {
+  if (!dbReady) return;
+  const { isMarketOpen } = require('./marketHours');
+  const db2 = require('./db');
+  const PINE_STALE_MS  = 2 * 60 * 60 * 1000;
+  const FXSSI_STALE_MS = 30 * 60 * 1000;
+  const now = Date.now();
+
+  const problems = [];
+
+  for (const sym of Object.keys(SYMBOLS)) {
+    if (!isMarketOpen(sym)) continue;
+    const data     = db2.getLatestMarketData(sym);
+    const lastSeen = data?.ts || null;
+    const age      = lastSeen ? (now - lastSeen) : null;
+
+    const alerts = [];
+    if (!data)                                            alerts.push(`NO_DATA — no Pine alert received yet`);
+    else if (age > PINE_STALE_MS)                         alerts.push(`PINE_STALE — last alert ${Math.round(age/60000)}m ago`);
+    if (data?.fxssi_long_pct != null && age > FXSSI_STALE_MS) alerts.push(`FXSSI_STALE — order book ${Math.round(age/60000)}m old`);
+
+    if (alerts.length === 0) {
+      // Clear cooldown when symbol recovers
+      delete healthAlertState[sym];
+      continue;
+    }
+
+    // Cooldown — don't spam, max 1 email per symbol per 2h
+    const lastAlert = healthAlertState[sym] || 0;
+    if (now - lastAlert < HEALTH_ALERT_COOLDOWN_MS) continue;
+
+    problems.push({ symbol: sym, alerts });
+  }
+
+  if (problems.length === 0) return;
+
+  // Send one combined email for all degraded symbols
+  const subject = `⚠ ATLAS//WATCHLIST DEGRADED — ${problems.map(p => p.symbol).join(', ')}`;
+  const body = [
+    `ATLAS//WATCHLIST health alert — ${new Date().toUTCString()}`,
+    ``,
+    `${problems.length} symbol(s) need attention:`,
+    ``,
+    ...problems.map(p => [
+      `${p.symbol}:`,
+      ...p.alerts.map(a => `  • ${a}`)
+    ].join('\n')),
+    ``,
+    `Actions:`,
+    `  • Check TradingView alerts are still active`,
+    `  • Verify Pine Script indicator is on all 6 charts`,
+    `  • Check FXSSI token is valid: ${process.env.ATLAS_URL || 'https://atlas-watchlist-production.up.railway.app'}/api/fxssi-test`,
+    `  • Force FXSSI scrape: ${process.env.ATLAS_URL || 'https://atlas-watchlist-production.up.railway.app'}/api/fxssi-force`,
+    `  • Full health status: ${process.env.ATLAS_URL || 'https://atlas-watchlist-production.up.railway.app'}/api/health`,
+  ].join('\n');
+
+  try {
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: false, // TLS via STARTTLS
+      auth: {
+        user: process.env.SMTP_USER, // your Gmail address
+        pass: process.env.SMTP_PASS  // Gmail App Password (not your login password)
+      }
+    });
+
+    await transporter.sendMail({
+      from: `"ATLAS//WATCHLIST" <${process.env.SMTP_USER}>`,
+      to: 'marounhashem@gmail.com',
+      subject,
+      text: body
+    });
+
+    console.log(`[Health] Alert email sent — ${problems.map(p => p.symbol).join(', ')}`);
+
+    // Mark alert sent for all affected symbols
+    for (const p of problems) {
+      healthAlertState[p.symbol] = now;
+    }
+  } catch (e) {
+    console.error('[Health] Email send error:', e.message);
+  }
+}
+
+// Run health check every 30 minutes
+cron.schedule('*/30 * * * *', () => {
+  runHealthCheck().catch(e => console.error('[Health] Cron error:', e.message));
+});
 // Listen FIRST so healthcheck passes, then init DB in background
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
