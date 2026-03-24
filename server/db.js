@@ -267,6 +267,13 @@ function insertLearningLog(entry) {
 // Get latest signal for current cycle only — retired signals invisible to dedup
 // Get latest signal for current cycle only — retired signals invisible to dedup
 function getLatestOpenSignal(symbol, direction) {
+  // Block new signals if ACTIVE already exists for this symbol+direction
+  // Can't take two concurrent trades on the same instrument
+  const active = get(
+    "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0) ORDER BY ts DESC LIMIT 1",
+    [symbol, direction]
+  );
+  if (active) return active;
   return get(
     "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='OPEN' AND (cycle IS NULL OR cycle=0) ORDER BY ts DESC LIMIT 1",
     [symbol, direction]
@@ -317,14 +324,35 @@ function mergeSignals(keepId, absorbId) {
 function retireActiveCycle(symbol) {
   const now = Date.now();
 
-  // Only ACTIVE signals (entry touched) are candidates for merging
+  // Only ACTIVE signals (entry touched) are candidates
   const retiring = all(
-    "SELECT * FROM signals WHERE symbol=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0)",
+    "SELECT * FROM signals WHERE symbol=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0) ORDER BY ts ASC",
     [symbol]
   );
   if (retiring.length === 0) return 0;
 
-  // Past ACTIVE signals still monitoring TP/SL
+  // ── Step 1: Merge same-cycle duplicates first ─────────────────────────────
+  // Two ACTIVE signals in the same cycle = same trade fired twice 5min apart
+  // Keep the oldest (first entry), absorb the newer one
+  const dedupedRetiring = [];
+  const absorbedIds = new Set();
+
+  for (let i = 0; i < retiring.length; i++) {
+    if (absorbedIds.has(retiring[i].id)) continue;
+    let kept = retiring[i];
+    for (let j = i + 1; j < retiring.length; j++) {
+      if (absorbedIds.has(retiring[j].id)) continue;
+      if (retiring[j].direction !== kept.direction) continue;
+      if (!entriesWithinPct(kept.entry, retiring[j].entry, 1.0)) continue;
+      // Same direction, within 1% — merge newer into older
+      mergeSignals(kept.id, retiring[j].id);
+      absorbedIds.add(retiring[j].id);
+      console.log(`[DB] ${symbol} same-cycle merge: absorbed signal ${retiring[j].id} into ${kept.id}`);
+    }
+    dedupedRetiring.push(kept);
+  }
+
+  // ── Step 2: Check against already-retired past ACTIVE signals ─────────────
   const monitoring = all(
     "SELECT * FROM signals WHERE symbol=? AND outcome='ACTIVE' AND (cycle IS NOT NULL AND cycle>0)",
     [symbol]
@@ -333,26 +361,20 @@ function retireActiveCycle(symbol) {
   let merged = 0;
   const toRetire = [];
 
-  for (const ret of retiring) {
+  for (const ret of dedupedRetiring) {
     let mergedThis = false;
-
-    // Only merge if both signals had entry touched (both ACTIVE)
     for (const mon of monitoring) {
       if (ret.direction !== mon.direction) continue;
       if (!entriesWithinPct(ret.entry, mon.entry, 1.0)) continue;
-
       mergeSignals(mon.id, ret.id);
       merged++;
       mergedThis = true;
       break;
     }
-
-    if (!mergedThis) {
-      toRetire.push(ret.id);
-    }
+    if (!mergedThis) toRetire.push(ret.id);
   }
 
-  // Retire non-merged ACTIVE signals to past cycle
+  // ── Step 3: Retire what's left ────────────────────────────────────────────
   if (toRetire.length > 0) {
     const placeholders = toRetire.map(() => '?').join(',');
     run(
@@ -363,10 +385,11 @@ function retireActiveCycle(symbol) {
 
   persist();
   const retired = toRetire.length;
-  if (retired > 0 || merged > 0) {
-    console.log(`[DB] ${symbol} — retired: ${retired}, merged: ${merged}`);
+  const sameCycleMerged = absorbedIds.size;
+  if (retired > 0 || merged > 0 || sameCycleMerged > 0) {
+    console.log(`[DB] ${symbol} — retired: ${retired}, cross-cycle merged: ${merged}, same-cycle merged: ${sameCycleMerged}`);
   }
-  return retired + merged;
+  return retired + merged + sameCycleMerged;
 }
 
 // Get all signals for current cycle (main board)
