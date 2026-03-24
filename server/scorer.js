@@ -407,41 +407,8 @@ function scoreSymbol(symbol) {
     entry = Math.round((entry + atr * claudeOpt.entry_bias) * 10000) / 10000;
   }
 
-  // ── Ask Claude for exact levels (async, high conviction only) ─────────────
-  // Runs in background — result used on NEXT scoring cycle for this symbol
-  if (score >= 65 && fxssiLevels) {
-    try {
-      const { calculateExactLevels } = require('./claudeLearner');
-      calculateExactLevels(symbol, direction, data, fxssiLevels).then(levels => {
-        if (levels?.confidence >= 70 && levels.entry && levels.sl && levels.tp) {
-          const testRR = calcRR(levels.entry, levels.sl, levels.tp, direction);
-          if (testRR >= 1.5 && testRR <= 4.0) {
-            // Cache for next cycle
-            if (!global._claudeLevelCache) global._claudeLevelCache = {};
-            global._claudeLevelCache[symbol] = { ...levels, direction, ts: Date.now() };
-            console.log(`[Scorer] Claude levels cached for ${symbol}: entry=${levels.entry} sl=${levels.sl} tp=${levels.tp} R:R=${testRR}`);
-          }
-        }
-      }).catch(() => {});
-    } catch(e) {}
-  }
-
-  // Use cached Claude levels if fresh (< 6 minutes) and direction matches
-  if (global._claudeLevelCache?.[symbol]) {
-    const cached = global._claudeLevelCache[symbol];
-    const age = (Date.now() - cached.ts) / 60000;
-    if (age < 6 && cached.direction === direction &&
-        cached.confidence >= 70 && cached.entry && cached.sl && cached.tp) {
-      const cachedRR = calcRR(cached.entry, cached.sl, cached.tp, direction);
-      if (cachedRR >= 1.5 && cachedRR <= 4.0) {
-        entry = cached.entry;
-        sl    = cached.sl;
-        tp    = cached.tp;
-        rr    = cachedRR;
-        console.log(`[Scorer] ${symbol} using cached Claude levels (${Math.round(age*10)/10}m old)`);
-      }
-    }
-  }
+  // Claude exact levels are calculated on-demand via ANALYSE button in dashboard
+  // Not fired here to avoid API costs — user triggers manually when needed
 
   return {
     symbol, label: cfg.label, direction, score, verdict,
