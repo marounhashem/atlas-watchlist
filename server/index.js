@@ -771,6 +771,10 @@ app.post('/api/paper-outcome', (req, res) => {
 // ── Cron jobs ─────────────────────────────────────────────────────────────────
 // Score all priority symbols every 5 minutes
 cron.schedule('*/5 * * * *', async () => {
+  if (!dbReady) return;
+  const { isMarketOpen } = require('./marketHours');
+  const anyOpen = Object.keys(SYMBOLS).some(s => isMarketOpen(s));
+  if (!anyOpen) return; // skip entirely outside market hours
   console.log('[Cron] Running 5m scoring cycle...');
   const results = await scoreAllPriority();
   const proceeds = results.filter(r => r.verdict === 'PROCEED');
@@ -794,6 +798,20 @@ cron.schedule('2,7,12,17,22,27,32,37,42,47,52,57 * * * *', () => {
   checkOutcomes(broadcast);
 });
 
+// FXSSI auto-scrape — fires at :01/:21/:41 every hour during market hours
+// This is the core data feed for order book scoring — must run automatically
+cron.schedule('1,21,41 * * * *', async () => {
+  if (!dbReady) return;
+  const { isMarketOpen } = require('./marketHours');
+  const anyOpen = Object.keys(SYMBOLS).some(s => isMarketOpen(s));
+  if (!anyOpen) return;
+  try {
+    await runFXSSIScrape(broadcast);
+  } catch(e) {
+    console.error('[FXSSI Cron] Error:', e.message);
+  }
+});
+
 // Retirement cron — fires at :02/:22/:42 (aligned with FXSSI scrape at :01/:21/:41)
 // FXSSI scrapes first, then 1 minute later we retire ACTIVE signals
 // Fresh FXSSI data is now in DB when new signals start scoring
@@ -805,6 +823,15 @@ cron.schedule('2,22,42 * * * *', async () => {
 // Minimum 30 closed trades per symbol + 30 new outcomes since last cycle + 6h gap
 cron.schedule('0 * * * *', async () => {
   await runLearningCycle(broadcast);
+  // Entry level optimisation — runs after learning cycle for each symbol with data
+  const { isMarketOpen } = require('./marketHours');
+  for (const symbol of Object.keys(SYMBOLS)) {
+    if (isMarketOpen(symbol)) {
+      claudeLearner.optimiseEntryLevels(symbol).catch(e =>
+        console.error(`[Claude] optimiseEntryLevels ${symbol}:`, e.message)
+      );
+    }
+  }
 });
 
 // Daily session summary — fires at 17:00 UTC (end of London session)

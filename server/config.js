@@ -69,9 +69,10 @@ const SYMBOLS = {
 
 function getSessionNow() {
   const uaeHour = new Date(Date.now() + 4 * 3600000).getUTCHours();
-  if (uaeHour >= 2 && uaeHour < 10) return 'asia';
-  if (uaeHour >= 11 && uaeHour < 19) return 'london';
+  // NewYork checked first — takes priority during overlap (17:00-19:00 UAE)
   if (uaeHour >= 17 && uaeHour < 25) return 'newYork';
+  if (uaeHour >= 11 && uaeHour < 19) return 'london';
+  if (uaeHour >= 2  && uaeHour < 10) return 'asia';
   return 'offHours';
 }
 

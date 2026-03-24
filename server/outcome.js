@@ -105,21 +105,28 @@ function checkOutcomes(broadcast) {
     }
 
     // ── WATCH paper trade tracking ────────────────────────────────────────────
-    // WATCH signals are never traded but we track where price would have gone
-    // This feeds the learner to evaluate if lowering min_score would help
+    // Only track paper outcome if entry was actually touched first
+    // Otherwise we're measuring signals that were never realistically enterable
     if (sig.verdict === 'WATCH' && !sig.paper_outcome && entry && sl && tp) {
-      let paperOutcome = null;
-      if (direction === 'LONG') {
-        if (price >= tp) paperOutcome = 'WIN';
-        else if (price <= sl) paperOutcome = 'LOSS';
-      } else {
-        if (price <= tp) paperOutcome = 'WIN';
-        else if (price >= sl) paperOutcome = 'LOSS';
-      }
-      if (paperOutcome) {
-        updatePaperOutcome(id, paperOutcome);
-        console.log(`[Outcome] ${sig.symbol} ${direction} WATCH → paper ${paperOutcome}`);
-        if (broadcast) broadcast({ type: 'PAPER_OUTCOME', signalId: id, symbol: sig.symbol, direction, paperOutcome, ts: Date.now() });
+      // Check entry was touched (same tolerance as real entry detection)
+      const watchEntryTouched = direction === 'LONG'
+        ? price <= entry + tolerance
+        : price >= entry - tolerance;
+
+      if (watchEntryTouched) {
+        let paperOutcome = null;
+        if (direction === 'LONG') {
+          if (price >= tp) paperOutcome = 'WIN';
+          else if (price <= sl) paperOutcome = 'LOSS';
+        } else {
+          if (price <= tp) paperOutcome = 'WIN';
+          else if (price >= sl) paperOutcome = 'LOSS';
+        }
+        if (paperOutcome) {
+          updatePaperOutcome(id, paperOutcome);
+          console.log(`[Outcome] ${sig.symbol} ${direction} WATCH → paper ${paperOutcome}`);
+          if (broadcast) broadcast({ type: 'PAPER_OUTCOME', signalId: id, symbol: sig.symbol, direction, paperOutcome, ts: Date.now() });
+        }
       }
     }
   }

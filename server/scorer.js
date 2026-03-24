@@ -199,9 +199,12 @@ function scoreSession(symbol) {
 
 function inferDirection(data) {
   if (!data) return null;
-  const bias = data.bias || 0;
-  if (bias > 0) return 'LONG';
-  if (bias < 0) return 'SHORT';
+  // Use bias_score (full composite -8 to +8) not raw bias (+/-1)
+  // Require minimum ±2 threshold — neutral bias = no signal
+  const score = data.bias_score || data.bias || 0;
+  if (score >= 2)  return 'LONG';
+  if (score <= -2) return 'SHORT';
+  // Fallback to structure if bias is weak
   if (data.structure === 'bullish') return 'LONG';
   if (data.structure === 'bearish') return 'SHORT';
   return null;
@@ -240,14 +243,24 @@ function scoreSymbol(symbol) {
   if (!cfg) return null;
 
   // ── FXSSI staleness gate ───────────────────────────────────────────────────
-  // Reject scoring if FXSSI data is older than 30 minutes — stale order book
-  // produces misleading signals, especially after Railway restarts
-  const fxssiAge = data.ts ? (Date.now() - data.ts) : Infinity;
+  // Use snapshotTime from fxssi_analysis — NOT data.ts which is Pine's timestamp
+  // Pine fires every bar close so data.ts is always fresh even if FXSSI is hours old
+  let fxssiAge = Infinity;
+  try {
+    if (data.fxssi_analysis) {
+      const fa = typeof data.fxssi_analysis === 'string'
+        ? JSON.parse(data.fxssi_analysis)
+        : data.fxssi_analysis;
+      if (fa?.snapshotTime) fxssiAge = Date.now() - fa.snapshotTime;
+    }
+  } catch(e) {}
+  // Fallback: if no snapshotTime, use data.ts as rough estimate
+  if (fxssiAge === Infinity && data.ts) fxssiAge = Date.now() - data.ts;
+
   const hasFxssi = data.fxssi_long_pct != null;
   if (hasFxssi && fxssiAge > FXSSI_MAX_AGE_MS) {
     const ageMin = Math.round(fxssiAge / 60000);
     console.log(`[Scorer] ${symbol} — FXSSI data stale (${ageMin}m old), scoring without order book`);
-    // Nullify FXSSI fields so scoreFXSSI and scoreOrderBook fall back to neutral
     data = { ...data,
       fxssi_long_pct: null, fxssi_short_pct: null,
       fxssi_trapped: null, ob_absorption: 0,
