@@ -770,7 +770,8 @@ function renderCard(sig, isPast=false) {
   const displayV = isActive ? 'ACTIVE' : v;
   const vcls = isActive ? 'vA' : v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
   const scls=isActive?'sbW':v==='PROCEED'?'sbP':v==='WATCH'?'sbW':'sbS';
-  const showAgents = v==='PROCEED' || v==='WATCH';
+  const showAgents  = v==='PROCEED';           // ANALYSE only for PROCEED
+  const showCopyBtn = v==='PROCEED' || v==='WATCH'; // copy button for PROCEED+WATCH
   const pastBadge = isPast ? '<span style="font-size:9px;color:var(--dim);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-right:3px;">PAST</span>' : '';
 
   return `<div class="card ${v.toLowerCase()} ${outcomeClass}" id="card-${sig.id||sig.symbol}">
@@ -794,7 +795,7 @@ function renderCard(sig, isPast=false) {
     <div class="card-actions">
       ${sig.outcome==='ACTIVE'?`<span style="font-size:9px;color:#ffd740;letter-spacing:.5px;">● MONITORING TP/SL</span>`:''}
       ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
-      ${showAgents?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')" title="Copy full trade dossier">⊞</div>`:''}
+      ${showCopyBtn?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')" title="Copy full trade dossier">⊞</div>`:''}
     </div>
     ${showAgents?`<div class="agents-panel" id="agents-${sig.id||sig.symbol}">
       <div class="agent-tabs">
