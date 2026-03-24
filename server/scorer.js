@@ -374,30 +374,38 @@ function scoreSymbol(symbol) {
     const atrSl = atr * 1.5;
 
     if (direction === 'LONG') {
-      // ── TP: nearest SL cluster above, but check for winning cluster obstruction ──
+      // ── TP: nearest SL cluster above, winning cluster obstruction check ──────
       const tpTarget = fxssiLevels.nearestSLAbove?.price || fxssiLevels.gravity?.price;
 
-      // Find winning clusters between price and TP target — these are reversal risks
-      const winningObstacles = tpTarget
-        ? (fxssiLevels.winningClusters || []).filter(c => c.price > close && c.price < tpTarget)
-            .sort((a, b) => a.price - b.price)
-        : [];
+      // Only use tpTarget if it's actually above close (gravity can be below)
+      const validTpTarget = tpTarget && tpTarget > close && (tpTarget - close) > atr * 0.5;
 
-      if (winningObstacles.length > 0) {
-        const obstacle     = winningObstacles[0];
-        const moveToTarget = tpTarget ? tpTarget - close : 0;
-        const moveToBlock  = obstacle.price - close;
-        const blockPct     = moveToTarget > 0 ? moveToBlock / moveToTarget : 1;
+      if (validTpTarget) {
+        // Find winning clusters strictly between close and tpTarget
+        const winningObstacles = (fxssiLevels.winningClusters || [])
+          .filter(c => c.price > close && c.price < tpTarget)
+          .sort((a, b) => a.price - b.price);
 
-        if (blockPct < 0.4) {
-          // Obstacle very close — skip TP target entirely, use ATR fallback
-          tp = Math.round((close + atr * 3.0) * 10000) / 10000;
+        if (winningObstacles.length > 0) {
+          const obstacle    = winningObstacles[0];
+          const moveToTarget = tpTarget - close;
+          const moveToBlock  = obstacle.price - close;
+          const blockPct     = moveToBlock / moveToTarget;
+
+          if (blockPct < 0.25) {
+            // Obstacle within 25% of move — very close to entry, use ATR fallback
+            tp = Math.round((close + atr * 3.0) * 10000) / 10000;
+          } else {
+            // Trim TP to just before obstacle
+            const trimmedTp = Math.round((obstacle.price - atr * 0.2) * 10000) / 10000;
+            // Only accept trim if it still gives R:R >= 1.8 vs our SL estimate
+            const estimatedSlDist = atr * 1.5;
+            const trimmedRR = (trimmedTp - close) / estimatedSlDist;
+            tp = trimmedRR >= 1.8 ? trimmedTp : Math.round(tpTarget * 10000) / 10000;
+          }
         } else {
-          // Obstacle past 40% of move — set TP just before it (leave 0.2 ATR gap)
-          tp = Math.round((obstacle.price - atr * 0.2) * 10000) / 10000;
+          tp = Math.round(tpTarget * 10000) / 10000;
         }
-      } else if (tpTarget && tpTarget > close && (tpTarget - close) > atr * 0.5) {
-        tp = Math.round(tpTarget * 10000) / 10000;
       } else {
         tp = Math.round((close + atr * 3.0) * 10000) / 10000;
       }
@@ -408,49 +416,55 @@ function scoreSymbol(symbol) {
         .sort((a, b) => b.price - a.price); // nearest first
 
       if (losingClustersBelow.length >= 2) {
-        // Place SL between cluster[0] and cluster[1] — beyond the sweep zone
         const nearCluster = losingClustersBelow[0];
         const farCluster  = losingClustersBelow[1];
         const gap         = nearCluster.price - farCluster.price;
         sl = Math.round((nearCluster.price - gap * 0.5) * 10000) / 10000;
       } else if (losingClustersBelow.length === 1) {
         const cluster = losingClustersBelow[0];
-        if (cluster.price > close - atrSl * 2) {
-          // Only one cluster — go 0.3 ATR past it as before
-          sl = Math.round((cluster.price - atr * 0.3) * 10000) / 10000;
-        } else {
-          sl = Math.round((close - atrSl) * 10000) / 10000;
-        }
+        sl = cluster.price > close - atrSl * 2
+          ? Math.round((cluster.price - atr * 0.3) * 10000) / 10000
+          : Math.round((close - atrSl) * 10000) / 10000;
       } else {
-        // No losing clusters — fall back to limit wall or ATR
         const limitBelow = fxssiLevels.nearestLimitBelow?.price;
         sl = (limitBelow && limitBelow > close - atrSl * 2)
           ? Math.round((limitBelow - atr * 0.5) * 10000) / 10000
           : Math.round((close - atrSl) * 10000) / 10000;
       }
 
+      // Final safety — sl must be below close, tp must be above close
+      if (!sl || sl >= close) sl = Math.round((close - atrSl) * 10000) / 10000;
+      if (!tp || tp <= close) tp = Math.round((close + atr * 3.0) * 10000) / 10000;
+
     } else { // SHORT
-      // ── TP: nearest SL cluster below, check for winning cluster obstruction ──
+      // ── TP: nearest SL cluster below, winning cluster obstruction check ──────
       const tpTarget = fxssiLevels.nearestSLBelow?.price || fxssiLevels.gravity?.price;
 
-      const winningObstacles = tpTarget
-        ? (fxssiLevels.winningClusters || []).filter(c => c.price < close && c.price > tpTarget)
-            .sort((a, b) => b.price - a.price)
-        : [];
+      // Only use tpTarget if it's actually below close
+      const validTpTarget = tpTarget && tpTarget < close && (close - tpTarget) > atr * 0.5;
 
-      if (winningObstacles.length > 0) {
-        const obstacle     = winningObstacles[0];
-        const moveToTarget = tpTarget ? close - tpTarget : 0;
-        const moveToBlock  = close - obstacle.price;
-        const blockPct     = moveToTarget > 0 ? moveToBlock / moveToTarget : 1;
+      if (validTpTarget) {
+        const winningObstacles = (fxssiLevels.winningClusters || [])
+          .filter(c => c.price < close && c.price > tpTarget)
+          .sort((a, b) => b.price - a.price);
 
-        if (blockPct < 0.4) {
-          tp = Math.round((close - atr * 3.0) * 10000) / 10000;
+        if (winningObstacles.length > 0) {
+          const obstacle     = winningObstacles[0];
+          const moveToTarget = close - tpTarget;
+          const moveToBlock  = close - obstacle.price;
+          const blockPct     = moveToBlock / moveToTarget;
+
+          if (blockPct < 0.25) {
+            tp = Math.round((close - atr * 3.0) * 10000) / 10000;
+          } else {
+            const trimmedTp = Math.round((obstacle.price + atr * 0.2) * 10000) / 10000;
+            const estimatedSlDist = atr * 1.5;
+            const trimmedRR = (close - trimmedTp) / estimatedSlDist;
+            tp = trimmedRR >= 1.8 ? trimmedTp : Math.round(tpTarget * 10000) / 10000;
+          }
         } else {
-          tp = Math.round((obstacle.price + atr * 0.2) * 10000) / 10000;
+          tp = Math.round(tpTarget * 10000) / 10000;
         }
-      } else if (tpTarget && tpTarget < close && (close - tpTarget) > atr * 0.5) {
-        tp = Math.round(tpTarget * 10000) / 10000;
       } else {
         tp = Math.round((close - atr * 3.0) * 10000) / 10000;
       }
@@ -467,17 +481,19 @@ function scoreSymbol(symbol) {
         sl = Math.round((nearCluster.price + gap * 0.5) * 10000) / 10000;
       } else if (losingClustersAbove.length === 1) {
         const cluster = losingClustersAbove[0];
-        if (cluster.price < close + atrSl * 2) {
-          sl = Math.round((cluster.price + atr * 0.3) * 10000) / 10000;
-        } else {
-          sl = Math.round((close + atrSl) * 10000) / 10000;
-        }
+        sl = cluster.price < close + atrSl * 2
+          ? Math.round((cluster.price + atr * 0.3) * 10000) / 10000
+          : Math.round((close + atrSl) * 10000) / 10000;
       } else {
         const limitAbove = fxssiLevels.nearestLimitAbove?.price;
         sl = (limitAbove && limitAbove < close + atrSl * 2)
           ? Math.round((limitAbove + atr * 0.5) * 10000) / 10000
           : Math.round((close + atrSl) * 10000) / 10000;
       }
+
+      // Final safety — sl must be above close, tp must be below close
+      if (!sl || sl <= close) sl = Math.round((close + atrSl) * 10000) / 10000;
+      if (!tp || tp >= close) tp = Math.round((close - atr * 3.0) * 10000) / 10000;
     }
   } else {
     // No FXSSI levels — pure ATR fallback
