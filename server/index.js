@@ -254,36 +254,32 @@ app.get('/api/signals', (req, res) => {
   res.json(db.getAllSignals(100));
 });
 
-// Debug endpoint — shows exactly what is in the DB
-app.get('/api/debug', (req, res) => {
-  if (!dbReady) return res.json({ error: 'DB not ready' });
+// EMERGENCY: reset all signal cycles back to 0 so they reappear on main board
+app.post('/api/reset-cycles', (req, res) => {
   try {
-    const all        = db.getAllSignals(200);
-    const open       = db.getOpenSignals();
-    const cycleSigs  = db.getCurrentCycleSignals(100);
-    const outcomes   = {};
-    for (const s of all) outcomes[s.outcome] = (outcomes[s.outcome]||0) + 1;
-    const cycles     = {};
-    for (const s of all) {
-      const c = s.cycle === null ? 'NULL' : String(s.cycle === 0 ? '0' : 'retired');
-      cycles[c] = (cycles[c]||0) + 1;
-    }
-    res.json({
-      dbReady,
-      totalSignals:       all.length,
-      openActive:         open.length,
-      currentCycle:       cycleSigs.length,
-      outcomeBreakdown:   outcomes,
-      cycleBreakdown:     cycles,
-      latestSignal:       all[0] || null,
-      sampleSignals:      all.slice(0,3).map(s=>({
-        id: s.id, symbol: s.symbol, outcome: s.outcome,
-        verdict: s.verdict, cycle: s.cycle, ts: new Date(s.ts).toISOString()
-      }))
-    });
+    db.run('UPDATE signals SET cycle=0, retired_at=NULL');
+    db.persist();
+    const count = db.getAllSignals(200).length;
+    res.json({ ok: true, message: `Reset cycle=0 on all signals`, count });
   } catch(e) {
     res.json({ error: e.message });
   }
+});
+
+// Debug: show DB state
+app.get('/api/debug', (req, res) => {
+  if (!dbReady) return res.json({ error: 'DB not ready' });
+  try {
+    const all = db.getAllSignals(200);
+    const outcomes = {}, cycles = {};
+    for (const s of all) {
+      outcomes[s.outcome] = (outcomes[s.outcome]||0) + 1;
+      const c = s.cycle == null ? 'NULL' : s.cycle === 0 ? '0(current)' : 'retired';
+      cycles[c] = (cycles[c]||0) + 1;
+    }
+    res.json({ dbReady, totalSignals: all.length, outcomes, cycles,
+      sample: all.slice(0,5).map(s=>({ id:s.id, symbol:s.symbol, outcome:s.outcome, verdict:s.verdict, cycle:s.cycle })) });
+  } catch(e) { res.json({ error: e.message }); }
 });
 
 app.get('/api/past-signals', (req, res) => {
@@ -389,6 +385,36 @@ app.post('/api/reset-data', (req, res) => {
     db.run('DELETE FROM learning_log');
     console.log('[Reset] Signals, market data and learning log cleared');
     res.json({ ok: true, message: 'Signals, market data and learning log cleared. Weights preserved.' });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Full reset — wipes everything including weights, reseeds from config defaults
+// Use this when changing weight schema or starting completely fresh
+app.post('/api/reset-all', (req, res) => {
+  try {
+    const db = require('./db');
+    const { SYMBOLS } = require('./config');
+
+    db.run('DELETE FROM signals');
+    db.run('DELETE FROM market_data');
+    db.run('DELETE FROM learning_log');
+    db.run('DELETE FROM weights');
+
+    // Reseed weights from current config defaults
+    for (const [sym, cfg] of Object.entries(SYMBOLS)) {
+      const w = cfg.scoringWeights;
+      db.run(
+        `INSERT INTO weights (symbol,ts,pine,fxssi,session,min_score_proceed,entry_fxssi_weight,sl_fxssi_weight,tp_fxssi_weight)
+         VALUES (?,?,?,?,?,?,?,?,?)`,
+        [sym, Date.now(), w.pine, w.fxssi, w.session, cfg.minScoreProceed, 0.50, 0.50, 0.50]
+      );
+    }
+
+    db.persist();
+    console.log('[Reset] Full reset complete — all data wiped, weights reseeded from config');
+    res.json({ ok: true, message: 'Full reset complete. All signals, market data, learning log and weights cleared. Weights reseeded from config defaults.' });
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
