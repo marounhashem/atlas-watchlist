@@ -382,6 +382,21 @@ app.get('/api/fxssi-fetch', async (req, res) => {
 });
 
 // Reset — wipe signals and market data, keep weights and schema
+// Signals-only reset — clears trades but preserves market data (Pine + FXSSI)
+// Use this when you want a clean slate without losing live order book data
+app.post('/api/reset-signals', (req, res) => {
+  try {
+    const db = require('./db');
+    db.run('DELETE FROM signals');
+    db.run('DELETE FROM learning_log');
+    db.persist();
+    console.log('[Reset] Signals and learning log cleared — market data preserved');
+    res.json({ ok: true, message: 'Signals cleared. Market data and weights preserved.' });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/reset-data', (req, res) => {
   try {
     const db = require('./db');
