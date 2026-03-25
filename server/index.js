@@ -211,7 +211,12 @@ app.post('/webhook/pine', (req, res) => {
     // v2 fields stored in raw_payload via JSON merge
     rawExtra: {
       momScore,
-      sr: { swingH1: data.sr?.swingH1, swingH2: data.sr?.swingH2,
+      structure: data.structure && typeof data.structure === 'object' ? data.structure : null,
+      rsi:       data.rsi       && typeof data.rsi       === 'object' ? data.rsi       : null,
+      rangeHigh: data.rangeHigh || null,
+      rangeLow:  data.rangeLow  || null,
+      sr: { resistance: data.sr?.resistance, support: data.sr?.support,
+            swingH1: data.sr?.swingH1, swingH2: data.sr?.swingH2,
             swingL1: data.sr?.swingL1, swingL2: data.sr?.swingL2 },
       atr: data.atr || atr1h,
       vwap: { mid: vwap, upper1: data.vwap?.upper1, lower1: data.vwap?.lower1,
@@ -524,8 +529,9 @@ app.get('/api/extract', async (req, res) => {
 app.get('/api/fxssi-force', async (req, res) => {
   try {
     const { runFXSSIScrape } = require('./fxssiScraper');
+    // Temporarily override shouldFetch
     process.env.FXSSI_FORCE = '1';
-    await runFXSSIScrape(broadcast, true); // forceWrite=true bypasses isNewData check
+    await runFXSSIScrape(null);
     process.env.FXSSI_FORCE = '';
     res.json({ ok: true, message: 'Scrape triggered — check /api/fxssi-status' });
   } catch(e) {
