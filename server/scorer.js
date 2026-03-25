@@ -818,33 +818,29 @@ function scoreSymbol(symbol) {
     if (pineSl) sl = Math.round((sl * slFxssiW + pineSl * (1 - slFxssiW)) * 10000) / 10000;
     if (pineTp) tp = Math.round((tp * tpFxssiW + pineTp * (1 - tpFxssiW)) * 10000) / 10000;
 
-    // ── TP cap at HTF resistance/support ──────────────────────────────────────
-    // Don't set TP beyond the nearest significant S/R level — price won't pass it cleanly
-    // Use Pine's nearestResistance/nearestSupport and rangeHigh/rangeLow
+    // ── TP cap at nearest swing S/R only ─────────────────────────────────────
+    // Only cap at a real swing level — not rangeHigh/rangeLow (20-bar range is too tight)
+    // FXSSI cluster targets can legitimately be beyond a 20-bar range
     try {
       const raw6 = JSON.parse(data.raw_payload || '{}');
       const sr   = raw6.sr || {};
       if (direction === 'LONG' && tp) {
-        // Cap TP at nearest resistance (leave small buffer)
         const res = sr.resistance;
-        const rHi = raw6.rangeHigh;
-        let cap = null;
-        if (res && res > entry && res < tp) cap = Math.round((res - atr * 0.3) * 10000) / 10000;
-        if (rHi && rHi > entry && rHi < tp && (!cap || rHi < cap)) cap = Math.round((rHi - atr * 0.2) * 10000) / 10000;
-        if (cap && cap > entry) {
-          tp = cap;
-          console.log(`[Scorer] ${symbol} LONG TP capped at resistance ${cap}`);
+        if (res && res > entry && res < tp) {
+          const cap = Math.round((res - atr * 0.3) * 10000) / 10000;
+          if (cap > entry) {
+            tp = cap;
+            console.log(`[Scorer] ${symbol} LONG TP capped at swing resistance ${cap}`);
+          }
         }
       } else if (direction === 'SHORT' && tp) {
-        // Cap TP at nearest support (leave small buffer)
         const sup = sr.support;
-        const rLo = raw6.rangeLow;
-        let cap = null;
-        if (sup && sup < entry && sup > tp) cap = Math.round((sup + atr * 0.3) * 10000) / 10000;
-        if (rLo && rLo < entry && rLo > tp && (!cap || rLo > cap)) cap = Math.round((rLo + atr * 0.2) * 10000) / 10000;
-        if (cap && cap < entry) {
-          tp = cap;
-          console.log(`[Scorer] ${symbol} SHORT TP capped at support ${cap}`);
+        if (sup && sup < entry && sup > tp) {
+          const cap = Math.round((sup + atr * 0.3) * 10000) / 10000;
+          if (cap < entry) {
+            tp = cap;
+            console.log(`[Scorer] ${symbol} SHORT TP capped at swing support ${cap}`);
+          }
         }
       }
     } catch(e) {}
@@ -871,9 +867,10 @@ function scoreSymbol(symbol) {
   } catch(e) {}
 
   const rrMin = claudeOpt?.ideal_rr_min || 1.5;
-  const rrMax = claudeOpt?.ideal_rr_max || 4.0;
+  const rrMax = claudeOpt?.ideal_rr_max || 6.0; // raised — don't cap good organic R:R
 
-  if (!rr || rr < rrMin || rr > rrMax) {
+  if (!rr || rr < rrMin) {
+    // R:R too tight — rebuild using ATR to get acceptable levels
     const slMult = claudeOpt?.sl_multiplier || 1.5;
     const tpMult = claudeOpt?.tp_multiplier || 3.0;
     if (direction === 'LONG') {
