@@ -799,6 +799,19 @@ cron.schedule('2,7,12,17,22,27,32,37,42,47,52,57 * * * *', () => {
   checkOutcomes(broadcast);
 });
 
+// FXSSI auto-scrape — fires at :01/:21/:41, aligned with 20-min FXSSI refresh cycle
+cron.schedule('1,21,41 * * * *', async () => {
+  if (!dbReady) return;
+  const { isMarketOpen } = require('./marketHours');
+  const anyOpen = Object.keys(SYMBOLS).some(s => isMarketOpen(s));
+  if (!anyOpen) return;
+  try {
+    await runFXSSIScrape(broadcast);
+  } catch(e) {
+    console.error('[FXSSI Cron] Error:', e.message);
+  }
+});
+
 // Retirement cron — fires at :02/:22/:42 (aligned with FXSSI scrape at :01/:21/:41)
 // FXSSI scrapes first, then 1 minute later we retire ACTIVE signals
 // Fresh FXSSI data is now in DB when new signals start scoring
