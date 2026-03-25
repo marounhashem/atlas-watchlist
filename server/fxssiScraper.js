@@ -17,7 +17,7 @@ const API_BASE = 'https://c.fxssi.com/api/order-book';
 const cache = {}; // { symbol: { data, analysed, ts } }
 
 function shouldFetch() {
-  if (process.env.FXSSI_FORCE_FETCH === '1') return true;
+  if (process.env.FXSSI_FORCE === '1') return true;
   const min = new Date().getUTCMinutes();
   return min === 1 || min === 21 || min === 41;
 }
@@ -239,7 +239,7 @@ async function fetchSymbol(pair) {
 }
 
 // ── Main scrape loop ─────────────────────────────────────────────────────────
-async function runFXSSIScrape(broadcast) {
+async function runFXSSIScrape(broadcast, forceWrite = false) {
   if (!process.env.FXSSI_TOKEN) return;
 
   const forceFetch = shouldFetch();
@@ -258,9 +258,10 @@ async function runFXSSIScrape(broadcast) {
 
           // Check freshness BEFORE updating cache
           // prevSnap must be read from old cache value
+          // forceWrite bypasses the check — always writes (used by /api/fxssi-force)
           const prevSnap = cache[symbol]?.analysed?.snapshotTime;
           const newSnap  = raw.time; // Unix seconds from FXSSI API
-          const isNewData = !prevSnap || newSnap !== prevSnap;
+          const isNewData = forceWrite || !prevSnap || newSnap !== prevSnap;
 
           // Always update cache with latest fetch
           cache[symbol] = { raw, analysed, ts: now };
