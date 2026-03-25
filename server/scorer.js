@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260324.1';
+const SCORER_VERSION = '20260325.1';
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -253,9 +253,9 @@ function scoreSession(symbol) {
 
 function inferDirection(data) {
   if (!data) return null;
-  // Use bias column directly — composite score (-8 to +8)
-  // data.bias_score is normalized 0-1 absolute value — wrong scale for threshold check
-  const score = data.bias || 0;
+  // Use bias_score (composite -8 to +8) not raw bias (just +/-1)
+  // Require minimum ±2 — a score of 1 is too weak to trade
+  const score = data.bias_score || data.bias || 0;
   if (score >= 2)  return 'LONG';
   if (score <= -2) return 'SHORT';
   if (data.structure === 'bullish') return 'LONG';
@@ -464,12 +464,26 @@ function scoreSymbol(symbol) {
   const fxssiCombined = (fxssiSc + obSc) / 2;
 
   const rawScore = (
-    biasSc       * weights.pine +
+    biasSc        * weights.pine +
     fxssiCombined * weights.fxssi +
-    sessionSc    * weights.session
+    sessionSc     * weights.session
   ) * 100;
 
-  const score = Math.round(rawScore * conflictMultiplier);
+  // ── Score ceiling based on multi-TF structure alignment ───────────────────
+  // Can't be 90%+ confident if only 1/5 TFs agree on direction
+  // structScore: -5 to +5. High score requires multiple TFs aligned
+  let structureCap = 95; // default max
+  if (structScore !== undefined) {
+    const absStruct = Math.abs(structScore);
+    if      (absStruct <= 1) structureCap = 78; // 0-1 TFs aligned — cap at 78
+    else if (absStruct <= 2) structureCap = 84; // 2 TFs aligned — cap at 84
+    else if (absStruct <= 3) structureCap = 89; // 3 TFs aligned — cap at 89
+    else if (absStruct <= 4) structureCap = 93; // 4 TFs aligned — cap at 93
+    // 5 TFs aligned = full 95 cap
+  }
+
+  const cappedRaw = Math.min(structureCap, rawScore);
+  const score = Math.round(cappedRaw * conflictMultiplier);
 
   // ── Regime adjustment ─────────────────────────────────────────────────────
   // Claude's regime detection feeds back into scoring — don't just display it
@@ -927,7 +941,7 @@ function scoreSymbol(symbol) {
       }
     }
   } catch(e) {}
-  const macroAdjustedScore = Math.min(100, Math.max(0, finalScore + macroScoreAdj));
+  const macroAdjustedScore = Math.min(95, Math.max(0, finalScore + macroScoreAdj));
   const macroVerdict = macroAdjustedScore >= adjustedMinScore ? 'PROCEED'
     : macroAdjustedScore >= Math.max(55, adjustedMinScore - 15) ? 'WATCH' : 'SKIP';
 
