@@ -819,14 +819,15 @@ function scoreSymbol(symbol) {
     if (pineTp) tp = Math.round((tp * tpFxssiW + pineTp * (1 - tpFxssiW)) * 10000) / 10000;
 
     // ── TP cap at nearest swing S/R only ─────────────────────────────────────
-    // Only cap at a real swing level — not rangeHigh/rangeLow (20-bar range is too tight)
-    // FXSSI cluster targets can legitimately be beyond a 20-bar range
+    // Only cap if resistance is at least 1.5x ATR away — closer than that and
+    // the cap destroys R:R, blocking a valid signal entirely
     try {
       const raw6 = JSON.parse(data.raw_payload || '{}');
       const sr   = raw6.sr || {};
       if (direction === 'LONG' && tp) {
         const res = sr.resistance;
-        if (res && res > entry && res < tp) {
+        const distToRes = res ? Math.abs(res - entry) : 0;
+        if (res && res > entry && res < tp && distToRes > atr * 1.5) {
           const cap = Math.round((res - atr * 0.3) * 10000) / 10000;
           if (cap > entry) {
             tp = cap;
@@ -835,7 +836,8 @@ function scoreSymbol(symbol) {
         }
       } else if (direction === 'SHORT' && tp) {
         const sup = sr.support;
-        if (sup && sup < entry && sup > tp) {
+        const distToSup = sup ? Math.abs(entry - sup) : 0;
+        if (sup && sup < entry && sup > tp && distToSup > atr * 1.5) {
           const cap = Math.round((sup + atr * 0.3) * 10000) / 10000;
           if (cap < entry) {
             tp = cap;
