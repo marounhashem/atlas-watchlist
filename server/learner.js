@@ -2,8 +2,8 @@ const { getRecentOutcomes, getWeights, updateWeights, insertLearningLog, getAllS
 const { SYMBOLS } = require('./config');
 
 // Learning thresholds
-const MIN_CLOSED_TRADES_PER_SYMBOL = 10;  // minimum before adjusting weights
-const MIN_TOTAL_OUTCOMES = 10;            // minimum total before any learning
+const MIN_CLOSED_TRADES_PER_SYMBOL = 30;  // minimum before adjusting weights — 10 is statistically meaningless
+const MIN_TOTAL_OUTCOMES = 20;            // minimum total before any learning
 const LEARNING_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours between cycles
 const NEW_OUTCOMES_THRESHOLD = 10;        // min new closed trades since last cycle
 
@@ -118,7 +118,7 @@ Rules:
 - If win rate > 65%: slightly increase weights of strongest factors, lower minScore by 1-2
 - If win rate < 45%: increase minScore by 3-5, reduce weights of weakest session
 - If win rate 45-65%: minimal changes only
-- Never change any single weight by more than 0.08 in one cycle
+- Never change any single weight by more than 0.03 in one cycle — small adjustments only
 Return format: { "SYMBOL": { "pine": 0.xx, "fxssi": 0.xx, "session": 0.15, "minScoreProceed": xx } }
 No explanation, no markdown, pure JSON only.`,
         messages: [{ role: 'user', content: prompt }]
