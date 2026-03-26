@@ -555,6 +555,15 @@ app.get('/api/fxssi-force', async (req, res) => {
   }
 });
 
+// Trade monitor — dismiss a recommendation
+app.post('/api/signals/:id/dismiss-rec/:recId', (req, res) => {
+  try {
+    const { dismissRecommendation } = require('./db');
+    dismissRecommendation(parseInt(req.params.id), req.params.recId);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // Claude learning endpoints
 app.get('/api/claude/regime', (req, res) => {
   const fn = claudeLearner.getRegime;
@@ -812,9 +821,9 @@ cron.schedule('*/5 * * * *', async () => {
   }
 });
 
-// Check outcomes every 5 minutes
+// Check outcomes every 5 minutes + monitor active signals for thesis changes
 cron.schedule('2,7,12,17,22,27,32,37,42,47,52,57 * * * *', () => {
-  checkOutcomes(broadcast);
+  checkOutcomes(broadcast); // includes trade monitoring via outcome.js
 });
 
 // FXSSI auto-scrape — fires at :01/:21/:41, aligned with 20-min FXSSI refresh cycle
