@@ -110,6 +110,9 @@ function initSchema() {
   db.run(`CREATE TABLE IF NOT EXISTS learning_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL,
     symbols_analysed TEXT, outcomes_used INTEGER, changes TEXT, reasoning TEXT)`);
+  db.run(`CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY, value TEXT, ts INTEGER
+  )`);
 
   // Seed default weights
   const { SYMBOLS } = require('./config');
@@ -202,6 +205,7 @@ function upsertMarketData(symbol, data) {
       [...baseParams, JSON.stringify({ ...data, ...(data.rawExtra || {}) })]
     );
   }
+  persist(); // flush market data to disk on every write
 }
 
 function getLatestMarketData(symbol) {
@@ -461,6 +465,8 @@ function getCurrentCycleOpenSignals() {
 function updateMFE(signalId, mfe, mfePct) {
   run("UPDATE signals SET mfe=?, mfe_pct=? WHERE id=? AND (mfe IS NULL OR mfe < ?)",
     [mfe, mfePct, signalId, mfe]);
+  // MFE is critical for learner quality — persist immediately
+  persist();
 }
 
 // Refine an existing OPEN signal in place — update levels, bump refine_count
@@ -562,6 +568,21 @@ function resolveStaleRecommendations(signalId) {
   } catch(e) {}
 }
 
+
+// ── Settings: persistent key-value store ──────────────────────────────────────
+// Used to persist learner state (lastLearningTs) across restarts
+function getSetting(key) {
+  try {
+    const row = get('SELECT value FROM settings WHERE key=?', [key]);
+    return row ? row.value : null;
+  } catch(e) { return null; }
+}
+
+function setSetting(key, value) {
+  run('INSERT OR REPLACE INTO settings (key, value, ts) VALUES (?,?,?)', [key, String(value), Date.now()]);
+  persist();
+}
+
 module.exports = {
   init, isReady, persist, run,
   upsertMarketData, getLatestMarketData,
@@ -572,5 +593,6 @@ module.exports = {
   getLatestOpenSignal, expireOldVersionSignals,
   addRecommendation, getRecommendations, markRecommendationFollowed,
   dismissRecommendation, resolveStaleRecommendations,
-  retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals
+  retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals,
+  getSetting, setSetting
 };
