@@ -1033,7 +1033,7 @@ function scoreSymbol(symbol) {
       }
     }
   } catch(e) {}
-  const macroAdjustedScore = Math.min(95, Math.max(0, finalScore + macroScoreAdj));
+  const macroAdjustedScore = Math.min(structureCap, Math.min(95, Math.max(0, finalScore + macroScoreAdj)));
   const macroVerdict = macroAdjustedScore >= adjustedMinScore ? 'PROCEED'
     : macroAdjustedScore >= Math.max(55, adjustedMinScore - 15) ? 'WATCH' : 'SKIP';
 
