@@ -1,4 +1,4 @@
-const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, updateMFE, run, addRecommendation, getRecommendations } = require('./db');
+const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, updateMFE, run, addRecommendation, getRecommendations, dismissRecommendation, resolveStaleRecommendations } = require('./db');
 const claudeLearner = require('./claudeLearner');
 
 // checkOutcomes runs across ALL cycles — retired signals still get WIN/LOSS detected
@@ -66,6 +66,8 @@ function checkOutcomes(broadcast) {
     // ── Trade Monitor: Generate recommendations on ACTIVE signals ───────────────
     // Runs every outcome check cycle — evaluates if original thesis still holds
     if (currentState === 'ACTIVE') {
+      // First resolve stale recommendations (20 min old = condition gone)
+      resolveStaleRecommendations(id);
       const recs = generateRecommendations(sig, data, price);
       for (const rec of recs) {
         const added = addRecommendation(id, rec);
