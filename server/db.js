@@ -146,6 +146,8 @@ function initSchema() {
   try { db.run('ALTER TABLE signals ADD COLUMN retired_at INTEGER DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN scorer_version TEXT DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN refine_count INTEGER DEFAULT 0'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN recommendations TEXT DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN rec_followed INTEGER DEFAULT 0'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN refine_ts INTEGER DEFAULT NULL'); } catch(e) {}
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
   try { db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL'); } catch(e) { console.error('[DB] Backfill error:', e.message); }
@@ -467,6 +469,51 @@ function refineSignal(signalId, updates) {
   return newCount;
 }
 
+// ── Trade Monitor: Recommendation Management ─────────────────────────────────
+// Each recommendation stored as JSON array on signal row
+// { type, reason, urgency, ts, price, mfe_pct, new_sl, new_tp }
+// Types: CLOSE | MOVE_SL | ADJUST_TP
+// Urgency: HIGH | MEDIUM | LOW
+
+function addRecommendation(signalId, rec) {
+  const signal = get('SELECT recommendations FROM signals WHERE id=?', [signalId]);
+  if (!signal) return;
+  const existing = [];
+  try {
+    if (signal.recommendations) {
+      const parsed = JSON.parse(signal.recommendations);
+      existing.push(...parsed);
+    }
+  } catch(e) {}
+
+  // Don't duplicate — skip if same type issued within last 10 minutes
+  const tenMinAgo = Date.now() - 10 * 60 * 1000;
+  const recentSame = existing.find(r => r.type === rec.type && r.ts > tenMinAgo);
+  if (recentSame) return false; // already issued recently
+
+  existing.push({
+    ...rec,
+    ts: Date.now(),
+    id: Date.now().toString(36) // short unique id
+  });
+
+  run('UPDATE signals SET recommendations=? WHERE id=?',
+    [JSON.stringify(existing), signalId]);
+  persist();
+  return true;
+}
+
+function getRecommendations(signalId) {
+  const signal = get('SELECT recommendations FROM signals WHERE id=?', [signalId]);
+  if (!signal?.recommendations) return [];
+  try { return JSON.parse(signal.recommendations); } catch(e) { return []; }
+}
+
+function markRecommendationFollowed(signalId) {
+  run('UPDATE signals SET rec_followed = rec_followed + 1 WHERE id=?', [signalId]);
+  persist();
+}
+
 module.exports = {
   init, isReady, persist, run,
   upsertMarketData, getLatestMarketData,
@@ -475,5 +522,6 @@ module.exports = {
   getWeights, updateWeights,
   insertLearningLog, getAllSignals, getLearningLog,
   getLatestOpenSignal, expireOldVersionSignals,
+  addRecommendation, getRecommendations, markRecommendationFollowed,
   retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals
 };
