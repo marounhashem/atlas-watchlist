@@ -217,10 +217,41 @@ function groupByScoreBand(trades) {
   return g;
 }
 
+function buildRecAccuracyStats(closed) {
+  // Analyse how accurate CLOSE recommendations were
+  // A CLOSE rec is "correct" if issued before a LOSS, "incorrect" if issued before a WIN
+  const withRecs = closed.filter(t => t.recommendations);
+  if (withRecs.length === 0) return 'No recommendation data yet';
+
+  let closeRecs = 0, closeCorrect = 0, moveSLRecs = 0;
+  for (const t of withRecs) {
+    try {
+      const recs = JSON.parse(t.recommendations);
+      const hasClose = recs.some(r => r.type === 'CLOSE');
+      const hasMSL   = recs.some(r => r.type === 'MOVE_SL');
+      if (hasClose) {
+        closeRecs++;
+        if (t.outcome === 'LOSS') closeCorrect++; // CLOSE rec before LOSS = correct
+      }
+      if (hasMSL) moveSLRecs++;
+    } catch(e) {}
+  }
+
+  const closeAcc = closeRecs > 0 ? Math.round(closeCorrect / closeRecs * 100) : 0;
+  return `CLOSE recommendations: ${closeRecs} issued, ${closeAcc}% accurate (preceded LOSS)\nMOVE_SL recommendations: ${moveSLRecs} issued`;
+}
+
 function buildLearnerPrompt(symbolStats, currentWeights) {
+  const { getAllSignals } = require('./db');
+  const allClosed = getAllSignals(500).filter(s => s.outcome === 'WIN' || s.outcome === 'LOSS');
+  const recStats = buildRecAccuracyStats(allClosed);
+
   const lines = [
     `Learning cycle analysis — ${new Date().toUTCString()}`,
     `Minimum threshold: ${MIN_CLOSED_TRADES_PER_SYMBOL} closed trades per symbol`,
+    '',
+    `TRADE MONITOR ACCURACY:`,
+    recStats,
     ''
   ];
   for (const [sym, stats] of Object.entries(symbolStats)) {
