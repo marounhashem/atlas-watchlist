@@ -14,7 +14,8 @@ const FXSSI_SYMBOLS = {
 };
 
 const API_BASE = 'https://c.fxssi.com/api/order-book';
-const cache = {}; // { symbol: { data, analysed, ts } }
+const cache       = {}; // 20-min book: { symbol: { raw, analysed, ts } }
+const cacheHourly = {}; // 1-hour book:  { symbol: { raw, analysed, ts } }
 
 function shouldFetch() {
   if (process.env.FXSSI_FORCE === '1') return true;
@@ -212,12 +213,12 @@ function analyseOrderBook(data) {
 }
 
 // ── Fetch from FXSSI API ─────────────────────────────────────────────────────
-async function fetchSymbol(pair) {
+async function fetchSymbol(pair, period = 1200) {
   const token  = process.env.FXSSI_TOKEN;
   const userId = process.env.FXSSI_USER_ID || '118460';
   if (!token) return null;
 
-  const url = `${API_BASE}?pair=${pair}&view=all&rand=${Math.random()}&token=${token}&user_id=${userId}&period=1200`;
+  const url = `${API_BASE}?pair=${pair}&view=all&rand=${Math.random()}&token=${token}&user_id=${userId}&period=${period}`;
 
   const res = await fetch(url, {
     headers: {
@@ -312,6 +313,55 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
           obLargeOrders: analysed.largeOrders,
           fxssiAnalysis: JSON.stringify(analysed)
         });
+
+      // ── Hourly order book scrape ─────────────────────────────────────────
+      // Scrape period=3600 for the same symbol — staggered with small delay
+      // Institutional levels show up in 1h book, not 20-min book
+      // Store separately — used by scorer for level confirmation
+      try {
+        await new Promise(r => setTimeout(r, 800)); // small delay — avoid rate limit
+        const cachedH  = cacheHourly[symbol];
+        const cacheAgeH = cachedH ? (now - cachedH.ts) / 60000 : 999;
+        if (forceWrite || cacheAgeH > 55) { // scrape hourly once per hour
+          const rawH = await fetchSymbol(pair, 3600);
+          if (rawH) {
+            const analysedH = analyseOrderBook(rawH);
+            const prevSnapH = cacheHourly[symbol]?.analysed?.snapshotTime;
+            const isNewH    = forceWrite || !prevSnapH || rawH.time !== prevSnapH;
+            cacheHourly[symbol] = { raw: rawH, analysed: analysedH, ts: now };
+            if (isNewH) {
+              console.log(`[FXSSI-H] ${symbol} — NEW hourly snapshot. bias:${analysedH?.signals?.bias} levels:${rawH.levels?.length} gravity:${analysedH?.gravity?.price}`);
+              // Merge hourly analysis into existing market data
+              const existingH = getLatestMarketData(symbol);
+              if (existingH) {
+                upsertMarketData(symbol, {
+                  close: existingH.close, high: existingH.high, low: existingH.low,
+                  volume: existingH.volume, ema200: existingH.ema200, vwap: existingH.vwap,
+                  rsi: existingH.rsi, macdHist: existingH.macd_hist,
+                  bias: existingH.bias, biasScore: existingH.bias_score,
+                  structure: existingH.structure,
+                  fvgPresent: existingH.fvg_present === 1,
+                  fvgHigh: existingH.fvg_high || null,
+                  fvgLow: existingH.fvg_low || null,
+                  fvgMid: existingH.fvg_mid || null,
+                  fxssiLongPct: existingH.fxssi_long_pct,
+                  fxssiShortPct: existingH.fxssi_short_pct,
+                  fxssiTrapped: existingH.fxssi_trapped,
+                  obAbsorption: existingH.ob_absorption,
+                  obImbalance: existingH.ob_imbalance,
+                  obLargeOrders: existingH.ob_large_orders,
+                  fxssiAnalysis: existingH.fxssi_analysis,
+                  fxssiHourlyAnalysis: JSON.stringify(analysedH)
+                });
+              }
+            } else {
+              console.log(`[FXSSI-H] ${symbol} — same hourly snapshot, skipping write`);
+            }
+          }
+        }
+      } catch(eH) {
+        console.error(`[FXSSI-H] ${symbol} hourly error:`, eH.message);
+      }
 
       if (broadcast) broadcast({ type: 'FXSSI_UPDATE', symbol, analysed, ts: now });
 
