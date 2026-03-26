@@ -2,8 +2,8 @@ const { getRecentOutcomes, getWeights, updateWeights, insertLearningLog, getAllS
 const { SYMBOLS } = require('./config');
 
 // Learning thresholds
-const MIN_CLOSED_TRADES_PER_SYMBOL = 30;  // minimum before adjusting weights — 10 is statistically meaningless
-const MIN_TOTAL_OUTCOMES = 20;            // minimum total before any learning
+const MIN_CLOSED_TRADES_PER_SYMBOL = 10;  // minimum before adjusting weights
+const MIN_TOTAL_OUTCOMES = 10;            // minimum total before any learning
 const LEARNING_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours between cycles
 const NEW_OUTCOMES_THRESHOLD = 10;        // min new closed trades since last cycle
 
@@ -109,11 +109,27 @@ async function runLearningCycle(broadcast, force = false) {
       body: JSON.stringify({
         model: 'claude-haiku-4-5-20251001', // Haiku — batch weight learning doesn't need Sonnet quality
         max_tokens: 1000,
-        system: `You are a quantitative trading system optimizer.
+        system: `You are a quantitative trading system optimizer for ATLAS//WATCHLIST.
+
+CRITICAL SYSTEM HISTORY:
+First trading session recorded 7% win rate (2W/26L). Root causes identified and fixed in scorer v20260326.1:
+1. System was buying into downtrends — EMAs lag, price was falling while EMAs still bullish
+2. RSI hard blocks now in place — LONG blocked if RSI < 35, SHORT blocked if RSI > 65
+3. EMA trend filter added — LONG blocked if 1h AND 4h EMA both bearish
+4. TP capped at 5x ATR — no more R:R of 640:1 from uncapped projections
+5. Crowd trap override — 65%+ crowd trapped opposite side now reduces EMA conflict penalty
+
+WEIGHT LEARNING RULES:
+- Old trade history (7% WR) is from broken scorer — do NOT punish fxssi weight based on it
+- The 2 wins came from OILWTI with Structure 2/5 aligned and RSI confirming direction
+- FXSSI crowd trap data was correct — Pine EMA was the problem
+- Reward signals with structure alignment and RSI confirmation
+- fxssi weight should stay 0.40-0.50 range
+
 Analyze trade outcomes and return ONLY a JSON object with updated weights.
 Rules:
 - Weights (pine + fxssi + session) must sum to exactly 1.0
-- pine = technical analysis weight, fxssi = order book weight (covers both sentiment and OB), session = fixed at 0.15
+- pine = technical analysis weight, fxssi = order book weight, session = fixed at 0.15
 - minScoreProceed must be between 62 and 88
 - If win rate > 65%: slightly increase weights of strongest factors, lower minScore by 1-2
 - If win rate < 45%: increase minScore by 3-5, reduce weights of weakest session
