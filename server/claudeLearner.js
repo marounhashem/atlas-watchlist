@@ -3,7 +3,7 @@
 // Fires: after every WIN/LOSS + daily at 17:00 UTC (end London) + every 20 outcomes
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL_SONNET = 'claude-sonnet-4-20250514'; // exact levels only
+const MODEL_SONNET = 'claude-sonnet-4-5-20251001'; // exact levels only
 const MODEL_HAIKU  = 'claude-haiku-4-5-20251001';  // all other tasks — 20x cheaper
 const MODEL = MODEL_HAIKU; // default
 
