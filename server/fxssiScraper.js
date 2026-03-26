@@ -283,6 +283,8 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
           const newSnap  = raw.time; // Unix seconds from FXSSI API
           const isNewData = forceWrite || !prevSnap || newSnap !== prevSnap;
 
+          // Read prevInProfitPct BEFORE updating cache — otherwise prev === curr (delta always 0)
+          const prevInProfitPct = cache[symbol]?.analysed?.inProfitPct ?? null;
           // Always update cache with latest fetch
           cache[symbol] = { raw, analysed, ts: now };
 
@@ -291,7 +293,6 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
             // ── Profit Ratio Delta ───────────────────────────────────────────────
             // Delta = change in inProfitPct since last scrape
             // Spike > 2% = potential reversal signal (FXSSI theory)
-            const prevInProfitPct = cache[symbol]?.analysed?.inProfitPct || null;
             const currInProfitPct = analysed?.inProfitPct || 50;
             const profitDelta = prevInProfitPct !== null
               ? Math.round((currInProfitPct - prevInProfitPct) * 10) / 10
