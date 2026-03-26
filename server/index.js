@@ -557,19 +557,21 @@ app.get('/api/fxssi-force', async (req, res) => {
 
 // Claude learning endpoints
 app.get('/api/claude/regime', (req, res) => {
-  res.json(claudeLearner.getRegime() || { regime: 'UNKNOWN', summary: 'Not enough data yet' });
+  const fn = claudeLearner.getRegime;
+  res.json((typeof fn === 'function' ? fn() : null) || { regime: 'UNKNOWN', summary: 'Not enough data yet' });
 });
 
 app.get('/api/claude/insights', (req, res) => {
-  res.json(claudeLearner.getInsights());
+  const fn = claudeLearner.getInsights;
+  res.json(typeof fn === 'function' ? fn() : []);
 });
 
 app.get('/api/claude/patterns', (req, res) => {
-  res.json(claudeLearner.getSessionPatterns());
+  const fp = claudeLearner.getSessionPatterns; res.json(typeof fp === 'function' ? fp() : {});
 });
 
 app.get('/api/claude/optimisations', (req, res) => {
-  res.json(claudeLearner.getAllOptimisations());
+  const fo = claudeLearner.getAllOptimisations; res.json(typeof fo === 'function' ? fo() : {});
 });
 
 app.post('/api/claude/optimise/:symbol', async (req, res) => {
@@ -579,7 +581,7 @@ app.post('/api/claude/optimise/:symbol', async (req, res) => {
 });
 
 app.post('/api/claude/regime-now', async (req, res) => {
-  const regime = await claudeLearner.detectRegime();
+  const detectFn = claudeLearner.detectRegime; const regime = typeof detectFn === 'function' ? await detectFn() : null;
   res.json(regime || { error: 'Not enough data' });
 });
 
