@@ -840,21 +840,51 @@ function renderCard(sig, isPast=false) {
       ${sig.outcome==='ACTIVE'?`<span style="font-size:9px;color:#ffd740;letter-spacing:.5px;">● MONITORING TP/SL</span>`:''}
       ${sig.outcome==='ACTIVE' && sig.recommendations ? (() => {
         try {
-          const recs = JSON.parse(sig.recommendations);
-          if (!recs.length) return '';
-          // Show last 3 recommendations, newest first
-          return recs.slice(-3).reverse().map(r => {
-            const ageMin = Math.round((Date.now() - r.ts) / 60000);
-            const ageStr = ageMin < 1 ? 'just now' : ageMin + 'm ago';
-            const icon = r.urgency === 'HIGH' ? '🚨' : r.urgency === 'MEDIUM' ? '⚠️' : 'ℹ️';
-            return `<div class="rec-card rec-${r.urgency}">
-              ${icon} <strong>${r.type}</strong><span class="rec-ts">${ageStr} · ${new Date(r.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span><br>
-              ${r.reason}
-              ${r.new_sl ? `<br><span style="color:#ffd740">→ New SL: ${r.new_sl}</span>` : ''}
-              ${r.new_tp ? `<br><span style="color:#00e676">→ New TP: ${r.new_tp}</span>` : ''}
-              ${r.progress_pct !== undefined ? `<br><span style="color:var(--dim)">Progress: ${r.progress_pct}% toward TP</span>` : ''}
-            </div>`;
+          const allRecs = JSON.parse(sig.recommendations);
+          // Filter: exclude dismissed and resolved
+          const active = allRecs.filter(r => !r.dismissed && !r.resolved);
+          if (!active.length) return '';
+
+          // Sort: HIGH first, then by ts desc
+          active.sort((a,b) => {
+            const urgOrder = {HIGH:0,MEDIUM:1,LOW:2};
+            return (urgOrder[a.urgency]||1) - (urgOrder[b.urgency]||1) || b.ts - a.ts;
+          });
+
+          const primary = active[0];
+          const rest = active.slice(1);
+          const icon = primary.urgency === 'HIGH' ? '🚨' : primary.urgency === 'MEDIUM' ? '⚠️' : 'ℹ️';
+          const ageMin = Math.round((Date.now() - primary.ts) / 60000);
+          const ageStr = ageMin < 1 ? 'just now' : ageMin + 'm ago';
+          const timeStr = new Date(primary.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
+
+          const moreBadge = rest.length > 0
+            ? '<span style="font-size:9px;color:var(--dim);margin-left:8px;cursor:pointer;" onclick="toggleMoreRecs(this)">+' + rest.length + ' more</span>'
+            : '';
+
+          const moreRecs = rest.map(r2 => {
+            const a2 = Math.round((Date.now()-r2.ts)/60000);
+            const icon2 = r2.urgency==='HIGH'?'🚨':r2.urgency==='MEDIUM'?'⚠️':'ℹ️';
+            const dimStyle = 'float:right;background:none;border:none;color:var(--dim);cursor:pointer;font-size:10px;';
+            return '<div class="rec-card rec-' + r2.urgency + '" style="margin-top:4px;opacity:.8;">'
+              + icon2 + ' <strong>' + r2.type + '</strong>'
+              + ' <span class="rec-ts">' + a2 + 'm ago</span> — '
+              + r2.reason.slice(0,60) + '...'
+              + '<button style="' + dimStyle + '" onclick="dismissRec(' + sig.id + ',this.dataset.rid)" data-rid="' + r2.id + '">✕</button>'
+              + '</div>';
           }).join('');
+
+          return '<div class="rec-card rec-' + primary.urgency + '">' +
+            icon + ' <strong>' + primary.type + '</strong>' +
+            '<span class="rec-ts">' + ageStr + ' · ' + timeStr + '</span>' +
+            '<button style="float:right;background:none;border:none;color:var(--dim);cursor:pointer;font-size:11px;padding:0 4px;" onclick="dismissRec(' + sig.id + ',this.dataset.rid)" data-rid="' + primary.id + '" title="Dismiss">✕</button>' +
+            moreBadge +
+            '<br>' + primary.reason +
+            (primary.new_sl ? '<br><span style="color:#ffd740">→ New SL: ' + primary.new_sl + '</span>' : '') +
+            (primary.new_tp ? '<br><span style="color:#00e676">→ New TP: ' + primary.new_tp + '</span>' : '') +
+            (primary.progress_pct !== undefined ? '<br><span style="color:var(--dim)">Progress: ' + primary.progress_pct + '% toward TP</span>' : '') +
+            '</div>' +
+            '<div style="display:none">' + moreRecs + '</div>';
         } catch(e) { return ''; }
       })() : ''}
       ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
@@ -1316,6 +1346,29 @@ async function fetchMarketStatus() {
   const entries=Object.entries(status);
   if(!entries.length) return;
   c.innerHTML=entries.map(([sym,s])=>`<div class="mhrow ${s.open?'mhO':'mhC'}"><span class="mhsym">${sym}</span><span class="${s.open?'mhopen':'mhclosed'}">${s.open?'OPEN':s.minutesUntilOpen?s.minutesUntilOpen+'m':'CLOSED'}</span></div>`).join('');
+}
+
+function toggleMoreRecs(el) {
+  const moreDiv = el.parentElement.nextElementSibling;
+  if (moreDiv) moreDiv.style.display = moreDiv.style.display === 'none' ? 'block' : 'none';
+}
+
+function dismissRec(signalId, recId) {
+  // recId may come from button dataset
+  const rid = recId || (event && event.target && event.target.dataset && event.target.dataset.rid);
+  if (!rid) return;
+  fetch('/api/signals/' + signalId + '/dismiss-rec/' + rid, {method:'POST'})
+    .then(() => {
+      const sig = allSignals.find(s => s.id === signalId);
+      if (sig && sig.recommendations) {
+        try {
+          const recs = JSON.parse(sig.recommendations);
+          const updated = recs.map(r => r.id === rid ? {...r, dismissed:true} : r);
+          sig.recommendations = JSON.stringify(updated);
+          renderSignals();
+        } catch(e) {}
+      }
+    }).catch(() => {});
 }
 
 function showToast(msg, type) {
