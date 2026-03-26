@@ -9,7 +9,8 @@ const db = require('./db');
 const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome, updatePaperOutcome, getPaperTradeStats, retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals } = db;
 const { isMarketOpen, getMarketStatus, minutesUntilOpen } = require('./marketHours');
 const { scoreAllPriority, saveSignal } = require('./scorer');
-const { checkOutcomes } = require('./outcome');
+const { checkOutcomes, checkAndMonitor } = require('./outcome');
+const { checkActiveSignals } = require('./monitor');
 const { runLearningCycle } = require('./learner');
 const claudeLearner = require('./claudeLearner');
 const { runFXSSIScrape, processBridgePayload } = require('./fxssiScraper');
@@ -555,6 +556,15 @@ app.get('/api/fxssi-force', async (req, res) => {
   }
 });
 
+// Trade monitor — dismiss a recommendation
+app.post('/api/signals/:id/dismiss-rec/:recId', (req, res) => {
+  try {
+    const { dismissRecommendation } = require('./db');
+    dismissRecommendation(parseInt(req.params.id), req.params.recId);
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // Claude learning endpoints
 app.get('/api/claude/regime', (req, res) => {
   const fn = claudeLearner.getRegime;
@@ -812,9 +822,9 @@ cron.schedule('*/5 * * * *', async () => {
   }
 });
 
-// Check outcomes every 5 minutes
+// Check outcomes every 5 minutes + monitor active signals for thesis changes
 cron.schedule('2,7,12,17,22,27,32,37,42,47,52,57 * * * *', () => {
-  checkOutcomes(broadcast);
+  checkAndMonitor(broadcast); // V2: includes trade monitoring
 });
 
 // FXSSI auto-scrape — fires at :01/:21/:41, aligned with 20-min FXSSI refresh cycle
