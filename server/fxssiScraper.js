@@ -74,6 +74,21 @@ function analyseOrderBook(data) {
   const inProfitPct = totalPL > 0 ? Math.round(totalInProfit / totalPL * 1000) / 10 : 50;
   const inLossPct   = totalPL > 0 ? Math.round(totalInLoss   / totalPL * 1000) / 10 : 50;
 
+  // ── Profit split: buyers vs sellers in profit ────────────────────────────
+  // FXSSI Profit Ratio: if spike in inProfitPct AND majority are sellers → BUY
+  // If majority are buyers at spike → SELL (crowd manipulation theory)
+  let buyersInProfit = 0, sellersInProfit = 0;
+  for (const l of levels) {
+    if (l.price < cp) {
+      buyersInProfit  += (l.pl || 0); // longs below price = buyers in profit
+    } else {
+      sellersInProfit += (l.ps || 0); // shorts above price = sellers in profit
+    }
+  }
+  const totalProfitSplit = buyersInProfit + sellersInProfit;
+  const buyersInProfitPct  = totalProfitSplit > 0 ? Math.round(buyersInProfit  / totalProfitSplit * 1000) / 10 : 50;
+  const sellersInProfitPct = totalProfitSplit > 0 ? Math.round(sellersInProfit / totalProfitSplit * 1000) / 10 : 50;
+
   const above = levels.filter(l => l.price > cp).sort((a,b) => a.price - b.price);
   const below = levels.filter(l => l.price < cp).sort((a,b) => b.price - a.price);
 
@@ -183,6 +198,7 @@ function analyseOrderBook(data) {
     longPct, shortPct,
     buyPositionsPct, sellPositionsPct,
     inProfitPct, inLossPct,
+    buyersInProfitPct, sellersInProfitPct,
     sentiment, trapped,
     currentPrice: cp,
 
@@ -269,7 +285,35 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
 
           if (isNewData) {
             const snapAge = Math.round((Date.now() / 1000 - newSnap) / 60);
-            console.log(`[FXSSI] ${symbol} — NEW snapshot (${snapAge}m old). long:${analysed?.longPct}% short:${analysed?.shortPct}% trapped:${analysed?.trapped||'—'} bias:${analysed?.signals?.bias} levels:${raw.levels?.length}`);
+            // ── Profit Ratio Delta ───────────────────────────────────────────────
+            // Delta = change in inProfitPct since last scrape
+            // Spike > 2% = potential reversal signal (FXSSI theory)
+            const prevInProfitPct = cache[symbol]?.analysed?.inProfitPct || null;
+            const currInProfitPct = analysed?.inProfitPct || 50;
+            const profitDelta = prevInProfitPct !== null
+              ? Math.round((currInProfitPct - prevInProfitPct) * 10) / 10
+              : 0;
+
+            // Determine reversal signal from delta
+            // If delta > 2%: check who is winning — sellers winning → BUY signal (crowd was wrong)
+            //                                       buyers winning → SELL signal (crowd was wrong)
+            const buyersWinning  = (analysed?.buyersInProfitPct  || 0) > 55;
+            const sellersWinning = (analysed?.sellersInProfitPct || 0) > 55;
+            const deltaReversalBias = Math.abs(profitDelta) > 2
+              ? (sellersWinning ? 'BUY' : buyersWinning ? 'SELL' : 'NEUTRAL')
+              : 'NEUTRAL';
+
+            if (Math.abs(profitDelta) > 2) {
+              console.log(`[FXSSI] ${symbol} — Profit Ratio DELTA: ${profitDelta > 0 ? '+' : ''}${profitDelta}% (${currInProfitPct}% profitable). Reversal bias: ${deltaReversalBias}`);
+            }
+
+            // Store delta on analysed object for scorer
+            analysed.profitDelta       = profitDelta;
+            analysed.deltaReversalBias = deltaReversalBias;
+            analysed.buyersInProfitPct  = analysed.buyersInProfitPct  || 50;
+            analysed.sellersInProfitPct = analysed.sellersInProfitPct || 50;
+
+            console.log(`[FXSSI] ${symbol} — NEW snapshot (${snapAge}m old). long:${analysed?.longPct}% short:${analysed?.shortPct}% trapped:${analysed?.trapped||'—'} bias:${analysed?.signals?.bias} delta:${profitDelta > 0 ? '+' : ''}${profitDelta}% levels:${raw.levels?.length}`);
           } else {
             console.log(`[FXSSI] ${symbol} — same snapshot, skipping DB write`);
             continue; // skip DB write, data unchanged
@@ -393,8 +437,12 @@ function processBridgePayload(payload) {
       shortPct:         fx.shortPct,
       buyPositionsPct:  fx.buyPositionsPct,
       sellPositionsPct: fx.sellPositionsPct,
-      inProfitPct:      fx.inProfitPct,
-      inLossPct:        fx.inLossPct,
+      inProfitPct:       fx.inProfitPct,
+      inLossPct:         fx.inLossPct,
+      buyersInProfitPct: fx.buyersInProfitPct  || 50,
+      sellersInProfitPct:fx.sellersInProfitPct || 50,
+      profitDelta:       fx.profitDelta        || 0,
+      deltaReversalBias: fx.deltaReversalBias  || 'NEUTRAL',
       sentiment:        fx.sentiment,
       trapped:          fx.longPct > 60 ? 'LONG' : fx.shortPct > 60 ? 'SHORT' : null,
       gravity:          ob.gravity,
