@@ -1,4 +1,4 @@
-const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, updateMFE, run, addRecommendation, getRecommendations, dismissRecommendation, resolveStaleRecommendations } = require('./db');
+const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, updateMFE, run, addRecommendation, getRecommendations, markRecommendationFollowed, dismissRecommendation, resolveStaleRecommendations } = require('./db');
 const claudeLearner = require('./claudeLearner');
 
 // checkOutcomes runs across ALL cycles — retired signals still get WIN/LOSS detected
@@ -109,6 +109,15 @@ function checkOutcomes(broadcast) {
       }
 
       if (outcome) {
+        // Auto-mark CLOSE recommendations as followed when SL hits (LOSS)
+        // Teaches learner: CLOSE rec before LOSS = recommendation was correct
+        if (outcome === 'LOSS') {
+          try {
+            const existingRecs = getRecommendations(id);
+            const hadClose = existingRecs.some(r => r.type === 'CLOSE' && !r.dismissed);
+            if (hadClose) markRecommendationFollowed(id);
+          } catch(e) {}
+        }
         updateOutcome(id, outcome, pnlPct);
         console.log(`[Outcome] ${sig.symbol} ${direction} → ${outcome} (${pnlPct > 0 ? '+' : ''}${pnlPct}%)`);
         if (broadcast) broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction, outcome, pnlPct, ts: Date.now() });
@@ -183,31 +192,56 @@ function generateRecommendations(sig, data, price) {
   // ── 1. CLOSE recommendations ──────────────────────────────────────────────
 
   // Structure flipped against direction on BOTH 1h and 4h
+  // Requires 2 consecutive checks (2 minutes) before firing — reduces noise from
+  // brief intraday structure flips that recover within one candle
   try {
     if (data.raw_payload) {
       const raw = JSON.parse(data.raw_payload);
       const st  = raw.structure || {};
       const str1h = typeof st['1h'] === 'number' ? st['1h'] : 0;
       const str4h = typeof st['4h'] === 'number' ? st['4h'] : 0;
-      if (direction === 'LONG'  && str1h === -1 && str4h === -1) {
-        recs.push({
-          type: 'CLOSE',
-          reason: 'Structure flipped bearish on 1h AND 4h — original thesis invalidated',
-          urgency: 'HIGH',
-          price,
-          mfe_pct: mfePct,
-          progress_pct: progressPct
-        });
-      }
-      if (direction === 'SHORT' && str1h === 1 && str4h === 1) {
-        recs.push({
-          type: 'CLOSE',
-          reason: 'Structure flipped bullish on 1h AND 4h — original thesis invalidated',
-          urgency: 'HIGH',
-          price,
-          mfe_pct: mfePct,
-          progress_pct: progressPct
-        });
+
+      const structBearish = direction === 'LONG'  && str1h === -1 && str4h === -1;
+      const structBullish = direction === 'SHORT' && str1h ===  1 && str4h ===  1;
+
+      if (structBearish || structBullish) {
+        // Check if structure was ALREADY against direction on previous check
+        // by looking for an unresolved CLOSE rec with structure reason < 3 min ago
+        const existingRecs = getRecommendations(sig.id);
+        const twoMinAgo = Date.now() - 3 * 60 * 1000;
+        const prevStructureFlip = existingRecs.find(r =>
+          r.type === 'CLOSE' &&
+          r.reason && r.reason.includes('Structure flipped') &&
+          !r.resolved &&
+          !r.dismissed &&
+          r.ts > twoMinAgo
+        );
+
+        if (prevStructureFlip) {
+          // Structure was already against us last check AND still is — confirmed flip
+          recs.push({
+            type: 'CLOSE',
+            reason: structBearish
+              ? 'Structure confirmed bearish on 1h AND 4h (2nd consecutive check) — exit now'
+              : 'Structure confirmed bullish on 1h AND 4h (2nd consecutive check) — exit now',
+            urgency: 'HIGH',
+            price,
+            mfe_pct: mfePct,
+            progress_pct: progressPct
+          });
+        } else {
+          // First time seeing this flip — store as a LOW urgency warning, not CLOSE yet
+          recs.push({
+            type: 'CLOSE',
+            reason: structBearish
+              ? 'Structure flipped bearish on 1h AND 4h — monitoring, will confirm next check'
+              : 'Structure flipped bullish on 1h AND 4h — monitoring, will confirm next check',
+            urgency: 'LOW', // downgraded until confirmed
+            price,
+            mfe_pct: mfePct,
+            progress_pct: progressPct
+          });
+        }
       }
     }
   } catch(e) {}
@@ -263,9 +297,19 @@ function generateRecommendations(sig, data, price) {
     }
   } catch(e) {}
 
-  // Price moved significantly AGAINST trade (MAE > 50% of SL distance)
-  const maeProgress = tpDist > 0 ? Math.round((-priceDist / slDist) * 100) : 0;
-  if (maeProgress > 60) {
+  // Price moved against trade — fire CLOSE rec early enough to act on
+  // 40% = early warning (MEDIUM), 70% = urgent (HIGH)
+  const maeProgress = slDist > 0 ? Math.round((-priceDist / slDist) * 100) : 0;
+  if (maeProgress > 70) {
+    recs.push({
+      type: 'CLOSE',
+      reason: `Price ${maeProgress}% of the way to SL — urgent, cut now`,
+      urgency: 'HIGH',
+      price,
+      mfe_pct: mfePct,
+      progress_pct: progressPct
+    });
+  } else if (maeProgress > 40) {
     recs.push({
       type: 'CLOSE',
       reason: `Price ${maeProgress}% of the way to SL — consider cutting early`,
