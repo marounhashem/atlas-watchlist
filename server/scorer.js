@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260326.6'; // Daily EMA filter added — blocks counter-trend LONGs in weekly downtrend
+const SCORER_VERSION = '20260326.7'; // SHORT balance: RSI threshold 75, crowd trap 55%, asymmetric thresholds
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -444,8 +444,11 @@ function scoreSymbol(symbol) {
     console.log(`[Scorer] ${symbol} LONG blocked — RSI ${rsiCheck} < 40 (momentum against)`);
     return null;
   }
-  if (direction === 'SHORT' && rsiCheck > 60) {
-    console.log(`[Scorer] ${symbol} SHORT blocked — RSI ${rsiCheck} > 60 (momentum against)`);
+  // SHORT: only block if RSI extremely overbought (>75) — RSI 50-75 is ideal SHORT zone
+  // RSI 60-75 on SHORT = elevated price, not yet extreme = best SHORT entry zone
+  // Previous threshold of 60 was incorrectly blocking the best SHORT setups
+  if (direction === 'SHORT' && rsiCheck > 75) {
+    console.log(`[Scorer] ${symbol} SHORT blocked — RSI ${rsiCheck} > 75 (extreme overbought, chase risk)`);
     return null;
   }
 
@@ -615,12 +618,13 @@ function scoreSymbol(symbol) {
   // 65%+ trapped = strong squeeze setup, slight boost
   const longPct  = data.fxssi_long_pct  || 50;
   const shortPct = data.fxssi_short_pct || 50;
+  // Asymmetric crowd thresholds — SHORT needs lower bar to trigger
   const crowdWithUs      = (direction === 'LONG'  && longPct  >= 60) ||
-                           (direction === 'SHORT' && shortPct >= 60);
+                           (direction === 'SHORT' && shortPct >= 55);
   const crowdTrappedOpp  = (direction === 'LONG'  && shortPct >= 60) ||
-                           (direction === 'SHORT' && longPct  >= 60);
+                           (direction === 'SHORT' && longPct  >= 55);
   const crowdStrongTrap  = (direction === 'LONG'  && shortPct >= 65) ||
-                           (direction === 'SHORT' && longPct  >= 65);
+                           (direction === 'SHORT' && longPct  >= 60);
 
   if (crowdWithUs) {
     // Crowd on same side as us = contrarian risk, slight penalty
