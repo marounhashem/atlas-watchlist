@@ -75,7 +75,21 @@ async function analysePostTrade(signal, outcome) {
       if (marketData?.fxssi_analysis) fxssi = JSON.parse(marketData.fxssi_analysis);
     } catch(e) {}
 
-    const prompt = `You are a trading analyst reviewing a completed trade for the ATLAS system.
+    // Build recommendation summary for prompt
+  let recSummary = 'None issued';
+  try {
+    const { getRecommendations } = require('./db');
+    const recs = getRecommendations(signal.id);
+    if (recs.length > 0) {
+      recSummary = recs.map(r => {
+        const age = Math.round((signal.outcome_ts - r.ts) / 60000);
+        const followed = r.followed ? 'FOLLOWED' : 'IGNORED';
+        return `${new Date(r.ts).toUTCString().slice(17,25)} — ${r.type} (${r.urgency}): ${r.reason} [${followed}, ${age}min before close]`;
+      }).join('\n  ');
+    }
+  } catch(e) {}
+
+  const prompt = `You are a trading analyst reviewing a completed trade for the ATLAS system.
 
 TRADE RESULT: ${outcome}
 Symbol: ${signal.symbol} | Direction: ${signal.direction} | Score: ${signal.score}%
@@ -83,6 +97,11 @@ Entry: ${signal.entry} | SL: ${signal.sl} | TP: ${signal.tp} | R:R: ${signal.rr}
 Session: ${signal.session} | PnL: ${signal.pnl_pct != null ? signal.pnl_pct + '%' : 'unknown'}
 Max Favorable Excursion: ${signal.mfe != null ? signal.mfe_pct + '% toward TP' : 'unknown'}
 Signal reasoning: ${signal.reasoning}
+
+TRADE MONITOR RECOMMENDATIONS ISSUED:
+  ${recSummary}
+Note: Were CLOSE/MOVE_SL recommendations issued before the trade closed? If so, were they correct?
+Did ignoring them contribute to the outcome? Factor this into score_adjustment.
 
 ${signal.mfe != null ? `MFE CONTEXT: Price moved ${signal.mfe_pct}% in the right direction before ${outcome === 'LOSS' ? 'reversing to hit SL' : 'hitting TP'}. ${outcome === 'LOSS' && signal.mfe_pct > 0.3 ? 'This suggests the direction was correct but SL was too tight.' : outcome === 'LOSS' && (signal.mfe_pct || 0) < 0.1 ? 'Price barely moved favorably — likely a wrong call entirely.' : ''}` : ''}
 
