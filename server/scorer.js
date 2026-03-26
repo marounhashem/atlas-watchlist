@@ -351,12 +351,12 @@ function scoreSymbol(symbol) {
   // RSI < 35 on LONG: price in freefall, catching a falling knife
   // RSI > 65 on SHORT: price in strong uptrend, fading momentum
   const rsiCheck = data.rsi || 50;
-  if (direction === 'LONG'  && rsiCheck < 35) {
-    console.log(`[Scorer] ${symbol} LONG blocked — RSI ${rsiCheck} < 35 (momentum against)`);
+  if (direction === 'LONG'  && rsiCheck < 40) {
+    console.log(`[Scorer] ${symbol} LONG blocked — RSI ${rsiCheck} < 40 (momentum against)`);
     return null;
   }
-  if (direction === 'SHORT' && rsiCheck > 65) {
-    console.log(`[Scorer] ${symbol} SHORT blocked — RSI ${rsiCheck} > 65 (momentum against)`);
+  if (direction === 'SHORT' && rsiCheck > 60) {
+    console.log(`[Scorer] ${symbol} SHORT blocked — RSI ${rsiCheck} > 60 (momentum against)`);
     return null;
   }
 
@@ -973,8 +973,9 @@ function scoreSymbol(symbol) {
   // Below 1.5 R:R is not worth taking regardless of score
   // Recalculate after all level adjustments are done
   rr = calcRR(entry, sl, tp, direction);
-  if (!rr || rr < 1.5) {
-    console.log(`[Scorer] ${symbol} ${direction} — R:R ${rr} below minimum 1.5, skipping`);
+  const minRRGate = cfg.assetClass === 'index' ? 1.8 : 1.5;
+  if (!rr || rr < minRRGate) {
+    console.log(`[Scorer] ${symbol} ${direction} — R:R ${rr} below minimum ${minRRGate}, skipping`);
     return null;
   }
 
