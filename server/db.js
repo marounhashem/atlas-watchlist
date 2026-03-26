@@ -514,6 +514,42 @@ function markRecommendationFollowed(signalId) {
   persist();
 }
 
+function dismissRecommendation(signalId, recId) {
+  const signal = get('SELECT recommendations FROM signals WHERE id=?', [signalId]);
+  if (!signal?.recommendations) return;
+  try {
+    const recs = JSON.parse(signal.recommendations);
+    const updated = recs.map(r => r.id === recId ? { ...r, dismissed: true, dismissed_ts: Date.now() } : r);
+    run('UPDATE signals SET recommendations=? WHERE id=?', [JSON.stringify(updated), signalId]);
+    persist();
+  } catch(e) {}
+}
+
+function resolveStaleRecommendations(signalId) {
+  // Auto-expire recommendations older than 20 minutes that haven't been re-triggered
+  // If condition was still present, addRecommendation would have tried to add again (dedup blocks it)
+  // If condition resolved, no new attempt = recommendation is stale after 20 min
+  const signal = get('SELECT recommendations FROM signals WHERE id=?', [signalId]);
+  if (!signal?.recommendations) return;
+  try {
+    const recs = JSON.parse(signal.recommendations);
+    const staleMs = 20 * 60 * 1000;
+    const now = Date.now();
+    let changed = false;
+    const updated = recs.map(r => {
+      if (!r.resolved && !r.dismissed && (now - r.ts) > staleMs) {
+        changed = true;
+        return { ...r, resolved: true, resolved_ts: now, resolved_reason: 'auto-expired (20min)' };
+      }
+      return r;
+    });
+    if (changed) {
+      run('UPDATE signals SET recommendations=? WHERE id=?', [JSON.stringify(updated), signalId]);
+      persist();
+    }
+  } catch(e) {}
+}
+
 module.exports = {
   init, isReady, persist, run,
   upsertMarketData, getLatestMarketData,
@@ -523,5 +559,6 @@ module.exports = {
   insertLearningLog, getAllSignals, getLearningLog,
   getLatestOpenSignal, expireOldVersionSignals,
   addRecommendation, getRecommendations, markRecommendationFollowed,
+  dismissRecommendation, resolveStaleRecommendations,
   retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals
 };
