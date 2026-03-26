@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260326.5'; // Profit Ratio Delta scoring added
+const SCORER_VERSION = '20260326.6'; // Daily EMA filter added — blocks counter-trend LONGs in weekly downtrend
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -460,6 +460,7 @@ function scoreSymbol(symbol) {
       const st     = rawEma.structure || {};
       const ema1h  = emaDir['1h'] || 0;
       const ema4h  = emaDir['4h'] || 0;
+      const ema1d  = emaDir['1d'] || 0; // daily EMA — more responsive than daily structure
       const str1h  = typeof st['1h'] === 'number' ? st['1h'] : 0;
       const str4h  = typeof st['4h'] === 'number' ? st['4h'] : 0;
       const str1d  = typeof st['1d'] === 'number' ? st['1d'] : 0;
@@ -473,7 +474,13 @@ function scoreSymbol(symbol) {
           console.log(`[Scorer] ${symbol} LONG blocked — 1h AND 4h structure both bearish`);
           return null;
         }
-        // Daily structure bearish = weekly downtrend — block LONG even if intraday looks ok
+        // Daily EMA bearish = price below 200 EMA on daily = weekly downtrend confirmed
+        // Block LONG when daily EMA bearish + at least one intraday TF also against
+        if (ema1d === -1 && (ema1h === -1 || ema4h === -1 || str1h === -1 || str4h === -1)) {
+          console.log(`[Scorer] ${symbol} LONG blocked — daily EMA bearish + intraday confirming downtrend`);
+          return null;
+        }
+        // Daily structure bearish (when swing points confirmed)
         if (str1d === -1 && (str1h === -1 || str4h === -1)) {
           console.log(`[Scorer] ${symbol} LONG blocked — daily structure bearish + higher TF confirming`);
           return null;
@@ -488,7 +495,11 @@ function scoreSymbol(symbol) {
           console.log(`[Scorer] ${symbol} SHORT blocked — 1h AND 4h structure both bullish`);
           return null;
         }
-        // Daily structure bullish = weekly uptrend — block SHORT even if intraday looks bearish
+        // Daily EMA bullish + intraday confirming = block SHORT
+        if (ema1d === 1 && (ema1h === 1 || ema4h === 1 || str1h === 1 || str4h === 1)) {
+          console.log(`[Scorer] ${symbol} SHORT blocked — daily EMA bullish + intraday confirming uptrend`);
+          return null;
+        }
         if (str1d === 1 && (str1h === 1 || str4h === 1)) {
           console.log(`[Scorer] ${symbol} SHORT blocked — daily structure bullish + higher TF confirming`);
           return null;
@@ -633,7 +644,7 @@ function scoreSymbol(symbol) {
       if (st && typeof st.score === 'number') {
         structScore = st.score;
       } else {
-        structScore = (st?.['1m']||0) + (st?.['5m']||0) + (st?.['15m']||0) +
+        structScore = (st?.['1m']||0) + (st?.['5m']||0) + (st?.['15m']||0) + (st?.['1h']||0) + (st?.['4h']||0) + (st?.['1d']||0);
                       (st?.['1h']||0) + (st?.['4h']||0);
       }
     }
@@ -1260,11 +1271,12 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
       const rawR = JSON.parse(data.raw_payload);
       const st = rawR.structure;
       if (st) {
-        const tfs = ['1m','5m','15m','1h','4h'];
+        const tfs = ['1m','5m','15m','1h','4h','1d'];
         const aligned = tfs.filter(tf => (direction==='LONG' ? st[tf]===1 : st[tf]===-1));
         const opposed = tfs.filter(tf => (direction==='LONG' ? st[tf]===-1 : st[tf]===1));
         const sc = typeof st.score === 'number' ? st.score : 0;
-        structTag = ` · Structure ${aligned.length}/5 aligned [${aligned.join(',') || '—'}]${opposed.length ? ' ⚠ opposed:'+opposed.join(',') : ''}`;
+        const maxTFs = st['1d'] !== undefined ? 6 : 5; // 6 TFs if daily is in payload
+        structTag = ` · Structure ${aligned.length}/${maxTFs} aligned [${aligned.join(',') || '—'}]${opposed.length ? ' ⚠ opposed:'+opposed.join(',') : ''}`;
       }
     }
   } catch(e) {}
