@@ -803,27 +803,36 @@ app.post('/api/paper-outcome', (req, res) => {
 // ── Cron jobs ─────────────────────────────────────────────────────────────────
 // Score all priority symbols every 5 minutes
 cron.schedule('* * * * *', async () => {
-  console.log('[Cron] Running 1m scoring cycle...');
-  const results = await scoreAllPriority();
-  const proceeds = results.filter(r => r.verdict === 'PROCEED');
-  const watches = results.filter(r => r.verdict === 'WATCH');
+  if (!dbReady) return;
+  try {
+    const results = await scoreAllPriority();
+    const proceeds = results.filter(r => r.verdict === 'PROCEED');
+    const watches  = results.filter(r => r.verdict === 'WATCH');
 
-  for (const r of [...proceeds, ...watches]) {
-    const signalId = saveSignal(r);
-    if (signalId) r.id = signalId;
-  }
+    for (const r of [...proceeds, ...watches]) {
+      const signalId = saveSignal(r);
+      if (signalId) r.id = signalId;
+    }
 
-  broadcast({ type: 'SCORES', results, ts: Date.now() });
+    broadcast({ type: 'SCORES', results, ts: Date.now() });
 
-  if (proceeds.length > 0) {
-    console.log(`[Cron] PROCEED signals: ${proceeds.map(r => r.symbol + ' ' + r.direction + ' ' + r.score + '%').join(', ')}`);
-    broadcast({ type: 'ALERT', signals: proceeds, ts: Date.now() });
+    if (proceeds.length > 0) {
+      console.log(`[Cron] PROCEED signals: ${proceeds.map(r => r.symbol + ' ' + r.direction + ' ' + r.score + '%').join(', ')}`);
+      broadcast({ type: 'ALERT', signals: proceeds, ts: Date.now() });
+    }
+  } catch(e) {
+    console.error('[Cron] Scoring error:', e.message);
   }
 });
 
-// Check outcomes every 5 minutes + monitor active signals for thesis changes
+// Check outcomes every minute + monitor active signals for thesis changes
 cron.schedule('* * * * *', () => {
-  checkOutcomes(broadcast); // includes trade monitoring via outcome.js — 1m cycle
+  if (!dbReady) return;
+  try {
+    checkOutcomes(broadcast);
+  } catch(e) {
+    console.error('[Cron] Outcome check error:', e.message);
+  }
 });
 
 // FXSSI auto-scrape — fires at :01/:21/:41, aligned with 20-min FXSSI refresh cycle
