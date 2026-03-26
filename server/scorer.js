@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260325.1';
+const SCORER_VERSION = '20260326.1'; // Major fixes: RSI hard block, EMA trend filter, TP cap, crowd trap override
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -345,6 +345,42 @@ function scoreSymbol(symbol) {
   const direction = inferDirection(data);
   if (!direction) return null;
 
+  // ── Hard RSI block ────────────────────────────────────────────────────────
+  // Analysis of 26 losses showed RSI opposing direction = 0% win rate
+  // These are hard blocks, not penalties — no signal generated at all
+  // RSI < 35 on LONG: price in freefall, catching a falling knife
+  // RSI > 65 on SHORT: price in strong uptrend, fading momentum
+  const rsiCheck = data.rsi || 50;
+  if (direction === 'LONG'  && rsiCheck < 35) {
+    console.log(`[Scorer] ${symbol} LONG blocked — RSI ${rsiCheck} < 35 (momentum against)`);
+    return null;
+  }
+  if (direction === 'SHORT' && rsiCheck > 65) {
+    console.log(`[Scorer] ${symbol} SHORT blocked — RSI ${rsiCheck} > 65 (momentum against)`);
+    return null;
+  }
+
+  // ── EMA trend filter ──────────────────────────────────────────────────────
+  // If 1h AND 4h EMAs are both against direction, block the signal
+  // The 200 EMA lags but when BOTH higher TFs agree it's a strong counter-trend signal
+  // This was the primary cause of 26 consecutive losses — buying into downtrend
+  try {
+    if (data.raw_payload) {
+      const rawEma = JSON.parse(data.raw_payload);
+      const emaDir = rawEma.emaDir || {};
+      const ema1h  = emaDir['1h'] || 0;
+      const ema4h  = emaDir['4h'] || 0;
+      if (direction === 'LONG'  && ema1h === -1 && ema4h === -1) {
+        console.log(`[Scorer] ${symbol} LONG blocked — 1h AND 4h EMA both bearish`);
+        return null;
+      }
+      if (direction === 'SHORT' && ema1h === 1  && ema4h === 1) {
+        console.log(`[Scorer] ${symbol} SHORT blocked — 1h AND 4h EMA both bullish`);
+        return null;
+      }
+    }
+  } catch(e) {}
+
   // Sanitise corrupted ob_imbalance
   if (data.ob_imbalance && typeof data.ob_imbalance === 'string' && data.ob_imbalance.startsWith('{')) {
     data.ob_imbalance = 0;
@@ -380,11 +416,30 @@ function scoreSymbol(symbol) {
     else if (agree) conflictMultiplier = 1.12;
   }
 
+  // ── Crowd trap override ───────────────────────────────────────────────────
+  // When 60%+ crowd is trapped on the OPPOSITE side, that IS the signal
+  // Don't penalise — the contrarian setup is valid even if Pine EMA conflicts
+  // 65%+ trapped = strong squeeze setup, slight boost
   const longPct  = data.fxssi_long_pct  || 50;
   const shortPct = data.fxssi_short_pct || 50;
-  const crowdWithUs = (direction === 'LONG'  && longPct  >= 60) ||
-                      (direction === 'SHORT' && shortPct >= 60);
-  if (crowdWithUs) conflictMultiplier *= 0.85;
+  const crowdWithUs      = (direction === 'LONG'  && longPct  >= 60) ||
+                           (direction === 'SHORT' && shortPct >= 60);
+  const crowdTrappedOpp  = (direction === 'LONG'  && shortPct >= 60) ||
+                           (direction === 'SHORT' && longPct  >= 60);
+  const crowdStrongTrap  = (direction === 'LONG'  && shortPct >= 65) ||
+                           (direction === 'SHORT' && longPct  >= 65);
+
+  if (crowdWithUs) {
+    // Crowd on same side as us = contrarian risk, slight penalty
+    conflictMultiplier *= 0.85;
+  } else if (crowdStrongTrap) {
+    // 65%+ on opposite side = strong squeeze fuel, override EMA conflict penalty
+    if (conflictMultiplier < 1.0) conflictMultiplier = Math.min(1.0, conflictMultiplier + 0.15);
+    conflictMultiplier *= 1.05;
+  } else if (crowdTrappedOpp) {
+    // 60-65% on opposite side = moderate contrarian setup
+    if (conflictMultiplier < 1.0) conflictMultiplier = Math.min(1.0, conflictMultiplier + 0.08);
+  }
 
   // ── Multi-TF structure alignment ──────────────────────────────────────────
   // structScore -5 to +5: all 5 TFs agreeing = much stronger than single 4h
@@ -464,26 +519,12 @@ function scoreSymbol(symbol) {
   const fxssiCombined = (fxssiSc + obSc) / 2;
 
   const rawScore = (
-    biasSc        * weights.pine +
+    biasSc       * weights.pine +
     fxssiCombined * weights.fxssi +
-    sessionSc     * weights.session
+    sessionSc    * weights.session
   ) * 100;
 
-  // ── Score ceiling based on multi-TF structure alignment ───────────────────
-  // Can't be 90%+ confident if only 1/5 TFs agree on direction
-  // structScore: -5 to +5. High score requires multiple TFs aligned
-  let structureCap = 95; // default max
-  if (structScore !== undefined) {
-    const absStruct = Math.abs(structScore);
-    if      (absStruct <= 1) structureCap = 78; // 0-1 TFs aligned — cap at 78
-    else if (absStruct <= 2) structureCap = 84; // 2 TFs aligned — cap at 84
-    else if (absStruct <= 3) structureCap = 89; // 3 TFs aligned — cap at 89
-    else if (absStruct <= 4) structureCap = 93; // 4 TFs aligned — cap at 93
-    // 5 TFs aligned = full 95 cap
-  }
-
-  const cappedRaw = Math.min(structureCap, rawScore);
-  const score = Math.round(cappedRaw * conflictMultiplier);
+  const score = Math.round(rawScore * conflictMultiplier);
 
   // ── Regime adjustment ─────────────────────────────────────────────────────
   // Claude's regime detection feeds back into scoring — don't just display it
@@ -818,31 +859,33 @@ function scoreSymbol(symbol) {
     if (pineSl) sl = Math.round((sl * slFxssiW + pineSl * (1 - slFxssiW)) * 10000) / 10000;
     if (pineTp) tp = Math.round((tp * tpFxssiW + pineTp * (1 - tpFxssiW)) * 10000) / 10000;
 
-    // ── TP cap at nearest swing S/R only ─────────────────────────────────────
-    // Only cap if resistance is at least 1.5x ATR away — closer than that and
-    // the cap destroys R:R, blocking a valid signal entirely
+    // ── TP cap at HTF resistance/support ──────────────────────────────────────
+    // Don't set TP beyond the nearest significant S/R level — price won't pass it cleanly
+    // Use Pine's nearestResistance/nearestSupport and rangeHigh/rangeLow
     try {
       const raw6 = JSON.parse(data.raw_payload || '{}');
       const sr   = raw6.sr || {};
       if (direction === 'LONG' && tp) {
+        // Cap TP at nearest resistance (leave small buffer)
         const res = sr.resistance;
-        const distToRes = res ? Math.abs(res - entry) : 0;
-        if (res && res > entry && res < tp && distToRes > atr * 1.5) {
-          const cap = Math.round((res - atr * 0.3) * 10000) / 10000;
-          if (cap > entry) {
-            tp = cap;
-            console.log(`[Scorer] ${symbol} LONG TP capped at swing resistance ${cap}`);
-          }
+        const rHi = raw6.rangeHigh;
+        let cap = null;
+        if (res && res > entry && res < tp) cap = Math.round((res - atr * 0.3) * 10000) / 10000;
+        if (rHi && rHi > entry && rHi < tp && (!cap || rHi < cap)) cap = Math.round((rHi - atr * 0.2) * 10000) / 10000;
+        if (cap && cap > entry) {
+          tp = cap;
+          console.log(`[Scorer] ${symbol} LONG TP capped at resistance ${cap}`);
         }
       } else if (direction === 'SHORT' && tp) {
+        // Cap TP at nearest support (leave small buffer)
         const sup = sr.support;
-        const distToSup = sup ? Math.abs(entry - sup) : 0;
-        if (sup && sup < entry && sup > tp && distToSup > atr * 1.5) {
-          const cap = Math.round((sup + atr * 0.3) * 10000) / 10000;
-          if (cap < entry) {
-            tp = cap;
-            console.log(`[Scorer] ${symbol} SHORT TP capped at swing support ${cap}`);
-          }
+        const rLo = raw6.rangeLow;
+        let cap = null;
+        if (sup && sup < entry && sup > tp) cap = Math.round((sup + atr * 0.3) * 10000) / 10000;
+        if (rLo && rLo < entry && rLo > tp && (!cap || rLo > cap)) cap = Math.round((rLo + atr * 0.2) * 10000) / 10000;
+        if (cap && cap < entry) {
+          tp = cap;
+          console.log(`[Scorer] ${symbol} SHORT TP capped at support ${cap}`);
         }
       }
     } catch(e) {}
@@ -859,6 +902,20 @@ function scoreSymbol(symbol) {
     }
   }
 
+  // ── TP sanity gate — cap at 5× ATR ───────────────────────────────────────
+  // Analysis showed 16 signals with R:R > 10 (up to 1102:1) — these are not real trades
+  // Happens when FXSSI has no cluster above entry and TP falls back to uncapped projection
+  // Cap TP at 5× ATR from entry — anything beyond is unrealistic for a swing trade
+  const maxTpDist = atr * 5.0;
+  if (direction === 'LONG'  && tp && tp - entry > maxTpDist) {
+    tp = Math.round((entry + maxTpDist) * 10000) / 10000;
+    console.log(`[Scorer] ${symbol} LONG TP capped at 5×ATR: ${tp}`);
+  }
+  if (direction === 'SHORT' && tp && entry - tp > maxTpDist) {
+    tp = Math.round((entry - maxTpDist) * 10000) / 10000;
+    console.log(`[Scorer] ${symbol} SHORT TP capped at 5×ATR: ${tp}`);
+  }
+
   let rr = calcRR(entry, sl, tp, direction);
 
   // ── R:R sanity check with Claude multipliers ──────────────────────────────
@@ -869,10 +926,9 @@ function scoreSymbol(symbol) {
   } catch(e) {}
 
   const rrMin = claudeOpt?.ideal_rr_min || 1.5;
-  const rrMax = claudeOpt?.ideal_rr_max || 6.0; // raised — don't cap good organic R:R
+  const rrMax = claudeOpt?.ideal_rr_max || 4.0;
 
-  if (!rr || rr < rrMin) {
-    // R:R too tight — rebuild using ATR to get acceptable levels
+  if (!rr || rr < rrMin || rr > rrMax) {
     const slMult = claudeOpt?.sl_multiplier || 1.5;
     const tpMult = claudeOpt?.tp_multiplier || 3.0;
     if (direction === 'LONG') {
@@ -940,7 +996,7 @@ function scoreSymbol(symbol) {
       }
     }
   } catch(e) {}
-  const macroAdjustedScore = Math.min(95, Math.max(0, finalScore + macroScoreAdj));
+  const macroAdjustedScore = Math.min(100, Math.max(0, finalScore + macroScoreAdj));
   const macroVerdict = macroAdjustedScore >= adjustedMinScore ? 'PROCEED'
     : macroAdjustedScore >= Math.max(55, adjustedMinScore - 15) ? 'WATCH' : 'SKIP';
 
