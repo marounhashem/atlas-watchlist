@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260326.4'; // FXSSI hourly confirmation, daily structure, gravity+absorption, SHORT momentum, FXSSI tiebreaker
+const SCORER_VERSION = '20260326.5'; // Profit Ratio Delta scoring added
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -229,6 +229,38 @@ function scoreOrderBook(data, direction) {
       if (hBias === 'SELL' && direction === 'SHORT') score += 0.08;
       if (hBias === 'BUY'  && direction === 'SHORT') score -= 0.08;
       if (hBias === 'SELL' && direction === 'LONG')  score -= 0.08;
+    }
+  } catch(e) {}
+
+  // ── Profit Ratio Delta scoring ────────────────────────────────────────────
+  // Delta > 2% = spike in profitable traders = manipulation/reversal signal
+  // If delta spike AND sellers are winning → BUY confirmed (sellers were squeezed)
+  // If delta spike AND buyers are winning → SELL confirmed (buyers were squeezed)
+  // If delta spike but neutral → slight boost (something happened, direction unclear)
+  // No delta or delta < 2% → no effect
+  try {
+    const raw3 = data.fxssi_analysis || data.raw_payload;
+    if (raw3) {
+      const parsed3 = JSON.parse(raw3);
+      const fx3 = parsed3.fxssiAnalysis
+        ? (typeof parsed3.fxssiAnalysis === 'string' ? JSON.parse(parsed3.fxssiAnalysis) : parsed3.fxssiAnalysis)
+        : (parsed3.longPct != null ? parsed3 : null);
+
+      const delta3    = fx3?.profitDelta       || 0;
+      const deltaBias = fx3?.deltaReversalBias || 'NEUTRAL';
+
+      if (Math.abs(delta3) > 2) {
+        if (deltaBias === 'BUY'  && direction === 'LONG')  {
+          score += 0.12; // delta confirms LONG
+          console.log && null; // silent
+        }
+        if (deltaBias === 'SELL' && direction === 'SHORT') {
+          score += 0.12; // delta confirms SHORT
+        }
+        if (deltaBias === 'BUY'  && direction === 'SHORT') score -= 0.08; // delta contradicts SHORT
+        if (deltaBias === 'SELL' && direction === 'LONG')  score -= 0.08; // delta contradicts LONG
+        if (deltaBias === 'NEUTRAL') score += 0.04; // spike but unclear — slight activity boost
+      }
     }
   } catch(e) {}
 
