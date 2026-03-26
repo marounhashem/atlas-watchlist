@@ -806,7 +806,7 @@ function renderRecommendations(sig) {
     var primaryId = primary.id || '';
 
     var moreBadge = rest.length > 0
-      ? '<span style="font-size:9px;color:var(--dim);margin-left:8px;cursor:pointer;" onclick="toggleMoreRecs(this)">+' + rest.length + ' more</span>'
+      ? '<button onclick="toggleMoreRecs(this)" style="margin-left:8px;background:rgba(255,255,255,0.08);border:1px solid var(--border);border-radius:3px;color:var(--text2);font-size:9px;padding:1px 6px;cursor:pointer;letter-spacing:.3px;">▼ +' + rest.length + ' more</button>'
       : '';
 
     var moreHtml = rest.map(function(r2) {
@@ -833,7 +833,7 @@ function renderRecommendations(sig) {
       + '</div>';
 
     if (rest.length > 0) {
-      html += '<div style="display:none">' + moreHtml + '</div>';
+      html += '<div style="display:none;margin-top:4px;border-left:2px solid var(--border);padding-left:6px;">' + moreHtml + '</div>';
     }
     return html;
   } catch(e) { return ''; }
@@ -1363,7 +1363,12 @@ async function fetchMarketStatus() {
 
 function toggleMoreRecs(el) {
   const moreDiv = el.parentElement.nextElementSibling;
-  if (moreDiv) moreDiv.style.display = moreDiv.style.display === 'none' ? 'block' : 'none';
+  if (!moreDiv) return;
+  const isHidden = moreDiv.style.display === 'none' || moreDiv.style.display === '';
+  moreDiv.style.display = isHidden ? 'block' : 'none';
+  // Update button text
+  const count = moreDiv.querySelectorAll('.rec-card').length;
+  el.textContent = isHidden ? ('▲ hide ' + count) : ('▼ +' + count + ' more');
 }
 
 function dismissRec(signalId, recId) {
