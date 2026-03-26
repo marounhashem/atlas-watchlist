@@ -848,7 +848,7 @@ function renderCard(sig, isPast=false) {
             const ageStr = ageMin < 1 ? 'just now' : ageMin + 'm ago';
             const icon = r.urgency === 'HIGH' ? '🚨' : r.urgency === 'MEDIUM' ? '⚠️' : 'ℹ️';
             return `<div class="rec-card rec-${r.urgency}">
-              ${icon} <strong>${r.type}</strong><span class="rec-ts">${ageStr} · $\{new Date(r.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span><br>
+              ${icon} <strong>${r.type}</strong><span class="rec-ts">${ageStr} · ${new Date(r.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span><br>
               ${r.reason}
               ${r.new_sl ? `<br><span style="color:#ffd740">→ New SL: ${r.new_sl}</span>` : ''}
               ${r.new_tp ? `<br><span style="color:#00e676">→ New TP: ${r.new_tp}</span>` : ''}
