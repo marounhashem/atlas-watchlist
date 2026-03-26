@@ -9,8 +9,7 @@ const db = require('./db');
 const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome, updatePaperOutcome, getPaperTradeStats, retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals } = db;
 const { isMarketOpen, getMarketStatus, minutesUntilOpen } = require('./marketHours');
 const { scoreAllPriority, saveSignal } = require('./scorer');
-const { checkOutcomes, checkAndMonitor } = require('./outcome');
-const { checkActiveSignals } = require('./monitor');
+const { checkOutcomes } = require('./outcome');
 const { runLearningCycle } = require('./learner');
 const claudeLearner = require('./claudeLearner');
 const { runFXSSIScrape, processBridgePayload } = require('./fxssiScraper');
@@ -824,7 +823,7 @@ cron.schedule('*/5 * * * *', async () => {
 
 // Check outcomes every 5 minutes + monitor active signals for thesis changes
 cron.schedule('2,7,12,17,22,27,32,37,42,47,52,57 * * * *', () => {
-  checkAndMonitor(broadcast); // V2: includes trade monitoring
+  checkOutcomes(broadcast); // includes trade monitoring via outcome.js
 });
 
 // FXSSI auto-scrape — fires at :01/:21/:41, aligned with 20-min FXSSI refresh cycle
