@@ -1,4 +1,4 @@
-const { getRecentOutcomes, getWeights, updateWeights, insertLearningLog, getAllSignals } = require('./db');
+const { getRecentOutcomes, getWeights, updateWeights, insertLearningLog, getAllSignals, getSetting, setSetting } = require('./db');
 const { SYMBOLS } = require('./config');
 
 // Learning thresholds
@@ -9,6 +9,15 @@ const NEW_OUTCOMES_THRESHOLD = 10;        // min new closed trades since last cy
 
 let lastLearningTs = 0;
 let lastOutcomeCount = 0;
+
+// Restore lastLearningTs from DB on startup — prevents 6h gap bypass after restart
+try {
+  const saved = getSetting('lastLearningTs');
+  if (saved) {
+    lastLearningTs = parseInt(saved, 10) || 0;
+    console.log('[Learner] Restored lastLearningTs from DB: ' + new Date(lastLearningTs).toUTCString());
+  }
+} catch(e) { /* DB may not be ready yet — will be 0 until first cycle */ }
 
 function shouldRunLearning() {
   const now = Date.now();
@@ -179,6 +188,7 @@ No explanation, no markdown, pure JSON only.`,
 
     lastLearningTs   = Date.now();
     lastOutcomeCount = closed.length;
+    try { setSetting('lastLearningTs', lastLearningTs); } catch(e) {}
 
     const logEntry = {
       symbolsAnalysed: Object.keys(symbolStats).join(','),
