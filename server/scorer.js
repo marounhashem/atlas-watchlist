@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260326.3'; // Gravity+absorption combo, SHORT momentum path, FXSSI signal tiebreaker
+const SCORER_VERSION = '20260326.4'; // FXSSI hourly confirmation, daily structure, gravity+absorption, SHORT momentum, FXSSI tiebreaker
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -195,6 +195,42 @@ function scoreOrderBook(data, direction) {
 
   if (data.ob_absorption && direction === 'LONG')  score += 0.20;
   if (data.ob_absorption && direction === 'SHORT') score += 0.05;
+
+  // ── Hourly order book confirmation ───────────────────────────────────────
+  // If a level appears in BOTH the 20-min and 1-hour order books it's significant
+  // Institutional positions don't appear in short snapshots — hourly confirms them
+  // Gravity aligned in both books = strong conviction boost
+  // Gravity contradicts in hourly = penalty (short-term noise, hourly says different)
+  try {
+    if (data.fxssi_hourly_analysis) {
+      const hourly = typeof data.fxssi_hourly_analysis === 'string'
+        ? JSON.parse(data.fxssi_hourly_analysis) : data.fxssi_hourly_analysis;
+      const hGravity = hourly?.gravity?.price;
+      const cp3 = data.close || 0;
+
+      if (hGravity && cp3) {
+        const hourlyBullish = hGravity > cp3; // gravity above = bullish pull
+        const hourlyBearish = hGravity < cp3; // gravity below = bearish pull
+
+        if (direction === 'LONG'  && hourlyBullish) {
+          score += 0.15; // hourly confirms LONG bias — institutional buying above
+          console.log && null; // silent
+        }
+        if (direction === 'SHORT' && hourlyBearish) {
+          score += 0.15; // hourly confirms SHORT bias — institutional selling below
+        }
+        if (direction === 'LONG'  && hourlyBearish) score -= 0.10; // hourly contradicts
+        if (direction === 'SHORT' && hourlyBullish) score -= 0.10; // hourly contradicts
+      }
+
+      // Hourly signalBias confirmation
+      const hBias = hourly?.signals?.bias;
+      if (hBias === 'BUY'  && direction === 'LONG')  score += 0.08;
+      if (hBias === 'SELL' && direction === 'SHORT') score += 0.08;
+      if (hBias === 'BUY'  && direction === 'SHORT') score -= 0.08;
+      if (hBias === 'SELL' && direction === 'LONG')  score -= 0.08;
+    }
+  } catch(e) {}
 
   // ── Gravity + Absorption combo boost ──────────────────────────────────────
   // Both V1 winning trades had this combination — empirically validated
@@ -394,6 +430,7 @@ function scoreSymbol(symbol) {
       const ema4h  = emaDir['4h'] || 0;
       const str1h  = typeof st['1h'] === 'number' ? st['1h'] : 0;
       const str4h  = typeof st['4h'] === 'number' ? st['4h'] : 0;
+      const str1d  = typeof st['1d'] === 'number' ? st['1d'] : 0;
 
       if (direction === 'LONG') {
         if (ema1h === -1 && ema4h === -1) {
@@ -404,6 +441,11 @@ function scoreSymbol(symbol) {
           console.log(`[Scorer] ${symbol} LONG blocked — 1h AND 4h structure both bearish`);
           return null;
         }
+        // Daily structure bearish = weekly downtrend — block LONG even if intraday looks ok
+        if (str1d === -1 && (str1h === -1 || str4h === -1)) {
+          console.log(`[Scorer] ${symbol} LONG blocked — daily structure bearish + higher TF confirming`);
+          return null;
+        }
       }
       if (direction === 'SHORT') {
         if (ema1h === 1 && ema4h === 1) {
@@ -412,6 +454,11 @@ function scoreSymbol(symbol) {
         }
         if (str1h === 1 && str4h === 1) {
           console.log(`[Scorer] ${symbol} SHORT blocked — 1h AND 4h structure both bullish`);
+          return null;
+        }
+        // Daily structure bullish = weekly uptrend — block SHORT even if intraday looks bearish
+        if (str1d === 1 && (str1h === 1 || str4h === 1)) {
+          console.log(`[Scorer] ${symbol} SHORT blocked — daily structure bullish + higher TF confirming`);
           return null;
         }
       }
@@ -638,13 +685,14 @@ function scoreSymbol(symbol) {
       const rawSc = JSON.parse(data.raw_payload);
       const stSc  = rawSc.structure;
       const sc    = typeof stSc?.score === 'number' ? Math.abs(stSc.score)
-        : (stSc ? Math.abs((stSc['1m']||0)+(stSc['5m']||0)+(stSc['15m']||0)+(stSc['1h']||0)+(stSc['4h']||0)) : 0);
+        : (stSc ? Math.abs((stSc['1m']||0)+(stSc['5m']||0)+(stSc['15m']||0)+(stSc['1h']||0)+(stSc['4h']||0)+(stSc['1d']||0)) : 0);
       structTier = sc;
       if      (sc <= 1) structureCap = 78;
       else if (sc <= 2) structureCap = 84;
       else if (sc <= 3) structureCap = 89;
       else if (sc <= 4) structureCap = 93;
-      // sc = 5 → max 95
+      else if (sc <= 5) structureCap = 94;
+      // sc = 6 (all TFs including daily) → max 95
     }
   } catch(e) {}
 
