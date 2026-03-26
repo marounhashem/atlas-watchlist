@@ -168,7 +168,10 @@ function analyseOrderBook(data) {
   // ── CONTRARIAN SENTIMENT ──────────────────────────────────────────────────
   let sentiment = 'NEUTRAL';
   let trapped   = null;
-  if (longPct > 60)  { sentiment = 'BEARISH'; trapped = 'LONG';  } // crowd long = contrarian bearish
+  // Asymmetric thresholds — SHORT signals need lower crowd trap bar to balance signal generation
+  // 55%+ long = bearish sentiment (SHORT opportunity) — lower bar enables more SHORT signals
+  // 60%+ short = bullish sentiment (LONG opportunity) — keep higher bar for LONG crowd traps
+  if (longPct > 55)  { sentiment = 'BEARISH'; trapped = 'LONG';  } // crowd long = contrarian bearish
   if (shortPct > 60) { sentiment = 'BULLISH'; trapped = 'SHORT'; } // crowd short = contrarian bullish
 
   // ── SIGNAL COUNTS (buy/sell signals based on structure) ───────────────────
