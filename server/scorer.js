@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260326.2'; // Major fixes: RSI hard block, EMA trend filter, TP cap, crowd trap override
+const SCORER_VERSION = '20260326.2'; // Added structure filter alongside EMA filter, RSI threshold 40, index min RR 1.8
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -360,23 +360,39 @@ function scoreSymbol(symbol) {
     return null;
   }
 
-  // ── EMA trend filter ──────────────────────────────────────────────────────
-  // If 1h AND 4h EMAs are both against direction, block the signal
-  // The 200 EMA lags but when BOTH higher TFs agree it's a strong counter-trend signal
-  // This was the primary cause of 26 consecutive losses — buying into downtrend
+  // ── EMA + Structure trend filter ─────────────────────────────────────────
+  // Block when BOTH higher TFs agree against direction — either via EMA or structure
+  // EMA lags significantly — also check structural HH/HL pattern from Pine
+  // Block if: (1h AND 4h EMA both against) OR (1h AND 4h structure both against)
   try {
     if (data.raw_payload) {
       const rawEma = JSON.parse(data.raw_payload);
-      const emaDir = rawEma.emaDir || {};
+      const emaDir = rawEma.emaDir    || {};
+      const st     = rawEma.structure || {};
       const ema1h  = emaDir['1h'] || 0;
       const ema4h  = emaDir['4h'] || 0;
-      if (direction === 'LONG'  && ema1h === -1 && ema4h === -1) {
-        console.log(`[Scorer] ${symbol} LONG blocked — 1h AND 4h EMA both bearish`);
-        return null;
+      const str1h  = typeof st['1h'] === 'number' ? st['1h'] : 0;
+      const str4h  = typeof st['4h'] === 'number' ? st['4h'] : 0;
+
+      if (direction === 'LONG') {
+        if (ema1h === -1 && ema4h === -1) {
+          console.log(`[Scorer] ${symbol} LONG blocked — 1h AND 4h EMA both bearish`);
+          return null;
+        }
+        if (str1h === -1 && str4h === -1) {
+          console.log(`[Scorer] ${symbol} LONG blocked — 1h AND 4h structure both bearish`);
+          return null;
+        }
       }
-      if (direction === 'SHORT' && ema1h === 1  && ema4h === 1) {
-        console.log(`[Scorer] ${symbol} SHORT blocked — 1h AND 4h EMA both bullish`);
-        return null;
+      if (direction === 'SHORT') {
+        if (ema1h === 1 && ema4h === 1) {
+          console.log(`[Scorer] ${symbol} SHORT blocked — 1h AND 4h EMA both bullish`);
+          return null;
+        }
+        if (str1h === 1 && str4h === 1) {
+          console.log(`[Scorer] ${symbol} SHORT blocked — 1h AND 4h structure both bullish`);
+          return null;
+        }
       }
     }
   } catch(e) {}
