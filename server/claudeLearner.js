@@ -1,225 +1,610 @@
-const { getRecentOutcomes, getWeights, updateWeights, insertLearningLog, getAllSignals } = require('./db');
-const { SYMBOLS } = require('./config');
+// ATLAS//WATCHLIST — Claude Learning Engine
+// Three layers: post-trade analysis, session patterns, market regime detection
+// Fires: after every WIN/LOSS + daily at 17:00 UTC (end London) + every 10 outcomes
 
-// Learning thresholds
-const MIN_CLOSED_TRADES_PER_SYMBOL = 30;  // minimum before adjusting weights — 10 is statistically meaningless
-const MIN_TOTAL_OUTCOMES = 20;            // minimum total before any learning
-const LEARNING_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours between cycles
-const NEW_OUTCOMES_THRESHOLD = 10;        // min new closed trades since last cycle
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const MODEL_SONNET = 'claude-sonnet-4-20250514'; // exact levels only
+const MODEL_HAIKU  = 'claude-haiku-4-5-20251001';  // all other tasks — 20x cheaper
+const MODEL = MODEL_HAIKU; // default
 
-let lastLearningTs = 0;
-let lastOutcomeCount = 0;
+// ── State ─────────────────────────────────────────────────────────────────────
+let outcomesSinceLastRegime = 0;
+let lastDailySummaryDate   = null;
+let regimeCache            = null; // current market regime
+let sessionPatterns        = {};   // { 'GOLD_london': { wins, losses, patterns[] } }
+let postTradeInsights      = [];   // last 50 insights
 
-function shouldRunLearning() {
+// Rate limiting — max 1 post-trade analysis per symbol per 30 minutes
+// Prevents API burn when multiple trades close in quick succession
+const lastAnalysisTs = {}; // { symbol: timestamp }
+const ANALYSIS_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+
+// ── Main entry point ─────────────────────────────────────────────────────────
+async function onOutcome(signal, outcome, broadcast) {
+  if (outcome !== 'WIN' && outcome !== 'LOSS') return;
+
+  outcomesSinceLastRegime++;
+
+  // Rate limit post-trade analysis — skip if same symbol analysed recently
   const now = Date.now();
-
-  // Never run more than once per 6 hours
-  if (now - lastLearningTs < LEARNING_INTERVAL_MS) {
-    const hoursLeft = Math.round((LEARNING_INTERVAL_MS - (now - lastLearningTs)) / 3600000);
-    console.log(`[Learner] Next cycle in ${hoursLeft}h`);
-    return false;
-  }
-
-  // Need minimum total outcomes
-  const outcomes = getRecentOutcomes(500);
-  const closed = outcomes.filter(o => o.outcome !== 'OPEN');
-  if (closed.length < MIN_TOTAL_OUTCOMES) {
-    console.log(`[Learner] Not enough outcomes yet — need ${MIN_TOTAL_OUTCOMES}, have ${closed.length}`);
-    return false;
-  }
-
-  // Need enough NEW outcomes since last cycle
-  const newOutcomes = closed.length - lastOutcomeCount;
-  if (newOutcomes < NEW_OUTCOMES_THRESHOLD && lastLearningTs > 0) {
-    console.log(`[Learner] Only ${newOutcomes} new outcomes since last cycle — need ${NEW_OUTCOMES_THRESHOLD}`);
-    return false;
-  }
-
-  return true;
-}
-
-async function runLearningCycle(broadcast, force = false) {
-  if (!force && !shouldRunLearning()) return;
-
-  console.log('[Learner] Starting learning cycle...');
-
-  const outcomes = getRecentOutcomes(500);
-  const closed = outcomes.filter(o => o.outcome !== 'OPEN');
-
-  // Group by symbol — only process symbols with MIN_CLOSED_TRADES_PER_SYMBOL
-  const bySymbol = {};
-  for (const o of closed) {
-    if (!bySymbol[o.symbol]) bySymbol[o.symbol] = [];
-    bySymbol[o.symbol].push(o);
-  }
-
-  const symbolStats = {};
-  for (const [sym, trades] of Object.entries(bySymbol)) {
-    const wins   = trades.filter(t => t.outcome === 'WIN').length;
-    const losses = trades.filter(t => t.outcome === 'LOSS').length;
-    const total  = wins + losses;
-
-    if (total < MIN_CLOSED_TRADES_PER_SYMBOL) {
-      console.log(`[Learner] ${sym}: only ${total} trades, need ${MIN_CLOSED_TRADES_PER_SYMBOL} — skipping`);
-      continue;
-    }
-
-    symbolStats[sym] = {
-      winRate: Math.round((wins / total) * 100),
-      wins, losses, total,
-      avgScore: Math.round(trades.reduce((s, t) => s + t.score, 0) / trades.length),
-      avgRR:    Math.round((trades.reduce((s, t) => s + (t.rr || 0), 0) / trades.length) * 10) / 10,
-      winsBySession:  groupBySession(trades.filter(t => t.outcome === 'WIN')),
-      lossBySession:  groupBySession(trades.filter(t => t.outcome === 'LOSS')),
-      // Score band analysis — which score bands actually win
-      winsByScoreBand: groupByScoreBand(trades.filter(t => t.outcome === 'WIN')),
-      lossByScoreBand: groupByScoreBand(trades.filter(t => t.outcome === 'LOSS'))
-    };
-  }
-
-  if (Object.keys(symbolStats).length === 0) {
-    console.log('[Learner] No symbols have reached the minimum trade threshold yet');
-    lastLearningTs = Date.now();
-    lastOutcomeCount = closed.length;
+  const lastTs = lastAnalysisTs[signal.symbol] || 0;
+  if (now - lastTs < ANALYSIS_COOLDOWN_MS) {
+    const minsLeft = Math.round((ANALYSIS_COOLDOWN_MS - (now - lastTs)) / 60000);
+    console.log(`[Claude] ${signal.symbol} ${outcome} — post-trade skipped (cooldown ${minsLeft}m remaining)`);
+    updateSessionPattern(signal, outcome, null);
     return;
   }
+  lastAnalysisTs[signal.symbol] = now;
 
-  // Current weights snapshot
-  const currentWeights = {};
-  for (const sym of Object.keys(symbolStats)) {
-    const w = getWeights(sym);
-    if (w) currentWeights[sym] = {
-      pine: w.pine || 0.40,
-      fxssi: w.fxssi || 0.45,
-      session: w.session || 0.15,
-      minScoreProceed: w.min_score_proceed
-    };
+  outcomesSinceLastRegime++;
+
+  // Layer 1 — Post-trade analysis after every WIN/LOSS
+  const insight = await analysePostTrade(signal, outcome);
+  if (insight) {
+    postTradeInsights.unshift(insight);
+    if (postTradeInsights.length > 50) postTradeInsights.pop();
+    if (broadcast) broadcast({ type: 'CLAUDE_INSIGHT', insight, ts: Date.now() });
+    console.log(`[Claude] Post-trade: ${signal.symbol} ${outcome} — ${insight.summary}`);
   }
 
-  const prompt = buildLearnerPrompt(symbolStats, currentWeights);
+  // Layer 2 — Session pattern update
+  updateSessionPattern(signal, outcome, insight);
+
+  // Layer 3 — Regime check every 10 outcomes
+  if (outcomesSinceLastRegime >= 10) {
+    outcomesSinceLastRegime = 0;
+    const regime = await detectRegime();
+    if (regime) {
+      regimeCache = regime;
+      if (broadcast) broadcast({ type: 'REGIME_UPDATE', regime, ts: Date.now() });
+      console.log(`[Claude] Regime: ${regime.regime} — ${regime.summary}`);
+    }
+  }
+}
+
+// ── Layer 1: Post-trade analysis ──────────────────────────────────────────────
+async function analysePostTrade(signal, outcome) {
+  if (!ANTHROPIC_API_KEY) return null;
 
   try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    const db = require('./db');
+    // Get the market data snapshot at signal time
+    const marketData = db.getLatestMarketData(signal.symbol);
+    let fxssi = null;
+    try {
+      if (marketData?.fxssi_analysis) fxssi = JSON.parse(marketData.fxssi_analysis);
+    } catch(e) {}
+
+    const prompt = `You are a trading analyst reviewing a completed trade for the ATLAS system.
+
+TRADE RESULT: ${outcome}
+Symbol: ${signal.symbol} | Direction: ${signal.direction} | Score: ${signal.score}%
+Entry: ${signal.entry} | SL: ${signal.sl} | TP: ${signal.tp} | R:R: ${signal.rr}
+Session: ${signal.session} | PnL: ${signal.pnl_pct != null ? signal.pnl_pct + '%' : 'unknown'}
+Max Favorable Excursion: ${signal.mfe != null ? signal.mfe_pct + '% toward TP' : 'unknown'}
+Signal reasoning: ${signal.reasoning}
+
+${signal.mfe != null ? `MFE CONTEXT: Price moved ${signal.mfe_pct}% in the right direction before ${outcome === 'LOSS' ? 'reversing to hit SL' : 'hitting TP'}. ${outcome === 'LOSS' && signal.mfe_pct > 0.3 ? 'This suggests the direction was correct but SL was too tight.' : outcome === 'LOSS' && (signal.mfe_pct || 0) < 0.1 ? 'Price barely moved favorably — likely a wrong call entirely.' : ''}` : ''}
+
+MARKET CONDITIONS AT ENTRY:
+Pine bias score: ${marketData?.bias || 'N/A'} | RSI: ${marketData?.rsi || 'N/A'} | Structure: ${marketData?.structure || 'N/A'}
+FXSSI: longPct=${fxssi?.longPct || 'N/A'}% shortPct=${fxssi?.shortPct || 'N/A'}% trapped=${fxssi?.trapped || 'none'}
+inProfitPct: ${fxssi?.inProfitPct || 'N/A'}% | signalBias: ${fxssi?.signals?.bias || 'N/A'}
+gravity: ${fxssi?.gravity?.price || 'N/A'} | nearestSLAbove: ${fxssi?.nearestSLAbove?.price || 'N/A'} | nearestSLBelow: ${fxssi?.nearestSLBelow?.price || 'N/A'}
+losingClusters: ${fxssi?.losingClusters?.length || 0} | winningClusters: ${fxssi?.winningClusters?.length || 0}
+middleOfVolume: ${fxssi?.middleOfVolume || 'N/A'}
+
+Analyse this trade and return ONLY this JSON (no markdown):
+{
+  "outcome": "${outcome}",
+  "symbol": "${signal.symbol}",
+  "summary": "<one sentence max 15 words>",
+  "what_worked": ["<factor that contributed to outcome>"],
+  "what_failed": ["<factor that hurt outcome>"],
+  "key_pattern": "<most important pattern to remember for this symbol/session>",
+  "score_adjustment": {
+    "pine_weight": <-0.1 to +0.1, adjust pine scoring weight>,
+    "fxssi_weight": <-0.1 to +0.1, adjust combined FXSSI+OB weight>,
+    "min_score_threshold": <-5 to +5, points to adjust>,
+    "sl_too_tight": <true if MFE > 0.3% but still lost>,
+    "entry_fxssi_shift": <-0.1 to +0.1, shift entry toward FXSSI(+) or Pine(-)>,
+    "tp_fxssi_shift": <-0.1 to +0.1, shift TP toward FXSSI(+) or Pine(-)>
+  },
+  "avoid_next_time": "<condition to avoid for next ${signal.symbol} ${signal.direction} signal>"
+}`;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'x-api-key': ANTHROPIC_API_KEY,
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001', // Haiku — batch weight learning doesn't need Sonnet quality
-        max_tokens: 1000,
-        system: `You are a quantitative trading system optimizer.
-Analyze trade outcomes and return ONLY a JSON object with updated weights.
-Rules:
-- Weights (pine + fxssi + session) must sum to exactly 1.0
-- pine = technical analysis weight, fxssi = order book weight (covers both sentiment and OB), session = fixed at 0.15
-- minScoreProceed must be between 62 and 88
-- If win rate > 65%: slightly increase weights of strongest factors, lower minScore by 1-2
-- If win rate < 45%: increase minScore by 3-5, reduce weights of weakest session
-- If win rate 45-65%: minimal changes only
-- Never change any single weight by more than 0.03 in one cycle — small adjustments only
-Return format: { "SYMBOL": { "pine": 0.xx, "fxssi": 0.xx, "session": 0.15, "minScoreProceed": xx } }
-No explanation, no markdown, pure JSON only.`,
+        model: MODEL,
+        max_tokens: 600,
         messages: [{ role: 'user', content: prompt }]
       })
     });
 
-    const data = await response.json();
-    const text = data.content?.[0]?.text || '';
+    const data = await res.json();
+    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+    const clean = text.replace(/```json|```/g, '').trim();
+    const insight = JSON.parse(clean);
 
-    let updatedWeights;
+    // Apply score adjustments to DB weights
+    if (insight.score_adjustment) {
+      applyWeightAdjustment(signal.symbol, insight.score_adjustment);
+    }
+
+    // Store in learning log
+    db.insertLearningLog({
+      symbolsAnalysed: signal.symbol,
+      outcomesUsed: 1,
+      changes: JSON.stringify([insight]),
+      reasoning: insight.key_pattern
+    });
+
+    return insight;
+  } catch(e) {
+    console.error('[Claude] Post-trade analysis error:', e.message);
+    return null;
+  }
+}
+
+// ── Layer 2: Session pattern tracking ────────────────────────────────────────
+function updateSessionPattern(signal, outcome, insight) {
+  const key = `${signal.symbol}_${signal.session}`;
+  if (!sessionPatterns[key]) sessionPatterns[key] = { wins: 0, losses: 0, patterns: [] };
+
+  if (outcome === 'WIN') sessionPatterns[key].wins++;
+  else sessionPatterns[key].losses++;
+
+  if (insight?.key_pattern) {
+    sessionPatterns[key].patterns.push({
+      outcome,
+      pattern: insight.key_pattern,
+      ts: Date.now()
+    });
+    if (sessionPatterns[key].patterns.length > 20) sessionPatterns[key].patterns.shift();
+  }
+}
+
+// ── Layer 3: Market regime detection ─────────────────────────────────────────
+async function detectRegime() {
+  if (!ANTHROPIC_API_KEY) return null;
+
+  try {
+    const db = require('./db');
+    const recentSignals = db.getAllSignals(20).filter(s =>
+      s.outcome === 'WIN' || s.outcome === 'LOSS'
+    );
+
+    if (recentSignals.length < 5) return null;
+
+    const winRate = recentSignals.filter(s => s.outcome === 'WIN').length / recentSignals.length;
+    const symbols = [...new Set(recentSignals.map(s => s.symbol))];
+    const sessions = [...new Set(recentSignals.map(s => s.session))];
+    const avgScore = recentSignals.reduce((s, r) => s + (r.score || 0), 0) / recentSignals.length;
+
+    const recentInsights = postTradeInsights.slice(0, 10).map(i =>
+      `${i.symbol} ${i.outcome}: ${i.key_pattern}`
+    ).join('\n');
+
+    const prompt = `You are a market regime analyst for the ATLAS trading system.
+
+RECENT PERFORMANCE (last ${recentSignals.length} closed trades):
+Win rate: ${Math.round(winRate * 100)}%
+Average signal score: ${Math.round(avgScore)}%
+Active symbols: ${symbols.join(', ')}
+Active sessions: ${sessions.join(', ')}
+
+Recent trade insights:
+${recentInsights || 'No insights yet'}
+
+Signal breakdown:
+${recentSignals.slice(0, 10).map(s => `${s.symbol} ${s.direction} ${s.score}% → ${s.outcome}`).join('\n')}
+
+Classify the current market regime and return ONLY this JSON (no markdown):
+{
+  "regime": "TRENDING|RANGING|HIGH_VOLATILITY|NEWS_DRIVEN|LOW_CONVICTION",
+  "summary": "<one sentence describing current conditions>",
+  "best_symbols": ["<symbols with highest edge right now>"],
+  "avoid_symbols": ["<symbols to avoid>"],
+  "best_sessions": ["<sessions performing well>"],
+  "threshold_adjustment": <-10 to +10, adjust min score threshold globally>,
+  "fxssi_weight_adjustment": <-0.05 to +0.05, adjust FXSSI weight globally>,
+  "key_observation": "<most important pattern across all recent trades>",
+  "confidence": <0-100>
+}`;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 500,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    const data = await res.json();
+    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+    const clean = text.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
+  } catch(e) {
+    console.error('[Claude] Regime detection error:', e.message);
+    return null;
+  }
+}
+
+// ── Daily session summary ─────────────────────────────────────────────────────
+async function dailySessionSummary(broadcast) {
+  const today = new Date().toDateString();
+  if (lastDailySummaryDate === today) return; // already ran today
+  lastDailySummaryDate = today;
+
+  if (!ANTHROPIC_API_KEY) return;
+
+  try {
+    const db = require('./db');
+    const todayStart = new Date();
+    todayStart.setUTCHours(0, 0, 0, 0);
+
+    const todaySignals = db.getAllSignals(50).filter(s =>
+      s.ts > todayStart.getTime() && (s.outcome === 'WIN' || s.outcome === 'LOSS')
+    );
+
+    if (todaySignals.length === 0) return;
+
+    const wins   = todaySignals.filter(s => s.outcome === 'WIN').length;
+    const losses = todaySignals.filter(s => s.outcome === 'LOSS').length;
+    const winRate = Math.round(wins / todaySignals.length * 100);
+
+    const prompt = `You are analysing today's trading session for the ATLAS system.
+
+TODAY'S RESULTS: ${wins}W / ${losses}L (${winRate}% win rate)
+Signals: ${todaySignals.map(s => `${s.symbol} ${s.direction} ${s.score}% → ${s.outcome}`).join(', ')}
+
+Session patterns today:
+${Object.entries(sessionPatterns)
+  .filter(([, v]) => v.wins + v.losses > 0)
+  .map(([k, v]) => `${k}: ${v.wins}W/${v.losses}L`)
+  .join('\n') || 'No patterns yet'}
+
+Return ONLY this JSON (no markdown):
+{
+  "summary": "<2-3 sentence daily summary>",
+  "top_setup": "<best performing setup today>",
+  "worst_setup": "<worst performing setup today>",
+  "tomorrow_focus": "<what to watch tomorrow>",
+  "weight_updates": [
+    {"symbol": "<sym>", "adjustment": "<what to change and why>"}
+  ]
+}`;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 500,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    const data = await res.json();
+    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+    const clean = text.replace(/```json|```/g, '').trim();
+    const summary = JSON.parse(clean);
+
+    console.log(`[Claude] Daily summary: ${summary.summary}`);
+    if (broadcast) broadcast({ type: 'DAILY_SUMMARY', summary, ts: Date.now() });
+
+    const db2 = require('./db');
+    db2.insertLearningLog({
+      symbolsAnalysed: 'ALL',
+      outcomesUsed: todaySignals.length,
+      changes: JSON.stringify(summary.weight_updates || []),
+      reasoning: summary.summary
+    });
+
+  } catch(e) {
+    console.error('[Claude] Daily summary error:', e.message);
+  }
+}
+
+// ── Weight adjustment helper ──────────────────────────────────────────────────
+function applyWeightAdjustment(symbol, adj) {
+  try {
+    const db = require('./db');
+    const w = db.getWeights(symbol);
+    if (!w) return;
+
+    const { SYMBOLS } = require('./config');
+    const cfg = SYMBOLS[symbol];
+    if (!cfg) return;
+
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
+    // New 3-weight schema: pine, fxssi (OB+sentiment combined), session fixed at 0.15
+    const newPine  = clamp((w.pine  || 0.40) + (adj.pine_weight  || 0), 0.15, 0.65);
+    const newFxssi = clamp((w.fxssi || 0.45) + (adj.fxssi_weight || 0), 0.20, 0.70);
+    const newMin   = clamp((w.min_score_proceed || cfg.minScoreProceed) + (adj.min_score_threshold || 0), 55, 90);
+
+    // Normalise pine + fxssi to leave 0.15 for session
+    const total = newPine + newFxssi;
+    if (total <= 0) return;
+    const scale = 0.85 / total;
+
+    // Level blend weights — how much FXSSI vs Pine for entry/SL/TP
+    // sl_too_tight = true means SL was wrong (Pine or FXSSI placement issue)
+    // Claude learns to shift weight toward whichever source gave better levels
+    const curEntryW = w.entry_fxssi_weight ?? 0.50;
+    const curSlW    = w.sl_fxssi_weight    ?? 0.50;
+    const curTpW    = w.tp_fxssi_weight    ?? 0.50;
+
+    let newEntryW = curEntryW;
+    let newSlW    = curSlW;
+    let newTpW    = curTpW;
+
+    if (adj.sl_too_tight === true) {
+      // SL was too tight — shift SL weight away from whichever source was tighter
+      // Can't know which without more data, so widen both slightly toward FXSSI clusters
+      newSlW = clamp(curSlW + 0.05, 0.20, 0.80);
+    }
+    if (adj.entry_fxssi_shift) newEntryW = clamp(curEntryW + adj.entry_fxssi_shift, 0.20, 0.80);
+    if (adj.tp_fxssi_shift)    newTpW    = clamp(curTpW    + adj.tp_fxssi_shift,    0.20, 0.80);
+
+    db.updateWeights(symbol, {
+      pine:              Math.round(newPine  * scale * 100) / 100,
+      fxssi:             Math.round(newFxssi * scale * 100) / 100,
+      session:           0.15,
+      minScoreProceed:   Math.round(newMin),
+      entryFxssiWeight:  Math.round(newEntryW * 100) / 100,
+      slFxssiWeight:     Math.round(newSlW    * 100) / 100,
+      tpFxssiWeight:     Math.round(newTpW    * 100) / 100
+    });
+
+    console.log(`[Claude] Weights updated for ${symbol}: pine=${(newPine*scale).toFixed(2)} fxssi=${(newFxssi*scale).toFixed(2)} minScore=${Math.round(newMin)} entry=${newEntryW.toFixed(2)} sl=${newSlW.toFixed(2)} tp=${newTpW.toFixed(2)}`);
+  } catch(e) {
+    console.error('[Claude] Weight adjustment error:', e.message);
+  }
+}
+
+// ── Layer 4: Exact level calculation ─────────────────────────────────────────
+// Claude calculates exact entry, SL and TP prices based on:
+// - Current order book structure (gravity, SL clusters, limit walls, losing clusters)
+// - Historical win/loss at specific price levels for this symbol
+// - FVG zones, swing structure, VWAP bands from Pine
+// - What has worked before vs what has failed
+
+let entryOptimisation = {}; // { GOLD: { slMultiplier, tpMultiplier, confidence, ... } }
+
+// Calculate exact levels for a live signal
+async function calculateExactLevels(symbol, direction, currentData, fxssi) {
+  if (!ANTHROPIC_API_KEY) return null;
+
+  try {
+    const db = require('./db');
+    const cp = currentData.close;
+
+    // Get historical closed trades for this symbol+direction
+    const history = db.getAllSignals(100).filter(s =>
+      s.symbol === symbol &&
+      s.direction === direction &&
+      (s.outcome === 'WIN' || s.outcome === 'LOSS') &&
+      s.entry && s.sl && s.tp
+    );
+
+    // Build level context from order book
+    const slClusters   = fxssi?.slClusters?.slice(0,5)   || [];
+    const limitWalls   = fxssi?.limitWalls?.slice(0,5)   || [];
+    const losingClusters = fxssi?.losingClusters?.slice(0,5) || [];
+    const gravity      = fxssi?.gravity;
+    const midVol       = fxssi?.middleOfVolume;
+
+    // Parse raw payload for FVG and swing levels
+    let fvg = null, swings = null, vwap = null, atr = null;
     try {
-      updatedWeights = JSON.parse(text.replace(/```json|```/g, '').trim());
-    } catch (e) {
-      console.error('[Learner] Failed to parse response:', text);
-      return;
-    }
+      const raw = JSON.parse(currentData.raw_payload || '{}');
+      fvg    = raw.fvg;
+      swings = raw.structure;
+      vwap   = raw.vwap;
+      atr    = raw.atr;
+    } catch(e) {}
 
-    const changes = [];
-    for (const [sym, newW] of Object.entries(updatedWeights)) {
-      if (!SYMBOLS[sym]) continue;
-      const old   = currentWeights[sym];
-      const stats = symbolStats[sym];
-      if (!stats) continue;
+    const prompt = `You are calculating exact entry, SL and TP price levels for an ${direction} trade on ${symbol}.
 
-      // Validate weights sum to 1.0
-      const sum = (newW.pine || 0) + (newW.fxssi || 0) + (newW.session || 0.15);
-      if (sum < 0.97 || sum > 1.03) {
-        console.warn(`[Learner] Invalid weights for ${sym} (sum=${sum.toFixed(3)}), skipping`);
-        continue;
-      }
+CURRENT PRICE: ${cp}
+DIRECTION: ${direction}
 
-      updateWeights(sym, { pine: newW.pine, fxssi: newW.fxssi, session: newW.session || 0.15, minScoreProceed: newW.minScoreProceed }, stats.winRate, stats.total);
+ORDER BOOK STRUCTURE:
+SL clusters (price hunts these — use as TP targets):
+${slClusters.map(c => '  ' + c.price + ' (volume: ' + (c.os?.toFixed(3) || 'N/A') + ')').join('\n') || '  None detected'}
 
-      if (old) {
-        const diffs = [];
-        if (Math.abs((newW.pine||0)  - (old.pine||0))  > 0.005) diffs.push(`pine ${(old.pine||0).toFixed(2)}→${(newW.pine||0).toFixed(2)}`);
-        if (Math.abs((newW.fxssi||0) - (old.fxssi||0)) > 0.005) diffs.push(`fxssi ${(old.fxssi||0).toFixed(2)}→${(newW.fxssi||0).toFixed(2)}`);
-        if (Math.abs(newW.minScoreProceed - old.minScoreProceed)  > 0.5)   diffs.push(`minScore ${old.minScoreProceed}→${newW.minScoreProceed}`);
-        if (diffs.length > 0) changes.push({ symbol: sym, winRate: stats.winRate, total: stats.total, diffs });
-      }
-    }
+Limit walls (real S/R — orange orders slow price):
+${limitWalls.map(c => '  ' + c.price + ' (volume: ' + (c.ol?.toFixed(3) || 'N/A') + ')').join('\n') || '  None detected'}
 
-    lastLearningTs   = Date.now();
-    lastOutcomeCount = closed.length;
+Losing position clusters (trapped traders = fuel):
+${losingClusters.map(c => '  ' + c.price + ' (ps: ' + (c.ps?.toFixed(3) || 0) + ' pl: ' + (c.pl?.toFixed(3) || 0) + ')').join('\n') || '  None detected'}
 
-    const logEntry = {
-      symbolsAnalysed: Object.keys(symbolStats).join(','),
-      outcomesUsed:    closed.length,
-      changes,
-      reasoning: `Symbols qualifying (${MIN_CLOSED_TRADES_PER_SYMBOL}+ trades): ${Object.entries(symbolStats).map(([s, st]) => `${s}:${st.winRate}%WR/${st.total}trades`).join(', ')}`
-    };
-    insertLearningLog(logEntry);
+Gravity (strongest SL cluster): ${gravity?.price || 'N/A'} (vol: ${gravity?.volume || 'N/A'})
+Middle of volume: ${midVol || 'N/A'}
 
-    console.log(`[Learner] Cycle complete. ${Object.keys(symbolStats).length} symbols analysed. Changes: ${changes.length}`);
+TECHNICAL LEVELS:
+${fvg?.bearActive ? `Bear FVG: ${fvg.bearBot} - ${fvg.bearTop} (mid: ${fvg.bearMid})` : ''}
+${fvg?.bullActive ? `Bull FVG: ${fvg.bullBot} - ${fvg.bullTop} (mid: ${fvg.bullMid})` : ''}
+Swing H1: ${swings?.swingH1 || 'N/A'} | H2: ${swings?.swingH2 || 'N/A'}
+Swing L1: ${swings?.swingL1 || 'N/A'} | L2: ${swings?.swingL2 || 'N/A'}
+VWAP: ${vwap?.mid || 'N/A'} | Upper2: ${vwap?.upper2 || 'N/A'} | Lower2: ${vwap?.lower2 || 'N/A'}
+ATR 1h: ${atr?.['1h'] || 'N/A'}
 
-    if (broadcast && changes.length > 0) {
-      broadcast({ type: 'LEARNING_UPDATE', changes, ts: Date.now() });
-    }
+HISTORICAL PERFORMANCE (${history.length} closed ${direction} trades):
+${history.slice(0, 10).map(t =>
+  t.direction + ' entry=' + t.entry + ' sl=' + t.sl + ' tp=' + t.tp + ' -> ' + t.outcome
+).join('\n') || 'No history yet — use order book logic only'}
 
-  } catch (e) {
-    console.error('[Learner] API error:', e.message);
+${history.length > 0 ? `Win rate: ${Math.round(history.filter(t => t.outcome === 'WIN').length / history.length * 100)}%` : ''}
+
+RULES:
+- Entry: for ${direction === 'SHORT' ? 'SHORT — entry should be at or just below resistance (limit wall above, FVG bear mid, or swing high)' : 'LONG — entry should be at or just above support (limit wall below, FVG bull mid, or swing low)'}
+- SL: place BEYOND a losing cluster or limit wall — if it breaks, the trade is wrong anyway
+- TP: target the nearest SL cluster in trade direction — price hunts these
+- R:R must be between 1.5 and 4.0
+- If no clear level exists for any component, use null and explain why
+
+Return ONLY this JSON (no markdown):
+{
+  "entry": <exact price>,
+  "sl": <exact price>,
+  "tp": <exact price>,
+  "entry_reason": "<why this entry level>",
+  "sl_reason": "<why this SL level>",
+  "tp_reason": "<why this TP level>",
+  "rr": <calculated R:R>,
+  "confidence": <0-100>,
+  "key_levels_used": ["<level type used>"]
+}`;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: MODEL_SONNET, // Sonnet for exact levels — quality matters here
+        max_tokens: 500,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    const data = await res.json();
+    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+    const levels = JSON.parse(text.replace(/```json|```/g, '').trim());
+
+    console.log(`[Claude] Exact levels for ${symbol} ${direction}: entry=${levels.entry} sl=${levels.sl} tp=${levels.tp} R:R=${levels.rr} (${levels.confidence}% confidence)`);
+    return levels;
+
+  } catch(e) {
+    console.error('[Claude] Level calculation error:', e.message);
+    return null;
   }
 }
 
-function groupBySession(trades) {
-  const g = { asia: 0, london: 0, newYork: 0, offHours: 0 };
-  for (const t of trades) g[t.session] = (g[t.session] || 0) + 1;
-  return g;
-}
+async function optimiseEntryLevels(symbol) {
+  if (!ANTHROPIC_API_KEY) return null;
 
-function groupByScoreBand(trades) {
-  const g = { '60-69': 0, '70-79': 0, '80-89': 0, '90+': 0 };
-  for (const t of trades) {
-    const s = t.score || 0;
-    if (s >= 90) g['90+']++;
-    else if (s >= 80) g['80-89']++;
-    else if (s >= 70) g['70-79']++;
-    else g['60-69']++;
-  }
-  return g;
-}
+  try {
+    const db = require('./db');
+    const closed = db.getAllSignals(100).filter(s =>
+      s.symbol === symbol &&
+      (s.outcome === 'WIN' || s.outcome === 'LOSS') &&
+      s.entry && s.sl && s.tp
+    );
 
-function buildLearnerPrompt(symbolStats, currentWeights) {
-  const lines = [
-    `Learning cycle analysis — ${new Date().toUTCString()}`,
-    `Minimum threshold: ${MIN_CLOSED_TRADES_PER_SYMBOL} closed trades per symbol`,
-    ''
-  ];
-  for (const [sym, stats] of Object.entries(symbolStats)) {
-    lines.push(`${sym}: ${stats.winRate}% win rate (${stats.wins}W/${stats.losses}L of ${stats.total} trades), avgScore=${stats.avgScore}, avgRR=1:${stats.avgRR}`);
-    lines.push(`  Wins by session:    ${JSON.stringify(stats.winsBySession)}`);
-    lines.push(`  Losses by session:  ${JSON.stringify(stats.lossBySession)}`);
-    lines.push(`  Wins by score band: ${JSON.stringify(stats.winsByScoreBand)}`);
-    lines.push(`  Losses by score band: ${JSON.stringify(stats.lossByScoreBand)}`);
-    if (currentWeights[sym]) {
-      const w = currentWeights[sym];
-      lines.push(`  Current weights: pine=${w.pine||0.40}, fxssi=${w.fxssi||0.45}, session=${w.session||0.15}, minScore=${w.minScoreProceed}`);
+    if (closed.length < 5) return null; // need minimum history
+
+    const wins  = closed.filter(s => s.outcome === 'WIN');
+    const losses = closed.filter(s => s.outcome === 'LOSS');
+
+    // Calculate average distances for wins vs losses
+    const avgWinSlDist  = wins.length  ? wins.reduce((s,t)  => s + Math.abs(t.sl - t.entry), 0) / wins.length  : null;
+    const avgLossSlDist = losses.length ? losses.reduce((s,t) => s + Math.abs(t.sl - t.entry), 0) / losses.length : null;
+    const avgWinTpDist  = wins.length  ? wins.reduce((s,t)  => s + Math.abs(t.tp - t.entry), 0) / wins.length  : null;
+    const avgWinRR      = wins.length  ? wins.reduce((s,t)  => s + (t.rr || 0), 0) / wins.length  : null;
+    const avgLossRR     = losses.length ? losses.reduce((s,t) => s + (t.rr || 0), 0) / losses.length : null;
+
+    const prompt = `You are optimising entry, SL and TP placement for ${symbol} trades in the ATLAS system.
+
+HISTORICAL DATA (${closed.length} closed trades):
+Win rate: ${Math.round(wins.length / closed.length * 100)}% (${wins.length}W / ${losses.length}L)
+
+Winning trades avg:
+- SL distance from entry: ${avgWinSlDist?.toFixed(4) || 'N/A'}
+- TP distance from entry: ${avgWinTpDist?.toFixed(4) || 'N/A'}
+- R:R: ${avgWinRR?.toFixed(2) || 'N/A'}
+
+Losing trades avg:
+- SL distance from entry: ${avgLossSlDist?.toFixed(4) || 'N/A'}
+- R:R: ${avgLossRR?.toFixed(2) || 'N/A'}
+
+${closed.slice(0, 15).map(t => t.direction + " entry=" + t.entry + " sl=" + t.sl + " tp=" + t.tp + " rr=" + t.rr + " -> " + t.outcome).join("\n")}
+')}
+
+Based on this data, what adjustments would improve future ${symbol} trade placement?
+Consider: SL too tight (getting stopped out before TP), TP too ambitious (price reverses before hitting), entry timing.
+
+Return ONLY this JSON (no markdown):
+{
+  "sl_multiplier": <0.5 to 2.0, multiply ATR-based SL distance by this>,
+  "tp_multiplier": <0.5 to 3.0, multiply ATR-based TP distance by this>,
+  "entry_bias": <-0.5 to 0.5, shift entry toward limit wall (negative) or away (positive)>,
+  "ideal_rr_min": <minimum R:R to accept for this symbol>,
+  "ideal_rr_max": <maximum R:R before TP is unrealistic>,
+  "key_insight": "<one sentence about what the data shows>",
+  "confidence": <0-100, based on sample size and consistency>
+}`;
+
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: MODEL,
+        max_tokens: 400,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+
+    const data = await res.json();
+    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+    const opt  = JSON.parse(text.replace(/```json|```/g, '').trim());
+
+    // Only apply if confidence is high enough
+    if (opt.confidence >= 60) {
+      entryOptimisation[symbol] = { ...opt, updatedAt: Date.now() };
+      console.log(`[Claude] Entry optimised for ${symbol}: SL×${opt.sl_multiplier} TP×${opt.tp_multiplier} — ${opt.key_insight}`);
     }
-    lines.push('');
+
+    return opt;
+  } catch(e) {
+    console.error('[Claude] Entry optimisation error:', e.message);
+    return null;
   }
-  return lines.join('\n');
 }
 
-module.exports = { runLearningCycle, shouldRunLearning };
+function getEntryOptimisation(symbol) {
+  return entryOptimisation[symbol] || null;
+}
+
+// ── Getters for dashboard ─────────────────────────────────────────────────────
+function getRegime()          { return regimeCache; }
+function getSessionPatterns() { return sessionPatterns; }
+function getInsights()        { return postTradeInsights.slice(0, 20); }
+function getAllOptimisations() { return entryOptimisation; }
+
+module.exports = {
+  onOutcome,
+  dailySessionSummary,
+  detectRegime,
+  optimiseEntryLevels,
+  getEntryOptimisation,
+  getRegime,
+  getSessionPatterns,
+  getInsights,
+  getAllOptimisations
+};
