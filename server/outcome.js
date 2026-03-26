@@ -33,6 +33,20 @@ function checkOutcomes(broadcast) {
       updateOutcome(id, 'ACTIVE', null);
       console.log(`[Outcome] ${sig.symbol} ${direction} → ACTIVE (entry touched @ ${price})`);
       if (broadcast) broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction, outcome: 'ACTIVE', ts: Date.now() });
+
+      // Expire any opposite direction ACTIVE signals — can't be long and short simultaneously
+      const oppositeDir = direction === 'LONG' ? 'SHORT' : 'LONG';
+      const { run: dbRun, persist: dbPersist, get: dbGet } = require('./db');
+      const oppositeActive = dbGet(
+        "SELECT id FROM signals WHERE symbol=? AND direction=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0) ORDER BY ts DESC LIMIT 1",
+        [sig.symbol, oppositeDir]
+      );
+      if (oppositeActive) {
+        dbRun("UPDATE signals SET outcome='EXPIRED', outcome_ts=? WHERE id=?", [Date.now(), oppositeActive.id]);
+        dbPersist();
+        console.log(`[Outcome] ${sig.symbol} — expired opposite ${oppositeDir} ACTIVE (id:${oppositeActive.id})`);
+        if (broadcast) broadcast({ type: 'OUTCOME', signalId: oppositeActive.id, symbol: sig.symbol, direction: oppositeDir, outcome: 'EXPIRED', ts: Date.now() });
+      }
       continue;
     }
 
