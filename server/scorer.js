@@ -432,6 +432,32 @@ function scoreSymbol(symbol) {
     else if (agree) conflictMultiplier = 1.12;
   }
 
+  // ── FXSSI gravity + bias contradiction check ─────────────────────────────
+  // If FXSSI gravity AND signalBias both contradict direction = strong block
+  // gravity above price pulling LONG signal SHORT = liquidity hunt in opposite direction
+  try {
+    if (data.fxssi_analysis) {
+      const fxData = typeof data.fxssi_analysis === 'string'
+        ? JSON.parse(data.fxssi_analysis) : data.fxssi_analysis;
+      const gravityPrice = fxData?.gravity?.price;
+      const signalBias   = fxData?.signals?.bias;
+      const cp           = data.close || data.price;
+      if (gravityPrice && cp) {
+        const gravityAbove = gravityPrice > cp;
+        const gravityBelow = gravityPrice < cp;
+        const biasContradicts = (direction === 'LONG'  && signalBias === 'SELL') ||
+                                (direction === 'SHORT' && signalBias === 'BUY');
+        const gravityContradicts = (direction === 'LONG'  && gravityBelow) ||
+                                   (direction === 'SHORT' && gravityAbove);
+        if (biasContradicts && gravityContradicts) {
+          console.log(`[Scorer] ${symbol} ${direction} blocked — FXSSI bias AND gravity both contradict`);
+          return null;
+        }
+        if (biasContradicts) conflictMultiplier *= 0.75;
+      }
+    }
+  } catch(e) {}
+
   // ── Crowd trap override ───────────────────────────────────────────────────
   // When 60%+ crowd is trapped on the OPPOSITE side, that IS the signal
   // Don't penalise — the contrarian setup is valid even if Pine EMA conflicts
