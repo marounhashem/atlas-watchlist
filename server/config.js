@@ -8,7 +8,7 @@ const SYMBOLS = {
     peakSession: 'london',
     scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['FOMC', 'CPI', 'NFP', 'DXY'],
-    minScoreProceed: 72
+    minScoreProceed: 78
   },
   SILVER: {
     label: 'Silver',
@@ -19,7 +19,7 @@ const SYMBOLS = {
     peakSession: 'london',
     scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['FOMC', 'CPI', 'NFP', 'DXY'],
-    minScoreProceed: 72
+    minScoreProceed: 78
   },
   OILWTI: {
     label: 'Oil WTI',
@@ -30,7 +30,7 @@ const SYMBOLS = {
     peakSession: 'newYork',
     scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['EIA_CRUDE', 'OPEC', 'API_REPORT'],
-    minScoreProceed: 70
+    minScoreProceed: 78
   },
   BTCUSD: {
     label: 'Bitcoin',
@@ -41,7 +41,7 @@ const SYMBOLS = {
     peakSession: 'newYork',
     scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['FOMC'],
-    minScoreProceed: 68
+    minScoreProceed: 78
   },
   US30: {
     label: 'Dow Jones',
@@ -52,7 +52,7 @@ const SYMBOLS = {
     peakSession: 'newYork',
     scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['FOMC', 'CPI', 'NFP', 'EARNINGS'],
-    minScoreProceed: 70
+    minScoreProceed: 78
   },
   US100: {
     label: 'Nasdaq 100',
@@ -63,7 +63,7 @@ const SYMBOLS = {
     peakSession: 'newYork',
     scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['FOMC', 'CPI', 'NFP', 'EARNINGS'],
-    minScoreProceed: 70
+    minScoreProceed: 78
   }
 };
 
