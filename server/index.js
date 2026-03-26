@@ -721,8 +721,8 @@ app.get('/api/status', (req, res) => {
 app.get('/api/health', (req, res) => {
   const { isMarketOpen } = require('./marketHours');
   const db2 = require('./db');
-  const PINE_STALE_MS  = 2 * 60 * 60 * 1000;  // 2 hours
-  const FXSSI_STALE_MS = 30 * 60 * 1000;       // 30 minutes
+  const PINE_STALE_MS  = 5 * 60 * 1000;   // 5 minutes — alerts now 1m, 5 missed = problem
+  const FXSSI_STALE_MS = 25 * 60 * 1000;  // 25 minutes — scrape every 20min + buffer
 
   const now = Date.now();
   const symbolHealth = {};
@@ -802,8 +802,8 @@ app.post('/api/paper-outcome', (req, res) => {
 
 // ── Cron jobs ─────────────────────────────────────────────────────────────────
 // Score all priority symbols every 5 minutes
-cron.schedule('*/5 * * * *', async () => {
-  console.log('[Cron] Running 5m scoring cycle...');
+cron.schedule('* * * * *', async () => {
+  console.log('[Cron] Running 1m scoring cycle...');
   const results = await scoreAllPriority();
   const proceeds = results.filter(r => r.verdict === 'PROCEED');
   const watches = results.filter(r => r.verdict === 'WATCH');
@@ -822,8 +822,8 @@ cron.schedule('*/5 * * * *', async () => {
 });
 
 // Check outcomes every 5 minutes + monitor active signals for thesis changes
-cron.schedule('2,7,12,17,22,27,32,37,42,47,52,57 * * * *', () => {
-  checkOutcomes(broadcast); // includes trade monitoring via outcome.js
+cron.schedule('* * * * *', () => {
+  checkOutcomes(broadcast); // includes trade monitoring via outcome.js — 1m cycle
 });
 
 // FXSSI auto-scrape — fires at :01/:21/:41, aligned with 20-min FXSSI refresh cycle
