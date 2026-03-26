@@ -116,34 +116,35 @@ async function runLearningCycle(broadcast, force = false) {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001', // Haiku — batch weight learning doesn't need Sonnet quality
-        max_tokens: 1000,
-        system: `You are a quantitative trading system optimizer for ATLAS//WATCHLIST.
+         model: 'claude-haiku-4-5-20251001', // Haiku — batch weight learning doesn't need Sonnet quality
+         max_tokens: 1000,
+         system: `You are a quantitative trading system optimizer for ATLAS//WATCHLIST.
 
 CRITICAL SYSTEM HISTORY:
-First trading session recorded 7% win rate (2W/26L). Root causes identified and fixed in scorer v20260326.1:
-1. System was buying into downtrends — EMAs lag, price was falling while EMAs still bullish
-2. RSI hard blocks now in place — LONG blocked if RSI < 35, SHORT blocked if RSI > 65
-3. EMA trend filter added — LONG blocked if 1h AND 4h EMA both bearish
-4. TP capped at 5x ATR — no more R:R of 640:1 from uncapped projections
-5. Crowd trap override — 65%+ crowd trapped opposite side now reduces EMA conflict penalty
+First 2 sessions: 7-8% WR from broken scorer (EMAs lagging in downtrend, uncapped R:R).
+Fixed: daily hard gate (bearish daily = SHORT only), RSI blocks, structure filters, minScore raised to 78.
+Do NOT punish FXSSI weights based on pre-fix broken-scorer history.
+
+OPTIMIZATION PHILOSOPHY — EXPECTED VALUE, NOT WIN RATE:
+A pro trader optimizes for expected value: (WinRate × AvgWin) - (LossRate × AvgLoss).
+A 40% WR with 3:1 R:R beats a 60% WR with 1:1 R:R.
+Reward HIGH-SCORE signals that win. Penalize LOW-SCORE signals regardless of outcome.
+A score-63 trade that won by luck is WORSE signal quality than a score-85 trade that lost cleanly.
 
 WEIGHT LEARNING RULES:
-- Old trade history (7% WR) is from broken scorer — do NOT punish fxssi weight based on it
-- The 2 wins came from OILWTI with Structure 2/5 aligned and RSI confirming direction
-- FXSSI crowd trap data was correct — Pine EMA was the problem
-- Reward signals with structure alignment and RSI confirmation
-- fxssi weight should stay 0.40-0.50 range
+- Only trades with score >= 78 (PROCEED threshold) carry signal quality information
+- FXSSI weight: stay 0.40-0.50 — order book data is the structural edge
+- Pine weight: 0.35-0.45 — structure context, slower to react
+- Session weight: fixed 0.15 — do not change
+- minScoreProceed: floor 78, ceiling 88. Only lower below 80 if 80+ score band WR > 65%
+- Never change any single weight by more than 0.03 per cycle
 
-Analyze trade outcomes and return ONLY a JSON object with updated weights.
-Rules:
-- Weights (pine + fxssi + session) must sum to exactly 1.0
-- pine = technical analysis weight, fxssi = order book weight, session = fixed at 0.15
-- minScoreProceed must be between 62 and 88
-- If win rate > 65%: slightly increase weights of strongest factors, lower minScore by 1-2
-- If win rate < 45%: increase minScore by 3-5, reduce weights of weakest session
-- If win rate 45-65%: minimal changes only
-- Never change any single weight by more than 0.03 in one cycle — small adjustments only
+SCORE BAND ANALYSIS — use this to drive decisions:
+- 80+ score WR > 60%: high conviction signals working → slightly lower minScore
+- 80+ score WR < 40%: high scores not predictive → increase minScore
+- 70-79 score WR < 35%: noise band → raise minScore aggressively
+- High MFE but LOSS outcome: SL placement issue, not signal quality — do not penalise signal weights
+
 Return format: { "SYMBOL": { "pine": 0.xx, "fxssi": 0.xx, "session": 0.15, "minScoreProceed": xx } }
 No explanation, no markdown, pure JSON only.`,
         messages: [{ role: 'user', content: prompt }]
