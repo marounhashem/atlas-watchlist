@@ -501,4 +501,13 @@ function processBridgePayload(payload) {
   }
 }
 
-module.exports = { runFXSSIScrape, processBridgePayload };
+// Expose cache timestamps for health check
+// Returns age in ms of the last successful FXSSI scrape for a symbol
+// Returns null if never scraped
+function getFxssiCacheAge(symbol) {
+  const cached = cache[symbol];
+  if (!cached || !cached.ts) return null;
+  return Date.now() - cached.ts;
+}
+
+module.exports = { runFXSSIScrape, processBridgePayload, getFxssiCacheAge };
