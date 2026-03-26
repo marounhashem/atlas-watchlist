@@ -1,4 +1,4 @@
-const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, updateMFE, run } = require('./db');
+const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, updateMFE, run, addRecommendation, getRecommendations } = require('./db');
 const claudeLearner = require('./claudeLearner');
 
 // checkOutcomes runs across ALL cycles — retired signals still get WIN/LOSS detected
@@ -60,6 +60,26 @@ function checkOutcomes(broadcast) {
       if (favorable > 0) {
         const mfePct = Math.round((favorable / entry) * 10000) / 100;
         updateMFE(id, favorable, mfePct);
+      }
+    }
+
+    // ── Trade Monitor: Generate recommendations on ACTIVE signals ───────────────
+    // Runs every outcome check cycle — evaluates if original thesis still holds
+    if (currentState === 'ACTIVE') {
+      const recs = generateRecommendations(sig, data, price);
+      for (const rec of recs) {
+        const added = addRecommendation(id, rec);
+        if (added) {
+          console.log(`[Monitor] ${sig.symbol} ${direction} — ${rec.type} (${rec.urgency}): ${rec.reason}`);
+          if (broadcast) broadcast({
+            type: 'RECOMMENDATION',
+            signalId: id,
+            symbol: sig.symbol,
+            direction,
+            recommendation: rec,
+            ts: Date.now()
+          });
+        }
       }
     }
 
@@ -142,6 +162,210 @@ function checkOutcomes(broadcast) {
       }
     }
   }
+}
+
+// ── Trade Monitor: Recommendation Engine ─────────────────────────────────────
+// Called on every ACTIVE signal check
+// Returns array of recommendations based on current market conditions
+function generateRecommendations(sig, data, price) {
+  const recs = [];
+  const { direction, entry, sl, tp, id } = sig;
+  if (!entry || !sl || !tp || !price) return recs;
+
+  const mfePct = sig.mfe_pct || 0;
+  const tpDist = Math.abs(tp - entry);
+  const slDist = Math.abs(sl - entry);
+  const priceDist = direction === 'LONG' ? price - entry : entry - price;
+  const progressPct = tpDist > 0 ? Math.round((priceDist / tpDist) * 100) : 0;
+
+  // ── 1. CLOSE recommendations ──────────────────────────────────────────────
+
+  // Structure flipped against direction on BOTH 1h and 4h
+  try {
+    if (data.raw_payload) {
+      const raw = JSON.parse(data.raw_payload);
+      const st  = raw.structure || {};
+      const str1h = typeof st['1h'] === 'number' ? st['1h'] : 0;
+      const str4h = typeof st['4h'] === 'number' ? st['4h'] : 0;
+      if (direction === 'LONG'  && str1h === -1 && str4h === -1) {
+        recs.push({
+          type: 'CLOSE',
+          reason: 'Structure flipped bearish on 1h AND 4h — original thesis invalidated',
+          urgency: 'HIGH',
+          price,
+          mfe_pct: mfePct,
+          progress_pct: progressPct
+        });
+      }
+      if (direction === 'SHORT' && str1h === 1 && str4h === 1) {
+        recs.push({
+          type: 'CLOSE',
+          reason: 'Structure flipped bullish on 1h AND 4h — original thesis invalidated',
+          urgency: 'HIGH',
+          price,
+          mfe_pct: mfePct,
+          progress_pct: progressPct
+        });
+      }
+    }
+  } catch(e) {}
+
+  // FXSSI crowd trap reversed — was trapped short (our LONG thesis), now trapped long
+  try {
+    const longPct  = data.fxssi_long_pct  || 50;
+    const shortPct = data.fxssi_short_pct || 50;
+    if (direction === 'LONG'  && longPct  >= 65) {
+      recs.push({
+        type: 'CLOSE',
+        reason: `FXSSI crowd flipped — ${longPct}% now LONG (was short) — squeeze thesis gone`,
+        urgency: 'HIGH',
+        price,
+        mfe_pct: mfePct,
+        progress_pct: progressPct
+      });
+    }
+    if (direction === 'SHORT' && shortPct >= 65) {
+      recs.push({
+        type: 'CLOSE',
+        reason: `FXSSI crowd flipped — ${shortPct}% now SHORT (was long) — squeeze thesis gone`,
+        urgency: 'HIGH',
+        price,
+        mfe_pct: mfePct,
+        progress_pct: progressPct
+      });
+    }
+  } catch(e) {}
+
+  // RSI extreme against direction
+  try {
+    const rsi = data.rsi || 50;
+    if (direction === 'LONG'  && rsi < 30) {
+      recs.push({
+        type: 'CLOSE',
+        reason: `RSI ${rsi} — extreme momentum against LONG, likely accelerating down`,
+        urgency: 'HIGH',
+        price,
+        mfe_pct: mfePct,
+        progress_pct: progressPct
+      });
+    }
+    if (direction === 'SHORT' && rsi > 70) {
+      recs.push({
+        type: 'CLOSE',
+        reason: `RSI ${rsi} — extreme momentum against SHORT, likely accelerating up`,
+        urgency: 'HIGH',
+        price,
+        mfe_pct: mfePct,
+        progress_pct: progressPct
+      });
+    }
+  } catch(e) {}
+
+  // Price moved significantly AGAINST trade (MAE > 50% of SL distance)
+  const maeProgress = tpDist > 0 ? Math.round((-priceDist / slDist) * 100) : 0;
+  if (maeProgress > 60) {
+    recs.push({
+      type: 'CLOSE',
+      reason: `Price ${maeProgress}% of the way to SL — consider cutting early`,
+      urgency: 'MEDIUM',
+      price,
+      mfe_pct: mfePct,
+      progress_pct: progressPct
+    });
+  }
+
+  // ── 2. MOVE_SL recommendations ────────────────────────────────────────────
+
+  // MFE > 50% of TP distance — move SL to breakeven
+  if (progressPct >= 50 && progressPct < 100) {
+    const breakevenSL = Math.round(entry * 10000) / 10000;
+    recs.push({
+      type: 'MOVE_SL',
+      reason: `Price ${progressPct}% toward TP — move SL to breakeven (${breakevenSL})`,
+      urgency: 'MEDIUM',
+      new_sl: breakevenSL,
+      price,
+      mfe_pct: mfePct,
+      progress_pct: progressPct
+    });
+  }
+
+  // MFE > 75% of TP — trail SL to 25% of TP distance
+  if (progressPct >= 75) {
+    const trailSL = direction === 'LONG'
+      ? Math.round((entry + tpDist * 0.25) * 10000) / 10000
+      : Math.round((entry - tpDist * 0.25) * 10000) / 10000;
+    recs.push({
+      type: 'MOVE_SL',
+      reason: `Price ${progressPct}% toward TP — trail SL to protect 25% of TP (${trailSL})`,
+      urgency: 'MEDIUM',
+      new_sl: trailSL,
+      price,
+      mfe_pct: mfePct,
+      progress_pct: progressPct
+    });
+  }
+
+  // New FXSSI gravity cluster between entry and SL — tighten
+  try {
+    if (data.fxssi_analysis) {
+      const fx = typeof data.fxssi_analysis === 'string'
+        ? JSON.parse(data.fxssi_analysis) : data.fxssi_analysis;
+      const gravity = fx?.gravity?.price;
+      if (gravity) {
+        const gravitySL = direction === 'LONG'
+          ? gravity < price && gravity > sl && gravity > entry * 0.997
+          : gravity > price && gravity < sl && gravity < entry * 1.003;
+        if (gravitySL) {
+          const newSL = direction === 'LONG'
+            ? Math.round((gravity * 0.999) * 10000) / 10000
+            : Math.round((gravity * 1.001) * 10000) / 10000;
+          recs.push({
+            type: 'MOVE_SL',
+            reason: `FXSSI gravity cluster at ${gravity} between SL and price — tighten SL`,
+            urgency: 'LOW',
+            new_sl: newSL,
+            price,
+            mfe_pct: mfePct,
+            progress_pct: progressPct
+          });
+        }
+      }
+    }
+  } catch(e) {}
+
+  // ── 3. ADJUST_TP recommendations ─────────────────────────────────────────
+
+  // New FXSSI resistance/support appeared between price and TP
+  try {
+    if (data.fxssi_analysis) {
+      const fx = typeof data.fxssi_analysis === 'string'
+        ? JSON.parse(data.fxssi_analysis) : data.fxssi_analysis;
+      const walls = fx?.limitWalls || [];
+      for (const wall of walls) {
+        const wallBetween = direction === 'LONG'
+          ? wall.price > price && wall.price < tp && wall.volume > 1.5
+          : wall.price < price && wall.price > tp && wall.volume > 1.5;
+        if (wallBetween) {
+          const newTP = direction === 'LONG'
+            ? Math.round((wall.price * 0.999) * 10000) / 10000
+            : Math.round((wall.price * 1.001) * 10000) / 10000;
+          recs.push({
+            type: 'ADJUST_TP',
+            reason: `Strong limit wall (vol ${wall.volume}) at ${wall.price} blocking TP — consider taking profit earlier`,
+            urgency: 'LOW',
+            new_tp: newTP,
+            price,
+            mfe_pct: mfePct,
+            progress_pct: progressPct
+          });
+          break; // only flag nearest wall
+        }
+      }
+    }
+  } catch(e) {}
+
+  return recs;
 }
 
 module.exports = { checkOutcomes };

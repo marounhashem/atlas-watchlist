@@ -422,6 +422,14 @@
 
   /* Toast */
   .toast-active{background:#ffd740!important;color:#000!important;font-weight:700;border:none;}
+  .toast-high{background:#ff1744!important;color:#fff!important;font-weight:700;border:none;}
+  .toast-medium{background:#ff9100!important;color:#000!important;font-weight:700;border:none;}
+  .toast-low{background:#2979ff!important;color:#fff!important;font-weight:600;border:none;}
+  .rec-card{margin-top:8px;border-radius:4px;padding:8px 10px;font-size:10px;letter-spacing:.3px;}
+  .rec-HIGH{background:rgba(255,23,68,.15);border:1px solid #ff1744;color:#ff6b6b;}
+  .rec-MEDIUM{background:rgba(255,145,0,.12);border:1px solid #ff9100;color:#ffb74d;}
+  .rec-LOW{background:rgba(41,121,255,.12);border:1px solid #2979ff;color:#64b5f6;}
+  .rec-ts{color:var(--dim);font-size:9px;margin-left:6px;}
   .toast-win{background:#00c853!important;color:#000!important;font-weight:700;border:none;}
   .toast-loss{background:#ff1744!important;color:#fff!important;font-weight:700;border:none;}
   .toast{
@@ -617,6 +625,28 @@ function handleMessage(msg) {
       }
     }
     if (msg.outcome==='WIN') showToast(`✅ WIN — ${msg.symbol} ${msg.direction} +${msg.pnlPct}%`, 'win');
+  } else if (msg.type==='RECOMMENDATION') {
+    const rec = msg.recommendation;
+    const urgencyIcon = rec.urgency === 'HIGH' ? '🚨' : rec.urgency === 'MEDIUM' ? '⚠️' : 'ℹ️';
+    showToast(`${urgencyIcon} ${msg.symbol} ${rec.type}: ${rec.reason.slice(0,60)}...`, rec.urgency.toLowerCase());
+    // Browser notification for HIGH urgency
+    if (rec.urgency === 'HIGH' && document.hidden && Notification.permission === 'granted') {
+      new Notification(`ATLAS // ${rec.type} — ${msg.symbol}`, {
+        body: rec.reason,
+        icon: '/favicon.ico'
+      });
+    }
+    // Update signal card with new recommendation
+    const sig = allSignals.find(s => s.id === msg.signalId);
+    if (sig) {
+      if (!sig.recommendations) sig.recommendations = '[]';
+      try {
+        const recs = JSON.parse(sig.recommendations);
+        recs.push(rec);
+        sig.recommendations = JSON.stringify(recs);
+      } catch(e) {}
+      renderSignals();
+    }
     if (msg.outcome==='LOSS') showToast(`❌ LOSS — ${msg.symbol} ${msg.direction} ${msg.pnlPct}%`, 'loss');
   } else if (msg.type==='CYCLE_RETIRED') {
     // Fetch fresh past signals after retirement
@@ -808,6 +838,25 @@ function renderCard(sig, isPast=false) {
     ${sig.reasoning?`<div class="reason">${sig.reasoning}</div>`:''}
     <div class="card-actions">
       ${sig.outcome==='ACTIVE'?`<span style="font-size:9px;color:#ffd740;letter-spacing:.5px;">● MONITORING TP/SL</span>`:''}
+      ${sig.outcome==='ACTIVE' && sig.recommendations ? (() => {
+        try {
+          const recs = JSON.parse(sig.recommendations);
+          if (!recs.length) return '';
+          // Show last 3 recommendations, newest first
+          return recs.slice(-3).reverse().map(r => {
+            const ageMin = Math.round((Date.now() - r.ts) / 60000);
+            const ageStr = ageMin < 1 ? 'just now' : ageMin + 'm ago';
+            const icon = r.urgency === 'HIGH' ? '🚨' : r.urgency === 'MEDIUM' ? '⚠️' : 'ℹ️';
+            return `<div class="rec-card rec-${r.urgency}">
+              ${icon} <strong>${r.type}</strong><span class="rec-ts">${ageStr} · $\{new Date(r.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span><br>
+              ${r.reason}
+              ${r.new_sl ? `<br><span style="color:#ffd740">→ New SL: ${r.new_sl}</span>` : ''}
+              ${r.new_tp ? `<br><span style="color:#00e676">→ New TP: ${r.new_tp}</span>` : ''}
+              ${r.progress_pct !== undefined ? `<br><span style="color:var(--dim)">Progress: ${r.progress_pct}% toward TP</span>` : ''}
+            </div>`;
+          }).join('');
+        } catch(e) { return ''; }
+      })() : ''}
       ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
       ${showAgents?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')" title="Copy full trade dossier">⊞</div>`:''}
     </div>
