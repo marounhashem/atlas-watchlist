@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260326.7'; // SHORT balance: RSI threshold 75, crowd trap 55%, asymmetric thresholds
+const SCORER_VERSION = '20260326.8'; // Swing entry: FVG edge, pullback buffer 0.15×ATR
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -868,9 +868,51 @@ function scoreSymbol(symbol) {
       }
     }
   } catch(e) {}
-  // FVG mid fallback for Pine
-  if (!pineOptimalEntry && data.fvg_mid && data.fvg_mid > 0) {
-    pineOptimalEntry = data.fvg_mid;
+  // FVG entry — use FVG low for LONG (better entry), FVG high for SHORT
+  // Only use FVG if it's meaningfully away from close (> 0.1×ATR distance)
+  if (!pineOptimalEntry) {
+    if (direction === 'LONG' && data.fvg_low && data.fvg_low > 0 && data.fvg_low < close - atr * 0.1) {
+      pineOptimalEntry = data.fvg_low;
+    } else if (direction === 'SHORT' && data.fvg_high && data.fvg_high > 0 && data.fvg_high > close + atr * 0.1) {
+      pineOptimalEntry = data.fvg_high;
+    } else if (direction === 'LONG' && data.fvg_mid && data.fvg_mid > 0 && data.fvg_mid < close - atr * 0.1) {
+      pineOptimalEntry = data.fvg_mid;
+    } else if (direction === 'SHORT' && data.fvg_mid && data.fvg_mid > 0 && data.fvg_mid > close + atr * 0.1) {
+      pineOptimalEntry = data.fvg_mid;
+    }
+  }
+
+  // ── Pullback buffer for swing entries ─────────────────────────────────────
+  // Don't enter at current price — wait for a small pullback
+  // 0.15×ATR below close for LONG, above close for SHORT
+  // This means entry is placed as a limit order slightly away from current price
+  // Better R:R, avoids entering at the high/low of a candle
+  // Swing entry buffer — minimum distance from close for a meaningful entry level
+  // 0.35×ATR = ~14 points for GOLD (ATR 40) — real pullback, not noise
+  // If Pine found a level but it's too close to current price, override with buffer
+  const pullbackBuffer    = atr * 0.35; // minimum meaningful pullback
+  const minEntryDist      = atr * 0.20; // reject levels closer than this to close
+
+  if (pineOptimalEntry && pineOptimalEntry === close) {
+    // Pine fell back to close — apply swing buffer
+    pineOptimalEntry = direction === 'LONG'
+      ? Math.round((close - pullbackBuffer) * 10000) / 10000
+      : Math.round((close + pullbackBuffer) * 10000) / 10000;
+  }
+  // Reject entries too close to current price
+  if (pineOptimalEntry) {
+    const distFromClose = Math.abs(pineOptimalEntry - close);
+    if (distFromClose < minEntryDist) {
+      pineOptimalEntry = direction === 'LONG'
+        ? Math.round((close - pullbackBuffer) * 10000) / 10000
+        : Math.round((close + pullbackBuffer) * 10000) / 10000;
+    }
+  }
+  // If still no pineOptimalEntry — use swing buffer as fallback
+  if (!pineOptimalEntry) {
+    pineOptimalEntry = direction === 'LONG'
+      ? Math.round((close - pullbackBuffer) * 10000) / 10000
+      : Math.round((close + pullbackBuffer) * 10000) / 10000;
   }
 
   // OB entry — FXSSI limit wall with volume-weighted buffer
