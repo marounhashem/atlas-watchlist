@@ -89,7 +89,7 @@ function initSchema() {
     fvg_present INTEGER DEFAULT 0, fvg_high REAL, fvg_low REAL, fvg_mid REAL,
     fxssi_long_pct REAL, fxssi_short_pct REAL,
     fxssi_trapped TEXT, ob_absorption INTEGER DEFAULT 0, ob_imbalance REAL,
-    ob_large_orders INTEGER DEFAULT 0, fxssi_analysis TEXT, raw_payload TEXT)`);
+    ob_large_orders INTEGER DEFAULT 0, fxssi_analysis TEXT, fxssi_hourly_analysis TEXT, raw_payload TEXT)`);
 
   db.run(`CREATE TABLE IF NOT EXISTS signals (
     id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL, ts INTEGER NOT NULL,
@@ -137,6 +137,7 @@ function initSchema() {
   try { db.run('ALTER TABLE market_data ADD COLUMN fvg_high REAL'); } catch(e) {}
   try { db.run('ALTER TABLE market_data ADD COLUMN fvg_low REAL'); } catch(e) {}
   try { db.run('ALTER TABLE market_data ADD COLUMN fvg_mid REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE market_data ADD COLUMN fxssi_hourly_analysis TEXT'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN paper_outcome TEXT DEFAULT NULL'); console.log('[DB] Migration: added paper_outcome column'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN paper_outcome_ts INTEGER DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN fxssi_stale INTEGER DEFAULT 0'); } catch(e) {}
@@ -186,9 +187,9 @@ function upsertMarketData(symbol, data) {
        structure,fvg_present,fvg_high,fvg_low,fvg_mid,
        fxssi_long_pct,fxssi_short_pct,fxssi_trapped,
        ob_absorption,ob_imbalance,ob_large_orders,
-       fxssi_analysis,raw_payload)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [...baseParams, data.fxssiAnalysis || null,
+       fxssi_analysis,fxssi_hourly_analysis,raw_payload)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [...baseParams, data.fxssiAnalysis || null, data.fxssiHourlyAnalysis || null,
         JSON.stringify({ ...data, ...(data.rawExtra || {}) })]
     );
   } else {
