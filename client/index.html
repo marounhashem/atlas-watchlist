@@ -1322,9 +1322,15 @@ async function fetchLearningLog() {
   const c=document.getElementById('learning-container');
   if(!log.length){c.innerHTML='<div class="empty" style="padding:8px">First cycle runs after 10 outcomes</div>';return;}
   c.innerHTML=log.slice(0,8).map(e=>{
-    const changes=JSON.parse(e.changes||'[]');
+    let changes=[];
+    try {
+      const parsed = JSON.parse(e.changes||'[]');
+      changes = Array.isArray(parsed) ? parsed : [];
+    } catch(ex) { changes=[]; }
     const dt=new Date(e.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-    return `<div class="log"><div class="logts">${dt} — ${e.outcomes_used} outcomes</div>${changes.length?changes.map(c=>`<div class="logch">↑ ${c.symbol} (${c.winRate}%WR): ${c.diffs.join(', ')}</div>`).join(''):'<div>No changes needed</div>'}</div>`;
+    return '<div class="log"><div class="logts">' + dt + ' — ' + e.outcomes_used + ' outcomes</div>'
+      + (changes.length ? changes.map(function(ch){ return '<div class="logch">↑ ' + ch.symbol + ' (' + ch.winRate + '%WR): ' + (Array.isArray(ch.diffs) ? ch.diffs.join(', ') : ch.diffs||'') + '</div>'; }).join('') : '<div>No changes needed</div>')
+      + '</div>';
   }).join('');
 }
 
