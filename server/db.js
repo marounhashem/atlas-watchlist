@@ -281,19 +281,30 @@ function getLatestOpenSignal(symbol, direction) {
   );
   if (active) return active;
 
-  // Check for ACTIVE signal in OPPOSITE direction — can't have SHORT and LONG open simultaneously
-  // If opposite ACTIVE exists, expire it so the new direction can proceed
+  // Check for OPEN signal in OPPOSITE direction — expire it so new direction can proceed
+  // IMPORTANT: Only expire OPEN signals (not yet entered)
+  // ACTIVE signals = entry touched = trader may be in a real trade — DO NOT auto-expire
+  // Let the trader manage their active trade manually
   const oppositeDir = direction === 'LONG' ? 'SHORT' : 'LONG';
+  const oppositeOpen = get(
+    "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='OPEN' AND (cycle IS NULL OR cycle=0) ORDER BY ts DESC LIMIT 1",
+    [symbol, oppositeDir]
+  );
+  if (oppositeOpen) {
+    // Opposite direction is OPEN (not yet entered) — safe to expire
+    run("UPDATE signals SET outcome='EXPIRED', outcome_ts=? WHERE id=?",
+      [Date.now(), oppositeOpen.id]);
+    persist();
+    console.log(`[DB] ${symbol} — expired opposite ${oppositeDir} OPEN (id:${oppositeOpen.id}) — new ${direction} signal taking over`);
+  }
+
+  // If opposite ACTIVE exists — do NOT auto-expire, just log a warning
   const oppositeActive = get(
     "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0) ORDER BY ts DESC LIMIT 1",
     [symbol, oppositeDir]
   );
   if (oppositeActive) {
-    // Opposite direction is ACTIVE — expire it, the market has changed direction
-    run("UPDATE signals SET outcome='EXPIRED', outcome_ts=? WHERE id=?",
-      [Date.now(), oppositeActive.id]);
-    persist();
-    console.log(`[DB] ${symbol} — expired opposite ${oppositeDir} ACTIVE (id:${oppositeActive.id}) — new ${direction} signal taking over`);
+    console.log(`[DB] ${symbol} — WARNING: opposite ${oppositeDir} ACTIVE (id:${oppositeActive.id}) still open — new ${direction} signal generated but NOT auto-closing active trade`);
   }
 
   return get(
