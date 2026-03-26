@@ -2,8 +2,8 @@ const { getRecentOutcomes, getWeights, updateWeights, insertLearningLog, getAllS
 const { SYMBOLS } = require('./config');
 
 // Learning thresholds
-const MIN_CLOSED_TRADES_PER_SYMBOL = 10;  // minimum before adjusting weights
-const MIN_TOTAL_OUTCOMES = 10;            // minimum total before any learning
+const MIN_CLOSED_TRADES_PER_SYMBOL = 30;  // minimum per symbol before adjusting weights
+const MIN_TOTAL_OUTCOMES = 20;            // minimum total before any learning cycle fires
 const LEARNING_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours between cycles
 const NEW_OUTCOMES_THRESHOLD = 10;        // min new closed trades since last cycle
 
