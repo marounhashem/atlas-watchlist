@@ -784,6 +784,61 @@ function renderSignals() {
   c.innerHTML=filtered.slice(0,30).map(renderCard).join('');
 }
 
+function renderRecommendations(sig) {
+  if (sig.outcome !== 'ACTIVE' || !sig.recommendations) return '';
+  try {
+    const allRecs = JSON.parse(sig.recommendations);
+    const active = allRecs.filter(function(r) { return !r.dismissed && !r.resolved; });
+    if (!active.length) return '';
+
+    active.sort(function(a,b) {
+      var urgOrder = {HIGH:0,MEDIUM:1,LOW:2};
+      var uDiff = (urgOrder[a.urgency]||1) - (urgOrder[b.urgency]||1);
+      return uDiff !== 0 ? uDiff : b.ts - a.ts;
+    });
+
+    var primary = active[0];
+    var rest = active.slice(1);
+    var icon = primary.urgency === 'HIGH' ? '🚨' : primary.urgency === 'MEDIUM' ? '⚠️' : 'ℹ️';
+    var ageMin = Math.round((Date.now() - primary.ts) / 60000);
+    var ageStr = ageMin < 1 ? 'just now' : ageMin + 'm ago';
+    var timeStr = new Date(primary.ts).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+    var primaryId = primary.id || '';
+
+    var moreBadge = rest.length > 0
+      ? '<span style="font-size:9px;color:var(--dim);margin-left:8px;cursor:pointer;" onclick="toggleMoreRecs(this)">+' + rest.length + ' more</span>'
+      : '';
+
+    var moreHtml = rest.map(function(r2) {
+      var a2 = Math.round((Date.now() - r2.ts) / 60000);
+      var icon2 = r2.urgency === 'HIGH' ? '🚨' : r2.urgency === 'MEDIUM' ? '⚠️' : 'ℹ️';
+      var r2id = r2.id || '';
+      return '<div class="rec-card rec-' + r2.urgency + '" style="margin-top:4px;opacity:.8;">'
+        + icon2 + ' <b>' + r2.type + '</b>'
+        + ' <span class="rec-ts">' + a2 + 'm ago</span> — '
+        + (r2.reason || '').slice(0, 60) + '...'
+        + '<button style="float:right;background:none;border:none;color:var(--dim);cursor:pointer;font-size:10px;" onclick="dismissRec(' + sig.id + ',&quot;' + r2id + '&quot;)">&#x2715;</button>'
+        + '</div>';
+    }).join('');
+
+    var html = '<div class="rec-card rec-' + primary.urgency + '">'
+      + icon + ' <b>' + primary.type + '</b>'
+      + '<span class="rec-ts"> ' + ageStr + ' · ' + timeStr + '</span>'
+      + '<button style="float:right;background:none;border:none;color:var(--dim);cursor:pointer;font-size:11px;padding:0 4px;" onclick="dismissRec(' + sig.id + ',&quot;' + primaryId + '&quot;)" title="Dismiss">&#x2715;</button>'
+      + moreBadge
+      + '<br>' + (primary.reason || '')
+      + (primary.new_sl ? '<br><span style="color:#ffd740">New SL: ' + primary.new_sl + '</span>' : '')
+      + (primary.new_tp ? '<br><span style="color:#00e676">New TP: ' + primary.new_tp + '</span>' : '')
+      + (primary.progress_pct !== undefined ? '<br><span style="color:var(--dim)">Progress: ' + primary.progress_pct + '% toward TP</span>' : '')
+      + '</div>';
+
+    if (rest.length > 0) {
+      html += '<div style="display:none">' + moreHtml + '</div>';
+    }
+    return html;
+  } catch(e) { return ''; }
+}
+
 function renderCard(sig, isPast=false) {
   const v=sig.verdict||'SKIP';
   if(v==='CLOSED') return `<div class="card closed"><div class="ctop"><div><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span></div><span class="verdict vC">CLOSED</span></div><div style="font-size:9px;color:var(--muted)">${sig.reasoning||'Market closed'}</div></div>`;
@@ -838,55 +893,7 @@ function renderCard(sig, isPast=false) {
     ${sig.reasoning?`<div class="reason">${sig.reasoning}</div>`:''}
     <div class="card-actions">
       ${sig.outcome==='ACTIVE'?`<span style="font-size:9px;color:#ffd740;letter-spacing:.5px;">● MONITORING TP/SL</span>`:''}
-      ${sig.outcome==='ACTIVE' && sig.recommendations ? (() => {
-        try {
-          const allRecs = JSON.parse(sig.recommendations);
-          // Filter: exclude dismissed and resolved
-          const active = allRecs.filter(r => !r.dismissed && !r.resolved);
-          if (!active.length) return '';
-
-          // Sort: HIGH first, then by ts desc
-          active.sort((a,b) => {
-            const urgOrder = {HIGH:0,MEDIUM:1,LOW:2};
-            return (urgOrder[a.urgency]||1) - (urgOrder[b.urgency]||1) || b.ts - a.ts;
-          });
-
-          const primary = active[0];
-          const rest = active.slice(1);
-          const icon = primary.urgency === 'HIGH' ? '🚨' : primary.urgency === 'MEDIUM' ? '⚠️' : 'ℹ️';
-          const ageMin = Math.round((Date.now() - primary.ts) / 60000);
-          const ageStr = ageMin < 1 ? 'just now' : ageMin + 'm ago';
-          const timeStr = new Date(primary.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-
-          const moreBadge = rest.length > 0
-            ? '<span style="font-size:9px;color:var(--dim);margin-left:8px;cursor:pointer;" onclick="toggleMoreRecs(this)">+' + rest.length + ' more</span>'
-            : '';
-
-          const moreRecs = rest.map(r2 => {
-            const a2 = Math.round((Date.now()-r2.ts)/60000);
-            const icon2 = r2.urgency==='HIGH'?'🚨':r2.urgency==='MEDIUM'?'⚠️':'ℹ️';
-            const dimStyle = 'float:right;background:none;border:none;color:var(--dim);cursor:pointer;font-size:10px;';
-            return '<div class="rec-card rec-' + r2.urgency + '" style="margin-top:4px;opacity:.8;">'
-              + icon2 + ' <strong>' + r2.type + '</strong>'
-              + ' <span class="rec-ts">' + a2 + 'm ago</span> — '
-              + r2.reason.slice(0,60) + '...'
-              + '<button style="' + dimStyle + '" onclick="dismissRec(' + sig.id + ',this.dataset.rid)" data-rid="' + r2.id + '">✕</button>'
-              + '</div>';
-          }).join('');
-
-          return '<div class="rec-card rec-' + primary.urgency + '">' +
-            icon + ' <strong>' + primary.type + '</strong>' +
-            '<span class="rec-ts">' + ageStr + ' · ' + timeStr + '</span>' +
-            '<button style="float:right;background:none;border:none;color:var(--dim);cursor:pointer;font-size:11px;padding:0 4px;" onclick="dismissRec(' + sig.id + ',this.dataset.rid)" data-rid="' + primary.id + '" title="Dismiss">✕</button>' +
-            moreBadge +
-            '<br>' + primary.reason +
-            (primary.new_sl ? '<br><span style="color:#ffd740">→ New SL: ' + primary.new_sl + '</span>' : '') +
-            (primary.new_tp ? '<br><span style="color:#00e676">→ New TP: ' + primary.new_tp + '</span>' : '') +
-            (primary.progress_pct !== undefined ? '<br><span style="color:var(--dim)">Progress: ' + primary.progress_pct + '% toward TP</span>' : '') +
-            '</div>' +
-            '<div style="display:none">' + moreRecs + '</div>';
-        } catch(e) { return ''; }
-      })() : ''}
+      ${renderRecommendations(sig)}
       ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
       ${showAgents?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')" title="Copy full trade dossier">⊞</div>`:''}
     </div>
