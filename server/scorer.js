@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260326.2'; // Added structure filter alongside EMA filter, RSI threshold 40, index min RR 1.8
+const SCORER_VERSION = '20260326.3'; // Gravity+absorption combo, SHORT momentum path, FXSSI signal tiebreaker
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -195,6 +195,27 @@ function scoreOrderBook(data, direction) {
 
   if (data.ob_absorption && direction === 'LONG')  score += 0.20;
   if (data.ob_absorption && direction === 'SHORT') score += 0.05;
+
+  // ── Gravity + Absorption combo boost ──────────────────────────────────────
+  // Both V1 winning trades had this combination — empirically validated
+  // Gravity above price = liquidity magnet pulling UP = bullish pull
+  // Absorption at entry = large buyers defending the level = support confirmed
+  // Together: institutional support + price magnet above = high conviction LONG
+  try {
+    const raw2 = data.fxssi_analysis || data.raw_payload;
+    if (raw2 && data.ob_absorption) {
+      const parsed2 = JSON.parse(raw2);
+      const fx2 = parsed2.fxssiAnalysis
+        ? (typeof parsed2.fxssiAnalysis === 'string' ? JSON.parse(parsed2.fxssiAnalysis) : parsed2.fxssiAnalysis)
+        : (parsed2.longPct != null ? parsed2 : null);
+      const gp = fx2?.gravity?.price;
+      const cp2 = data.close || 0;
+      if (gp && cp2) {
+        if (direction === 'LONG'  && gp > cp2) score += 0.18; // gravity above + absorption = strong LONG setup
+        if (direction === 'SHORT' && gp < cp2) score += 0.18; // gravity below + absorption = strong SHORT setup
+      }
+    }
+  } catch(e) {}
 
   const imbalance = data.ob_imbalance || 0;
   if (direction === 'LONG'  && imbalance > 0.3)  score += 0.15;
@@ -432,6 +453,46 @@ function scoreSymbol(symbol) {
     else if (agree) conflictMultiplier = 1.12;
   }
 
+  // ── SHORT momentum path ──────────────────────────────────────────────────
+  // In downtrends, SHORT signals don't need crowd traps — momentum continuation works
+  // Standard scoring penalises SHORTs for not having 60%+ crowd trapped LONG
+  // This path rewards SHORTs that have: bearish structure + RSI confirming + gravity below
+  if (direction === 'SHORT') {
+    try {
+      let shortMomentumBoost = 0;
+      const rsiShort = data.rsi || 50;
+
+      // RSI between 45-60 on SHORT = momentum confirming bearish without being extreme
+      if (rsiShort >= 45 && rsiShort <= 60) shortMomentumBoost += 0.06;
+
+      // 4h structure bearish = trend confirmed on higher TF
+      if (data.raw_payload) {
+        const rawSh = JSON.parse(data.raw_payload);
+        const stSh = rawSh.structure || {};
+        if (typeof stSh['4h'] === 'number' && stSh['4h'] === -1) shortMomentumBoost += 0.08;
+        if (typeof stSh['1h'] === 'number' && stSh['1h'] === -1) shortMomentumBoost += 0.05;
+      }
+
+      // FXSSI gravity below price = downward pull confirmed
+      if (data.fxssi_analysis) {
+        const fxSh = typeof data.fxssi_analysis === 'string'
+          ? JSON.parse(data.fxssi_analysis) : data.fxssi_analysis;
+        const gpSh = fxSh?.gravity?.price;
+        const cpSh = data.close || 0;
+        if (gpSh && cpSh && gpSh < cpSh) shortMomentumBoost += 0.07;
+
+        // Price above middleOfVolume = overextended = good fade setup
+        if (fxSh?.middleOfVolume && cpSh > fxSh.middleOfVolume) shortMomentumBoost += 0.05;
+      }
+
+      // Apply boost — only when at least 2 conditions met (avoid boosting weak setups)
+      if (shortMomentumBoost >= 0.12) {
+        conflictMultiplier = Math.min(conflictMultiplier * (1 + shortMomentumBoost), conflictMultiplier * 1.35);
+        console.log(`[Scorer] ${symbol} SHORT momentum path — boost +${Math.round(shortMomentumBoost*100)}%`);
+      }
+    } catch(e) {}
+  }
+
   // ── FXSSI gravity + bias contradiction check ─────────────────────────────
   // If FXSSI gravity AND signalBias both contradict direction = strong block
   // gravity above price pulling LONG signal SHORT = liquidity hunt in opposite direction
@@ -569,14 +630,16 @@ function scoreSymbol(symbol) {
   // ── Structure-based score ceiling ─────────────────────────────────────────
   // Can't be 90%+ confident if only 0-1 TFs agree on direction
   // Requires multi-TF alignment to justify high scores
-  // structScore is calculated below in conflictMultiplier block — read from raw_payload
+  // Within each structure tier, FXSSI signal count differentiates quality
   let structureCap = 95;
+  let structTier = 5; // default: 5 TFs aligned
   try {
     if (data.raw_payload) {
       const rawSc = JSON.parse(data.raw_payload);
       const stSc  = rawSc.structure;
       const sc    = typeof stSc?.score === 'number' ? Math.abs(stSc.score)
         : (stSc ? Math.abs((stSc['1m']||0)+(stSc['5m']||0)+(stSc['15m']||0)+(stSc['1h']||0)+(stSc['4h']||0)) : 0);
+      structTier = sc;
       if      (sc <= 1) structureCap = 78;
       else if (sc <= 2) structureCap = 84;
       else if (sc <= 3) structureCap = 89;
@@ -584,6 +647,32 @@ function scoreSymbol(symbol) {
       // sc = 5 → max 95
     }
   } catch(e) {}
+
+  // ── FXSSI signal count tiebreaker within structure tier ───────────────────
+  // When structure is 0-1/5, FXSSI signal count (0-7) differentiates quality
+  // More FXSSI conditions aligned = higher confidence within the same structure tier
+  // Prevents weak and strong signals both capping at exactly 78%
+  if (structTier <= 1) {
+    try {
+      let fxssiSigCount = 0;
+      if (data.fxssi_analysis) {
+        const fxTb = typeof data.fxssi_analysis === 'string'
+          ? JSON.parse(data.fxssi_analysis) : data.fxssi_analysis;
+        fxssiSigCount = direction === 'LONG'
+          ? (fxTb?.signals?.buy  || 0)
+          : (fxTb?.signals?.sell || 0);
+      }
+      // Scale cap within 0/5 tier based on FXSSI conviction:
+      // 0-1 signals = 68%  (very weak — barely passes)
+      // 2-3 signals = 72%  (moderate FXSSI confirmation)
+      // 4-5 signals = 75%  (strong FXSSI confirmation)
+      // 6-7 signals = 78%  (maximum allowed at 0/5 structure)
+      if      (fxssiSigCount <= 1) structureCap = 68;
+      else if (fxssiSigCount <= 3) structureCap = 72;
+      else if (fxssiSigCount <= 5) structureCap = 75;
+      // 6-7 keeps the existing 78% cap
+    } catch(e) {}
+  }
 
   const cappedRaw = Math.min(structureCap, rawScore);
   const score = Math.round(cappedRaw * conflictMultiplier);
