@@ -12,7 +12,7 @@ const { scoreAllPriority, saveSignal } = require('./scorer');
 const { checkOutcomes } = require('./outcome');
 const { runLearningCycle } = require('./learner');
 const claudeLearner = require('./claudeLearner');
-const { runFXSSIScrape, processBridgePayload } = require('./fxssiScraper');
+const { runFXSSIScrape, processBridgePayload, getFxssiCacheAge } = require('./fxssiScraper');
 const { SYMBOLS } = require('./config');
 
 const app = express();
@@ -730,12 +730,15 @@ app.get('/api/health', (req, res) => {
   for (const sym of Object.keys(SYMBOLS)) {
     const data    = db2.getLatestMarketData(sym);
     const isOpen  = isMarketOpen(sym);
-    const lastSeen = data?.ts || null;
-    const pineAge  = lastSeen ? (now - lastSeen) : null;
-    const fxssiAge = lastSeen ? (now - lastSeen) : null;
+    const lastSeen  = data?.ts || null;
+    const pineAge   = lastSeen ? (now - lastSeen) : null;
+    // FXSSI has its own scrape cycle — use actual cache timestamp, not Pine alert time
+    // Pine stale ≠ FXSSI stale (they run on different schedules)
+    const fxssiAge  = getFxssiCacheAge(sym);
 
     const pineStale  = isOpen && pineAge != null && pineAge > PINE_STALE_MS;
-    const fxssiStale = data?.fxssi_long_pct != null && fxssiAge != null && fxssiAge > FXSSI_STALE_MS;
+    // Only flag FXSSI stale if: market is open AND we've scraped before AND it's old
+    const fxssiStale = isOpen && fxssiAge != null && fxssiAge > FXSSI_STALE_MS;
     const noData     = isOpen && !data;
 
     symbolHealth[sym] = {
