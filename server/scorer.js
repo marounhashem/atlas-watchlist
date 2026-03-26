@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260326.8'; // Swing entry: FVG edge, pullback buffer 0.35×ATR, SHORT balance
+const SCORER_VERSION = '20260326.9'; // Daily hard gate, cluster entry, raised PROCEED bar to 78, EV learner
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -468,6 +468,25 @@ function scoreSymbol(symbol) {
       const str4h  = typeof st['4h'] === 'number' ? st['4h'] : 0;
       const str1d  = typeof st['1d'] === 'number' ? st['1d'] : 0;
 
+      // ── CHANGE 1: Daily bias as hard gate ──────────────────────────────────
+      // Daily trend = absolute wall. Not a penalty. Not a filter. A wall.
+      // dailyBias: -1 = bearish, +1 = bullish, 0 = ranging
+      // Priority: daily structure > daily EMA (structure is confirmed swing, EMA is lagging)
+      const dailyBias = str1d !== 0 ? str1d : ema1d;
+
+      if (dailyBias === -1 && direction === 'LONG') {
+        // Daily is bearish — ONLY SHORT signals allowed. LONG is blocked, full stop.
+        console.log(`[Scorer] ${symbol} LONG blocked — daily trend BEARISH (hard gate)`);
+        return null;
+      }
+      if (dailyBias === 1 && direction === 'SHORT') {
+        // Daily is bullish — ONLY LONG signals allowed. SHORT is blocked, full stop.
+        console.log(`[Scorer] ${symbol} SHORT blocked — daily trend BULLISH (hard gate)`);
+        return null;
+      }
+      // dailyBias === 0 (ranging): both directions allowed but score floor raised to 82 later
+
+      // Intraday filters still apply — both TFs against = no trade
       if (direction === 'LONG') {
         if (ema1h === -1 && ema4h === -1) {
           console.log(`[Scorer] ${symbol} LONG blocked — 1h AND 4h EMA both bearish`);
@@ -475,17 +494,6 @@ function scoreSymbol(symbol) {
         }
         if (str1h === -1 && str4h === -1) {
           console.log(`[Scorer] ${symbol} LONG blocked — 1h AND 4h structure both bearish`);
-          return null;
-        }
-        // Daily EMA bearish = price below 200 EMA on daily = weekly downtrend confirmed
-        // Block LONG when daily EMA bearish + at least one intraday TF also against
-        if (ema1d === -1 && (ema1h === -1 || ema4h === -1 || str1h === -1 || str4h === -1)) {
-          console.log(`[Scorer] ${symbol} LONG blocked — daily EMA bearish + intraday confirming downtrend`);
-          return null;
-        }
-        // Daily structure bearish (when swing points confirmed)
-        if (str1d === -1 && (str1h === -1 || str4h === -1)) {
-          console.log(`[Scorer] ${symbol} LONG blocked — daily structure bearish + higher TF confirming`);
           return null;
         }
       }
@@ -498,16 +506,10 @@ function scoreSymbol(symbol) {
           console.log(`[Scorer] ${symbol} SHORT blocked — 1h AND 4h structure both bullish`);
           return null;
         }
-        // Daily EMA bullish + intraday confirming = block SHORT
-        if (ema1d === 1 && (ema1h === 1 || ema4h === 1 || str1h === 1 || str4h === 1)) {
-          console.log(`[Scorer] ${symbol} SHORT blocked — daily EMA bullish + intraday confirming uptrend`);
-          return null;
-        }
-        if (str1d === 1 && (str1h === 1 || str4h === 1)) {
-          console.log(`[Scorer] ${symbol} SHORT blocked — daily structure bullish + higher TF confirming`);
-          return null;
-        }
       }
+
+      // Store dailyBias for use in score threshold below
+      data._dailyBias = dailyBias;
     }
   } catch(e) {}
 
@@ -832,7 +834,17 @@ function scoreSymbol(symbol) {
   const finalScore = Math.round(score * regimeMultiplier);
   const adjustedMinScore = Math.min(88, Math.max(55, minScore + regimeMinScoreAdj));
 
-  const verdict = finalScore >= adjustedMinScore ? 'PROCEED' : finalScore >= Math.max(55, adjustedMinScore - 15) ? 'WATCH' : 'SKIP';
+  // ── CHANGE 5: Raise the bar — PROCEED requires real conviction ──────────────
+  // PROCEED: score >= adjustedMinScore (raised to 78 in config)
+  // WATCH:   score >= adjustedMinScore - 8 (tight band, not 15 below)
+  // SKIP:    everything else — not a trade, not a watch
+  // Ranging daily (dailyBias===0): floor raised to 82 for PROCEED
+  const dailyBiasForThresh = data._dailyBias !== undefined ? data._dailyBias : 0;
+  const rangingPenalty = dailyBiasForThresh === 0 ? 4 : 0; // daily ranging = need higher conviction
+  const effectiveMinScore = adjustedMinScore + rangingPenalty;
+  const verdict = finalScore >= effectiveMinScore ? 'PROCEED'
+    : finalScore >= effectiveMinScore - 8 ? 'WATCH'
+    : 'SKIP';
   const reasoning = buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, data, cfg, regimeNote, macroNote });
 
   const close = data.close || 0;
@@ -858,95 +870,85 @@ function scoreSymbol(symbol) {
   let pineOptimalEntry = null;
   let obEntry = null;
 
-  // Pine optimal entry
+  // ── CHANGE 2: Entry = heaviest institutional volume cluster ─────────────────
+  // The heaviest ol (limit orders) cluster below price (LONG) or above (SHORT)
+  // IS the institutional level — that is where smart money is waiting to buy/sell
+  // Priority: heaviest FXSSI volume cluster → FVG level → ATR buffer (last resort)
+  const fallbackBuffer = atr * 0.35;
+
+  // Find heaviest ol cluster in the order book
+  let heaviestClusterEntry = null;
+  try {
+    if (data.raw_payload) {
+      const rawOB = JSON.parse(data.raw_payload);
+      const levels = rawOB.fxssiLevels || rawOB.levels || [];
+      if (levels.length > 0 && close > 0) {
+        if (direction === 'LONG') {
+          // Heaviest ol cluster BELOW price — institutional support
+          const below = levels
+            .filter(l => l.price < close && (l.ol || 0) > 0.2)
+            .sort((a, b) => (b.ol || 0) - (a.ol || 0)); // sort by volume desc
+          const best = below[0];
+          if (best && (close - best.price) < atr * 3) {
+            // Slight buffer just above the cluster (enter just above institutional level)
+            heaviestClusterEntry = Math.round((best.price * 1.0002) * 10000) / 10000;
+            entrySource = `fxssi_cluster_vol${Math.round((best.ol||0)*10)/10}`;
+          }
+        } else {
+          // Heaviest ol cluster ABOVE price — institutional resistance
+          const above = levels
+            .filter(l => l.price > close && (l.ol || 0) > 0.2)
+            .sort((a, b) => (b.ol || 0) - (a.ol || 0));
+          const best = above[0];
+          if (best && (best.price - close) < atr * 3) {
+            // Slight buffer just below the cluster
+            heaviestClusterEntry = Math.round((best.price * 0.9998) * 10000) / 10000;
+            entrySource = `fxssi_cluster_vol${Math.round((best.ol||0)*10)/10}`;
+          }
+        }
+      }
+    }
+  } catch(e) {}
+
+  // Fallback 1: FVG level (if meaningfully away from close)
+  let fvgEntry = null;
   try {
     if (data.raw_payload) {
       const raw4 = JSON.parse(data.raw_payload);
       const pe = raw4.entry;
       if (pe) {
-        pineOptimalEntry = direction === 'LONG' ? pe.longOptimal : pe.shortOptimal;
+        const lvl = direction === 'LONG' ? pe.longOptimal : pe.shortOptimal;
+        const src = direction === 'LONG' ? pe.longSource  : pe.shortSource;
+        if (lvl && src !== 'close' && Math.abs(lvl - close) >= atr * 0.15) {
+          fvgEntry = Math.round(lvl * 10000) / 10000;
+          if (!heaviestClusterEntry) entrySource = `pine_${src}`;
+        }
       }
     }
   } catch(e) {}
-  // FVG entry — use FVG low for LONG (better entry), FVG high for SHORT
-  // Only use FVG if it's meaningfully away from close (> 0.1×ATR distance)
-  if (!pineOptimalEntry) {
-    if (direction === 'LONG' && data.fvg_low && data.fvg_low > 0 && data.fvg_low < close - atr * 0.1) {
-      pineOptimalEntry = data.fvg_low;
-    } else if (direction === 'SHORT' && data.fvg_high && data.fvg_high > 0 && data.fvg_high > close + atr * 0.1) {
-      pineOptimalEntry = data.fvg_high;
-    } else if (direction === 'LONG' && data.fvg_mid && data.fvg_mid > 0 && data.fvg_mid < close - atr * 0.1) {
-      pineOptimalEntry = data.fvg_mid;
-    } else if (direction === 'SHORT' && data.fvg_mid && data.fvg_mid > 0 && data.fvg_mid > close + atr * 0.1) {
-      pineOptimalEntry = data.fvg_mid;
+
+  // Entry selection: cluster > FVG > ATR buffer
+  if (heaviestClusterEntry) {
+    // Validate cluster entry is actually away from current price (min 0.1×ATR)
+    if (Math.abs(heaviestClusterEntry - close) >= atr * 0.10) {
+      entry = heaviestClusterEntry;
+    } else if (fvgEntry) {
+      entry = fvgEntry;
+      entrySource = 'fvg_fallback';
+    } else {
+      entry = direction === 'LONG'
+        ? Math.round((close - fallbackBuffer) * 10000) / 10000
+        : Math.round((close + fallbackBuffer) * 10000) / 10000;
+      entrySource = 'atr_buffer';
     }
-  }
-
-  // ── Pullback buffer for swing entries ─────────────────────────────────────
-  // Don't enter at current price — wait for a small pullback
-  // 0.15×ATR below close for LONG, above close for SHORT
-  // This means entry is placed as a limit order slightly away from current price
-  // Better R:R, avoids entering at the high/low of a candle
-  // Swing entry buffer — minimum distance from close for a meaningful entry level
-  // 0.35×ATR = ~14 points for GOLD (ATR 40) — real pullback, not noise
-  // If Pine found a level but it's too close to current price, override with buffer
-  const pullbackBuffer    = atr * 0.35; // minimum meaningful pullback
-  const minEntryDist      = atr * 0.20; // reject levels closer than this to close
-
-  if (pineOptimalEntry && pineOptimalEntry === close) {
-    // Pine fell back to close — apply swing buffer
-    pineOptimalEntry = direction === 'LONG'
-      ? Math.round((close - pullbackBuffer) * 10000) / 10000
-      : Math.round((close + pullbackBuffer) * 10000) / 10000;
-  }
-  // Reject entries too close to current price
-  if (pineOptimalEntry) {
-    const distFromClose = Math.abs(pineOptimalEntry - close);
-    if (distFromClose < minEntryDist) {
-      pineOptimalEntry = direction === 'LONG'
-        ? Math.round((close - pullbackBuffer) * 10000) / 10000
-        : Math.round((close + pullbackBuffer) * 10000) / 10000;
-    }
-  }
-  // If still no pineOptimalEntry — use swing buffer as fallback
-  if (!pineOptimalEntry) {
-    pineOptimalEntry = direction === 'LONG'
-      ? Math.round((close - pullbackBuffer) * 10000) / 10000
-      : Math.round((close + pullbackBuffer) * 10000) / 10000;
-  }
-
-  // OB entry — FXSSI limit wall with volume-weighted buffer
-  if (fxssiLevels && close > 0) {
-    if (direction === 'SHORT' && fxssiLevels.nearestLimitAbove?.price) {
-      const wall    = fxssiLevels.nearestLimitAbove.price;
-      const wallVol = fxssiLevels.nearestLimitAbove.ol || 1.0;
-      const dist    = wall - close;
-      if (dist > 0 && dist < atr * 2) {
-        const bufferPct = wallVol >= 2.0 ? 0.0005 : wallVol >= 1.0 ? 0.001 : 0.002;
-        obEntry = Math.round((wall - wall * bufferPct) * 10000) / 10000;
-      }
-    } else if (direction === 'LONG' && fxssiLevels.nearestLimitBelow?.price) {
-      const wall    = fxssiLevels.nearestLimitBelow.price;
-      const wallVol = fxssiLevels.nearestLimitBelow.ol || 1.0;
-      const dist    = close - wall;
-      if (dist > 0 && dist < atr * 2) {
-        const bufferPct = wallVol >= 2.0 ? 0.0005 : wallVol >= 1.0 ? 0.001 : 0.002;
-        obEntry = Math.round((wall + wall * bufferPct) * 10000) / 10000;
-      }
-    }
-  }
-
-  // 50/50 blend — average when both available, use whichever is available otherwise
-  // Weights learned by claudeLearner from outcomes: entryFxssiW adjusts over time
-  if (obEntry && pineOptimalEntry) {
-    entry = Math.round((obEntry * entryFxssiW + pineOptimalEntry * (1 - entryFxssiW)) * 10000) / 10000;
-    entrySource = `fxssi${Math.round(entryFxssiW*100)}_pine${Math.round((1-entryFxssiW)*100)}`;
-  } else if (obEntry) {
-    entry = obEntry;
-    entrySource = 'fxssi_wall';
-  } else if (pineOptimalEntry && pineOptimalEntry !== close) {
-    entry = Math.round(pineOptimalEntry * 10000) / 10000;
-    entrySource = 'pine_level';
+  } else if (fvgEntry) {
+    entry = fvgEntry;
+  } else {
+    // Last resort: ATR buffer
+    entry = direction === 'LONG'
+      ? Math.round((close - fallbackBuffer) * 10000) / 10000
+      : Math.round((close + fallbackBuffer) * 10000) / 10000;
+    entrySource = 'atr_buffer';
   }
 
   // ── SL/TP from order book ─────────────────────────────────────────────────
@@ -1286,8 +1288,10 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
   const macroAdjustedScore = Math.min(structureCap, Math.min(95, Math.max(0, finalScore + macroScoreAdj)));
-  const macroVerdict = macroAdjustedScore >= adjustedMinScore ? 'PROCEED'
-    : macroAdjustedScore >= Math.max(55, adjustedMinScore - 15) ? 'WATCH' : 'SKIP';
+  const macroRangingPenalty = data._dailyBias === 0 ? 4 : 0;
+  const macroEffectiveMin = adjustedMinScore + macroRangingPenalty;
+  const macroVerdict = macroAdjustedScore >= macroEffectiveMin ? 'PROCEED'
+    : macroAdjustedScore >= macroEffectiveMin - 8 ? 'WATCH' : 'SKIP';
 
   const fxssiStale = hasFxssi && fxssiAge > FXSSI_MAX_AGE_MS;
   const finalReasoning = fxssiStale
@@ -1536,6 +1540,22 @@ function entryTouched(signal, currentPrice) {
 
 function saveSignal(scored) {
   if (scored.verdict !== 'PROCEED' && scored.verdict !== 'WATCH') return null;
+
+  // ── Opposite direction conflict guard ─────────────────────────────────────
+  // If an OPEN or ACTIVE signal already exists in the opposite direction,
+  // do NOT save this new signal — prevents simultaneous LONG+SHORT on same symbol
+  // The existing trade takes priority; the new signal is discarded
+  try {
+    const { getLatestOpenSignal } = require('./db');
+    const oppositeDir = scored.direction === 'LONG' ? 'SHORT' : 'LONG';
+    const oppositeSignal = getLatestOpenSignal(scored.symbol, oppositeDir);
+    if (oppositeSignal) {
+      console.log(`[Scorer] ${scored.symbol} ${scored.direction} blocked — opposite ${oppositeDir} already OPEN/ACTIVE (id:${oppositeSignal.id})`);
+      return null;
+    }
+  } catch(e) {
+    console.error('[Scorer] opposite-dir check error:', e.message);
+  }
 
   // Dedup only checks CURRENT CYCLE signals (cycle=0)
   // Retired ACTIVE signals (cycle>0) are completely invisible here —
