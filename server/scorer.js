@@ -524,7 +524,27 @@ function scoreSymbol(symbol) {
     sessionSc    * weights.session
   ) * 100;
 
-  const score = Math.round(rawScore * conflictMultiplier);
+  // ── Structure-based score ceiling ─────────────────────────────────────────
+  // Can't be 90%+ confident if only 0-1 TFs agree on direction
+  // Requires multi-TF alignment to justify high scores
+  // structScore is calculated below in conflictMultiplier block — read from raw_payload
+  let structureCap = 95;
+  try {
+    if (data.raw_payload) {
+      const rawSc = JSON.parse(data.raw_payload);
+      const stSc  = rawSc.structure;
+      const sc    = typeof stSc?.score === 'number' ? Math.abs(stSc.score)
+        : (stSc ? Math.abs((stSc['1m']||0)+(stSc['5m']||0)+(stSc['15m']||0)+(stSc['1h']||0)+(stSc['4h']||0)) : 0);
+      if      (sc <= 1) structureCap = 78;
+      else if (sc <= 2) structureCap = 84;
+      else if (sc <= 3) structureCap = 89;
+      else if (sc <= 4) structureCap = 93;
+      // sc = 5 → max 95
+    }
+  } catch(e) {}
+
+  const cappedRaw = Math.min(structureCap, rawScore);
+  const score = Math.round(cappedRaw * conflictMultiplier);
 
   // ── Regime adjustment ─────────────────────────────────────────────────────
   // Claude's regime detection feeds back into scoring — don't just display it
@@ -996,7 +1016,7 @@ function scoreSymbol(symbol) {
       }
     }
   } catch(e) {}
-  const macroAdjustedScore = Math.min(100, Math.max(0, finalScore + macroScoreAdj));
+  const macroAdjustedScore = Math.min(95, Math.max(0, finalScore + macroScoreAdj));
   const macroVerdict = macroAdjustedScore >= adjustedMinScore ? 'PROCEED'
     : macroAdjustedScore >= Math.max(55, adjustedMinScore - 15) ? 'WATCH' : 'SKIP';
 
