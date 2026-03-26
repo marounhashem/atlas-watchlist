@@ -534,11 +534,11 @@
   </div>
   <div class="panel">
     <div class="ptitle">Learning log</div>
-    <div id="learning-container"><div class="empty" style="padding:8px">First cycle runs after 10 outcomes</div></div>
+    <div id="learning-container"><div class="empty" style="padding:8px">First cycle runs after 20 outcomes</div></div>
   </div>
   <div class="panel" id="regime-panel">
     <div class="ptitle">Market regime — Claude</div>
-    <div id="regime-container"><div class="empty" style="padding:8px">Fires after 10 outcomes</div></div>
+    <div id="regime-container"><div class="empty" style="padding:8px">Fires after 30 outcomes</div></div>
   </div>
   <div class="panel">
     <div class="ptitle">Webhook</div>
@@ -1320,7 +1320,7 @@ async function fetchStats() {
 async function fetchLearningLog() {
   const log=await fetch('/api/learning-log').then(r=>r.json()).catch(()=>[]);
   const c=document.getElementById('learning-container');
-  if(!log.length){c.innerHTML='<div class="empty" style="padding:8px">First cycle runs after 10 outcomes</div>';return;}
+  if(!log.length){c.innerHTML='<div class="empty" style="padding:8px">First cycle runs after 20 outcomes</div>';return;}
   c.innerHTML=log.slice(0,8).map(e=>{
     let changes=[];
     try {
