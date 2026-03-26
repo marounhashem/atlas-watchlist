@@ -1,6 +1,6 @@
 // ATLAS//WATCHLIST — Claude Learning Engine
 // Three layers: post-trade analysis, session patterns, market regime detection
-// Fires: after every WIN/LOSS + daily at 17:00 UTC (end London) + every 10 outcomes
+// Fires: after every WIN/LOSS + daily at 17:00 UTC (end London) + every 20 outcomes
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL_SONNET = 'claude-sonnet-4-20250514'; // exact levels only
@@ -50,8 +50,8 @@ async function onOutcome(signal, outcome, broadcast) {
   // Layer 2 — Session pattern update
   updateSessionPattern(signal, outcome, insight);
 
-  // Layer 3 — Regime check every 10 outcomes
-  if (outcomesSinceLastRegime >= 10) {
+  // Layer 3 — Regime check every 20 outcomes (needs meaningful sample)
+  if (outcomesSinceLastRegime >= 20) {
     outcomesSinceLastRegime = 0;
     const regime = await detectRegime();
     if (regime) {
@@ -195,11 +195,11 @@ async function detectRegime() {
 
   try {
     const db = require('./db');
-    const recentSignals = db.getAllSignals(20).filter(s =>
+    const recentSignals = db.getAllSignals(50).filter(s =>
       s.outcome === 'WIN' || s.outcome === 'LOSS'
     );
 
-    if (recentSignals.length < 5) return null;
+    if (recentSignals.length < 30) return null; // need meaningful sample for regime
 
     const winRate = recentSignals.filter(s => s.outcome === 'WIN').length / recentSignals.length;
     const symbols = [...new Set(recentSignals.map(s => s.symbol))];
