@@ -154,7 +154,8 @@ app.post('/webhook/pine', (req, res) => {
     fvgMid  = data.fvgMid  || null;
   }
 
-  // Structure
+  // Structure — preserve raw object for raw_payload BEFORE converting to string
+  const rawStructureObj = (data.structure && typeof data.structure === 'object') ? data.structure : null;
   let structure = data.structure || 'ranging';
   if (typeof structure === 'object') {
     structure = structure.bull ? 'bullish' : structure.bear ? 'bearish' : 'ranging';
@@ -211,7 +212,7 @@ app.post('/webhook/pine', (req, res) => {
     // v2 fields stored in raw_payload via JSON merge
     rawExtra: {
       momScore,
-      structure: data.structure && typeof data.structure === 'object' ? data.structure : null,
+      structure: rawStructureObj,
       rsi:       data.rsi       && typeof data.rsi       === 'object' ? data.rsi       : null,
       rangeHigh: data.rangeHigh || null,
       rangeLow:  data.rangeLow  || null,
