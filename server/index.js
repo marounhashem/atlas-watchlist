@@ -385,6 +385,17 @@ app.get('/api/fxssi-fetch', async (req, res) => {
 // Reset — wipe signals and market data, keep weights and schema
 // Signals-only reset — clears trades but preserves market data (Pine + FXSSI)
 // Use this when you want a clean slate without losing live order book data
+// Watch signals — read-only endpoint for dashboard
+app.get('/api/watch-signals', (req, res) => {
+  try {
+    const { getRecentWatchSignals } = require('./db');
+    const watches = getRecentWatchSignals(100);
+    res.json({ ok: true, signals: watches });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/reset-signals', (req, res) => {
   try {
     const db = require('./db');
