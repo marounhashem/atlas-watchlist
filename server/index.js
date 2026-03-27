@@ -839,11 +839,10 @@ cron.schedule('* * * * *', () => {
 });
 
 // FXSSI auto-scrape — fires at :01/:21/:41, aligned with 20-min FXSSI refresh cycle
+// Runs 24/7 regardless of market hours — FXSSI data is live trader positioning,
+// valid at all times. Stopping during market close caused stale data at open.
 cron.schedule('1,21,41 * * * *', async () => {
   if (!dbReady) return;
-  const { isMarketOpen } = require('./marketHours');
-  const anyOpen = Object.keys(SYMBOLS).some(s => isMarketOpen(s));
-  if (!anyOpen) return;
   try {
     await runFXSSIScrape(broadcast);
   } catch(e) {
