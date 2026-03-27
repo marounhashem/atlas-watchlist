@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260327.3'; // PROCEED=30min cooldown, WATCH=5min, FXSSI stale fix
+const SCORER_VERSION = '20260327.4'; // fetchedAt for FXSSI age, research schema fix
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -374,7 +374,7 @@ function estimateATR(data, assetClass) {
   return fallbacks[assetClass] || 5;
 }
 
-const FXSSI_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes
+const FXSSI_MAX_AGE_MS = 25 * 60 * 1000; // 25 minutes — FXSSI updates at :00/:20/:40, we fetch at :01/:21/:41
 
 function scoreSymbol(symbol) {
   let data;
@@ -385,15 +385,21 @@ function scoreSymbol(symbol) {
   if (!cfg) return null;
 
   // ── FXSSI staleness gate ───────────────────────────────────────────────────
-  // Use snapshotTime from fxssi_analysis — NOT data.ts (Pine's bar close timestamp)
-  // Pine fires every bar so data.ts is always fresh even if FXSSI is hours old
+  // Staleness = how long since WE last fetched, not since FXSSI last updated their data
+  // fetchedAt: set by scraper every time it successfully fetches (even same snapshot)
+  // snapshotTime: FXSSI API's own update time (~30min cycles) — NOT our fetch time
+  // Using snapshotTime caused false stale: we fetch every 20min but FXSSI updates every 30min
+  // so snapshotTime could be 30min old even though we fetched 2min ago → false stale
   let fxssiAge = Infinity;
   try {
     if (data.fxssi_analysis) {
       const fa = typeof data.fxssi_analysis === 'string'
         ? JSON.parse(data.fxssi_analysis) : data.fxssi_analysis;
-      if (fa?.snapshotTime) {
-        // snapshotTime is Unix seconds from FXSSI API — convert to ms
+      if (fa?.fetchedAt) {
+        // fetchedAt = our fetch timestamp in ms — always fresh if scraper ran recently
+        fxssiAge = Date.now() - fa.fetchedAt;
+      } else if (fa?.snapshotTime) {
+        // Legacy fallback — old records without fetchedAt
         const snapMs = fa.snapshotTime > 1e10 ? fa.snapshotTime : fa.snapshotTime * 1000;
         fxssiAge = Date.now() - snapMs;
       }
