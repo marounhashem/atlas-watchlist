@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260326.9'; // Off-hours WATCH block, FXSSI stale block, 5min cooldown, SL cap
+const SCORER_VERSION = '20260327.1'; // Structure 0/5 block, counter-trend 65% gate + 80 minScore, WATCH to watch_signals
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -551,6 +551,37 @@ function scoreSymbol(symbol) {
   const obSc      = scoreOrderBook(data, direction);
   const sessionSc = scoreSession(symbol);
 
+  // ── Counter-trend crowd trap gate ────────────────────────────────────────
+  // Going against structure requires genuine crowd extremity to fuel the reversal
+  // Below 65% trapped = crowd is not squeezed enough = counter-trend has no fuel
+  try {
+    const rawCT = data.fxssi_analysis || data.raw_payload;
+    if (rawCT) {
+      const parsedCT = JSON.parse(rawCT);
+      const fxCT = parsedCT.fxssiAnalysis
+        ? (typeof parsedCT.fxssiAnalysis === 'string' ? JSON.parse(parsedCT.fxssiAnalysis) : parsedCT.fxssiAnalysis)
+        : (parsedCT.longPct != null ? parsedCT : null);
+      if (fxCT) {
+        const longPctCT  = fxCT.longPct  || 0;
+        const shortPctCT = fxCT.shortPct || 0;
+        // structScore from raw_payload
+        const rawSCT   = JSON.parse(data.raw_payload || '{}');
+        const stSCT    = rawSCT.structure;
+        const scCT     = typeof stSCT?.score === 'number' ? stSCT.score
+          : ((stSCT?.['1h']||0)+(stSCT?.['4h']||0));
+        const isCounterTrend = (direction === 'LONG' && scCT < 0) ||
+                               (direction === 'SHORT' && scCT > 0);
+        if (isCounterTrend) {
+          const trapPct = direction === 'LONG' ? shortPctCT : longPctCT;
+          if (trapPct < 65) {
+            console.log(`[Scorer] ${symbol} ${direction} blocked — counter-trend with ${trapPct}% crowd trapped (need ≥65%)`);
+            return null;
+          }
+        }
+      }
+    }
+  } catch(e) {}
+
   // Conflict multiplier
   let conflictMultiplier = 1.0;
   const pineStrong = biasSc >= 0.65;
@@ -755,6 +786,22 @@ function scoreSymbol(symbol) {
   // Can't be 90%+ confident if only 0-1 TFs agree on direction
   // Requires multi-TF alignment to justify high scores
   // Within each structure tier, FXSSI signal count differentiates quality
+  // ── Structure 0/5 hard block ──────────────────────────────────────────────
+  // Zero timeframes aligned = no conviction = no trade
+  // A trader never enters when not a single TF confirms direction
+  try {
+    if (data.raw_payload) {
+      const rawStruct = JSON.parse(data.raw_payload);
+      const stCheck   = rawStruct.structure;
+      const scCheck   = typeof stCheck?.score === 'number' ? Math.abs(stCheck.score)
+        : (stCheck ? Math.abs((stCheck['1m']||0)+(stCheck['5m']||0)+(stCheck['15m']||0)+(stCheck['1h']||0)+(stCheck['4h']||0)+(stCheck['1d']||0)) : 0);
+      if (scCheck === 0) {
+        console.log(`[Scorer] ${symbol} ${direction} blocked — Structure 0/5 (no TF alignment)`);
+        return null;
+      }
+    }
+  } catch(e) {}
+
   let structureCap = 95;
   let structTier = 5; // default: 5 TFs aligned
   try {
@@ -860,7 +907,22 @@ function scoreSymbol(symbol) {
   } catch(e) {}
 
   const finalScore = Math.round(score * regimeMultiplier);
-  const adjustedMinScore = Math.min(88, Math.max(55, minScore + regimeMinScoreAdj));
+  let adjustedMinScore = Math.min(88, Math.max(55, minScore + regimeMinScoreAdj));
+
+  // ── Counter-trend minScore floor: 80 ─────────────────────────────────────
+  // Counter-trend trades that pass the 65% crowd gate still need high scoring
+  // Minimum 80 score regardless of symbol thresholds
+  try {
+    const rawMinCT = JSON.parse(data.raw_payload || '{}');
+    const stMinCT  = rawMinCT.structure;
+    const scMinCT  = typeof stMinCT?.score === 'number' ? stMinCT.score
+      : ((stMinCT?.['1h']||0)+(stMinCT?.['4h']||0));
+    const isCounterTrendMin = (direction === 'LONG' && scMinCT < 0) ||
+                              (direction === 'SHORT' && scMinCT > 0);
+    if (isCounterTrendMin && adjustedMinScore < 80) {
+      adjustedMinScore = 80;
+    }
+  } catch(e) {}
 
   // ── CHANGE 5: Raise the bar — PROCEED requires real conviction ──────────────
   // PROCEED: score >= adjustedMinScore (raised to 78 in config)
@@ -1624,6 +1686,20 @@ function entryTouched(signal, currentPrice) {
 
 function saveSignal(scored) {
   if (scored.verdict !== 'PROCEED' && scored.verdict !== 'WATCH') return null;
+
+  // ── WATCH signals → separate watch_signals table ──────────────────────────
+  // WATCH = uncertain signal — never mixed with live tradeable signals
+  // Saved separately for learning and pattern analysis only
+  if (scored.verdict === 'WATCH') {
+    try {
+      const { insertWatchSignal } = require('./db');
+      const wid = insertWatchSignal({ ...scored, scorerVersion: SCORER_VERSION });
+      if (wid) console.log(`[Scorer] ${scored.symbol} ${scored.direction} WATCH saved to watch_signals (id:${wid})`);
+    } catch(e) {
+      console.error('[Scorer] watch signal save error:', e.message);
+    }
+    return null; // do NOT save to main signals table
+  }
 
   // ── Off-hours + FXSSI stale hard block ────────────────────────────────────
   // During off-hours with stale FXSSI: no order book anchor = dangerously wide SL
