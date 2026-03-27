@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260327.2'; // Fix structureZero cap on macroVerdict, counter-trend gate uses full struct sum
+const SCORER_VERSION = '20260327.3'; // PROCEED=30min cooldown, WATCH=5min, FXSSI stale fix
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -1721,18 +1721,22 @@ function saveSignal(scored) {
     }
   }
 
-  // ── Minimum 5-minute cooldown between same symbol+direction signals ────────
-  // Prevents signal churn during off-hours or rapid market moves
-  // Checks the most recent signal regardless of outcome (OPEN, EXPIRED, REPLACED etc)
+  // ── Signal cooldown — tiered by verdict ──────────────────────────────────
+  // PROCEED: 30min cooldown — prevents double-entry on same move (id:2793 + id:2794 issue)
+  // WATCH:   5min cooldown — just prevents rapid churn
+  // Checks main signals table only (WATCH go to watch_signals, different table)
   try {
     const { getAllSignals } = require('./db');
-    const recent = getAllSignals(20).find(s =>
+    const cooldownMs = scored.verdict === 'PROCEED' ? 30 * 60 * 1000 : 5 * 60 * 1000;
+    const recent = getAllSignals(50).find(s =>
       s.symbol === scored.symbol &&
       s.direction === scored.direction &&
-      (Date.now() - s.ts) < 5 * 60 * 1000
+      (Date.now() - s.ts) < cooldownMs
     );
     if (recent) {
-      console.log(`[Scorer] ${scored.symbol} ${scored.direction} cooldown — last signal ${Math.round((Date.now()-recent.ts)/1000)}s ago (id:${recent.id})`);
+      const agoMin = Math.round((Date.now() - recent.ts) / 60000);
+      const coolMin = cooldownMs / 60000;
+      console.log(`[Scorer] ${scored.symbol} ${scored.direction} ${scored.verdict} cooldown (${agoMin}m < ${coolMin}m) — last signal id:${recent.id}`);
       return null;
     }
   } catch(e) {
