@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260327.1'; // Structure 0/5 block, counter-trend 65% gate + 80 minScore, WATCH to watch_signals
+const SCORER_VERSION = '20260327.2'; // Fix structureZero cap on macroVerdict, counter-trend gate uses full struct sum
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -554,9 +554,10 @@ function scoreSymbol(symbol) {
   // ── Counter-trend crowd trap gate ────────────────────────────────────────
   // Going against structure requires genuine crowd extremity to fuel the reversal
   // Below 65% trapped = crowd is not squeezed enough = counter-trend has no fuel
+  // Structure 0/5 = no direction to be counter to — gate skipped for 0/5
   try {
     const rawCT = data.fxssi_analysis || data.raw_payload;
-    if (rawCT) {
+    if (rawCT && !structureZero) {
       const parsedCT = JSON.parse(rawCT);
       const fxCT = parsedCT.fxssiAnalysis
         ? (typeof parsedCT.fxssiAnalysis === 'string' ? JSON.parse(parsedCT.fxssiAnalysis) : parsedCT.fxssiAnalysis)
@@ -564,11 +565,11 @@ function scoreSymbol(symbol) {
       if (fxCT) {
         const longPctCT  = fxCT.longPct  || 0;
         const shortPctCT = fxCT.shortPct || 0;
-        // structScore from raw_payload
-        const rawSCT   = JSON.parse(data.raw_payload || '{}');
-        const stSCT    = rawSCT.structure;
-        const scCT     = typeof stSCT?.score === 'number' ? stSCT.score
-          : ((stSCT?.['1h']||0)+(stSCT?.['4h']||0));
+        // Use full TF sum for structure direction (not just 1h+4h)
+        const rawSCT = JSON.parse(data.raw_payload || '{}');
+        const stSCT  = rawSCT.structure;
+        const scCT   = typeof stSCT?.score === 'number' ? stSCT.score
+          : ((stSCT?.['1m']||0)+(stSCT?.['5m']||0)+(stSCT?.['15m']||0)+(stSCT?.['1h']||0)+(stSCT?.['4h']||0)+(stSCT?.['1d']||0));
         const isCounterTrend = (direction === 'LONG' && scCT < 0) ||
                                (direction === 'SHORT' && scCT > 0);
         if (isCounterTrend) {
@@ -933,11 +934,11 @@ function scoreSymbol(symbol) {
   const dailyBiasForThresh = data._dailyBias !== undefined ? data._dailyBias : 0;
   const rangingPenalty = dailyBiasForThresh === 0 ? 4 : 0; // daily ranging = need higher conviction
   const effectiveMinScore = adjustedMinScore + rangingPenalty;
-  // Structure 0/5 forces WATCH max — cannot be PROCEED regardless of score
+  // verdict here is intermediate — final verdict is macroVerdict below
   const rawVerdict = finalScore >= effectiveMinScore ? 'PROCEED'
     : finalScore >= effectiveMinScore - 8 ? 'WATCH'
     : 'SKIP';
-  const verdict = structureZero && rawVerdict === 'PROCEED' ? 'WATCH' : rawVerdict;
+  const verdict = rawVerdict; // structureZero cap applied to macroVerdict below
   const reasoning = buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, data, cfg, regimeNote, macroNote });
 
   const close = data.close || 0;
@@ -1417,8 +1418,10 @@ function scoreSymbol(symbol) {
   const macroAdjustedScore = Math.min(structureCap, Math.min(95, Math.max(0, finalScore + macroScoreAdj)));
   const macroRangingPenalty = data._dailyBias === 0 ? 4 : 0;
   const macroEffectiveMin = adjustedMinScore + macroRangingPenalty;
-  const macroVerdict = macroAdjustedScore >= macroEffectiveMin ? 'PROCEED'
+  // Structure 0/5 caps verdict to WATCH maximum — cannot be PROCEED
+  const macroRawVerdict = macroAdjustedScore >= macroEffectiveMin ? 'PROCEED'
     : macroAdjustedScore >= macroEffectiveMin - 8 ? 'WATCH' : 'SKIP';
+  const macroVerdict = structureZero && macroRawVerdict === 'PROCEED' ? 'WATCH' : macroRawVerdict;
 
   const fxssiStale = hasFxssi && fxssiAge > FXSSI_MAX_AGE_MS;
 
