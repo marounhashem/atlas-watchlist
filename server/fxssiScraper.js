@@ -319,8 +319,16 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
 
             console.log(`[FXSSI] ${symbol} — NEW snapshot (${snapAge}m old). long:${analysed?.longPct}% short:${analysed?.shortPct}% trapped:${analysed?.trapped||'—'} bias:${analysed?.signals?.bias} delta:${profitDelta > 0 ? '+' : ''}${profitDelta}% levels:${raw.levels?.length}`);
           } else {
-            console.log(`[FXSSI] ${symbol} — same snapshot, skipping DB write`);
-            continue; // skip DB write, data unchanged
+            // Same snapshot from FXSSI API — data hasn't changed on their end
+            // BUT we must still write to DB to refresh the row timestamp
+            // Otherwise scorer treats data as stale based on DB row age, not fetch age
+            // Copy over existing profitDelta from cache so it's preserved
+            analysed.profitDelta       = cache[symbol]?.analysed?.profitDelta       ?? 0;
+            analysed.deltaReversalBias = cache[symbol]?.analysed?.deltaReversalBias ?? 'NEUTRAL';
+            analysed.buyersInProfitPct  = analysed.buyersInProfitPct  || 50;
+            analysed.sellersInProfitPct = analysed.sellersInProfitPct || 50;
+            console.log(`[FXSSI] ${symbol} — same snapshot, refreshing DB timestamp to prevent false stale`);
+            // fall through to DB write below
           }
         } else {
           console.log(`[FXSSI] ${symbol} — fetch returned null`);
