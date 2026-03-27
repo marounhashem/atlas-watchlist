@@ -17,8 +17,10 @@ const API_BASE = 'https://c.fxssi.com/api/order-book';
 const cache       = {}; // 20-min book: { symbol: { raw, analysed, ts } }
 const cacheHourly = {}; // 1-hour book:  { symbol: { raw, analysed, ts } }
 
-function shouldFetch() {
+function shouldFetch(symbol) {
   if (process.env.FXSSI_FORCE === '1') return true;
+  // Always fetch if cache is empty (startup / restart)
+  if (symbol && !cache[symbol]) return true;
   const min = new Date().getUTCMinutes();
   return min === 1 || min === 21 || min === 41;
 }
@@ -262,7 +264,6 @@ async function fetchSymbol(pair, period = 1200) {
 async function runFXSSIScrape(broadcast, forceWrite = false) {
   if (!process.env.FXSSI_TOKEN) return;
 
-  const forceFetch = shouldFetch();
   const now = Date.now();
 
   for (const [symbol, pair] of Object.entries(FXSSI_SYMBOLS)) {
@@ -271,7 +272,7 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
       const cacheAge = cached ? (now - cached.ts) / 60000 : 999;
 
       let raw;
-      if (forceFetch || cacheAge > 21) {
+      if (shouldFetch(symbol) || cacheAge > 21) {
         raw = await fetchSymbol(pair);
         if (raw) {
           const analysed = analyseOrderBook(raw);
@@ -317,17 +318,21 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
             analysed.buyersInProfitPct  = analysed.buyersInProfitPct  || 50;
             analysed.sellersInProfitPct = analysed.sellersInProfitPct || 50;
 
+            // Store fetchedAt — scorer uses this for age, not snapshotTime
+            // snapshotTime = when FXSSI last updated their data (~30min cycles)
+            // fetchedAt = when WE last successfully fetched it (our 20min cycles)
+            // Stale should mean: we haven't fetched recently, not that FXSSI hasn't updated
+            analysed.fetchedAt = Date.now();
             console.log(`[FXSSI] ${symbol} — NEW snapshot (${snapAge}m old). long:${analysed?.longPct}% short:${analysed?.shortPct}% trapped:${analysed?.trapped||'—'} bias:${analysed?.signals?.bias} delta:${profitDelta > 0 ? '+' : ''}${profitDelta}% levels:${raw.levels?.length}`);
           } else {
             // Same snapshot from FXSSI API — data hasn't changed on their end
-            // BUT we must still write to DB to refresh the row timestamp
-            // Otherwise scorer treats data as stale based on DB row age, not fetch age
-            // Copy over existing profitDelta from cache so it's preserved
-            analysed.profitDelta       = cache[symbol]?.analysed?.profitDelta       ?? 0;
-            analysed.deltaReversalBias = cache[symbol]?.analysed?.deltaReversalBias ?? 'NEUTRAL';
+            // Still write to DB to refresh timestamp, carry forward fetchedAt = now
+            analysed.profitDelta        = cache[symbol]?.analysed?.profitDelta       ?? 0;
+            analysed.deltaReversalBias  = cache[symbol]?.analysed?.deltaReversalBias ?? 'NEUTRAL';
             analysed.buyersInProfitPct  = analysed.buyersInProfitPct  || 50;
             analysed.sellersInProfitPct = analysed.sellersInProfitPct || 50;
-            console.log(`[FXSSI] ${symbol} — same snapshot, refreshing DB timestamp to prevent false stale`);
+            analysed.fetchedAt = Date.now(); // mark as freshly fetched even if data unchanged
+            console.log(`[FXSSI] ${symbol} — same snapshot, refreshing DB timestamp (fetchedAt updated)`);
             // fall through to DB write below
           }
         } else {
