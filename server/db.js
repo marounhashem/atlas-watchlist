@@ -113,6 +113,17 @@ function initSchema() {
   db.run(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY, value TEXT, ts INTEGER
   )`);
+  // WATCH signals — separate table, not mixed with live tradeable signals
+  // Used for learning and pattern analysis only — never shown as active trades
+  db.run(`CREATE TABLE IF NOT EXISTS watch_signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT, ts INTEGER, direction TEXT, score INTEGER,
+    entry REAL, sl REAL, tp REAL, rr REAL,
+    session TEXT, reasoning TEXT, scorer_version TEXT,
+    mfe REAL DEFAULT NULL, mfe_pct REAL DEFAULT NULL,
+    outcome TEXT DEFAULT 'PENDING',
+    outcome_ts INTEGER DEFAULT NULL, pnl_pct REAL DEFAULT NULL
+  )`);
 
   // Seed default weights
   const { SYMBOLS } = require('./config');
@@ -583,6 +594,37 @@ function setSetting(key, value) {
   persist();
 }
 
+
+// ── Watch signals ─────────────────────────────────────────────────────────────
+function insertWatchSignal(signal) {
+  run(`INSERT INTO watch_signals
+    (symbol,ts,direction,score,entry,sl,tp,rr,session,reasoning,scorer_version)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [signal.symbol, Date.now(), signal.direction, signal.score,
+     signal.entry, signal.sl, signal.tp, signal.rr,
+     signal.session, signal.reasoning, signal.scorerVersion || null]);
+  const row = db.exec('SELECT last_insert_rowid() as id')[0]?.values?.[0]?.[0];
+  persist();
+  return row || null;
+}
+
+function getRecentWatchSignals(limit = 50) {
+  return db.exec(
+    `SELECT * FROM watch_signals ORDER BY ts DESC LIMIT ${parseInt(limit)}`
+  )[0]?.values?.map(r => ({
+    id: r[0], symbol: r[1], ts: r[2], direction: r[3], score: r[4],
+    entry: r[5], sl: r[6], tp: r[7], rr: r[8], session: r[9],
+    reasoning: r[10], scorer_version: r[11], mfe: r[12], mfe_pct: r[13],
+    outcome: r[14], outcome_ts: r[15], pnl_pct: r[16]
+  })) || [];
+}
+
+function updateWatchOutcome(id, outcome, pnlPct) {
+  run('UPDATE watch_signals SET outcome=?, outcome_ts=?, pnl_pct=? WHERE id=?',
+    [outcome, Date.now(), pnlPct, id]);
+  persist();
+}
+
 module.exports = {
   init, isReady, persist, run,
   upsertMarketData, getLatestMarketData,
@@ -594,5 +636,6 @@ module.exports = {
   addRecommendation, getRecommendations, markRecommendationFollowed,
   dismissRecommendation, resolveStaleRecommendations,
   retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals,
-  getSetting, setSetting
+  getSetting, setSetting,
+  insertWatchSignal, getRecentWatchSignals, updateWatchOutcome
 };
