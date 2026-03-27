@@ -1094,6 +1094,14 @@ server.listen(PORT, () => {
   db.init().then(() => {
     dbReady = true;
     console.log('[DB] Initialised and ready');
+    // Force immediate FXSSI scrape on startup — ensures order book data before first scoring cycle
+    // Without this, signals fired in first 20min after deploy/restart have no order book
+    setTimeout(() => {
+      console.log('[Startup] Running initial FXSSI scrape...');
+      runFXSSIScrape(null)
+        .then(() => console.log('[Startup] Initial FXSSI scrape complete — order book ready'))
+        .catch(e => console.error('[Startup] FXSSI scrape error:', e.message));
+    }, 2000);
     // Expire OPEN signals from old scorer versions — keeps board clean after deploys
     // ACTIVE signals (real trades) are never auto-expired
     try {
