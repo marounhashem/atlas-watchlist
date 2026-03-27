@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260326.9'; // Session exhaustion + swing retest entry + daily hard gate
+const SCORER_VERSION = '20260326.9'; // Off-hours WATCH block, FXSSI stale block, 5min cooldown, SL cap
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -1356,6 +1356,28 @@ function scoreSymbol(symbol) {
     : macroAdjustedScore >= macroEffectiveMin - 8 ? 'WATCH' : 'SKIP';
 
   const fxssiStale = hasFxssi && fxssiAge > FXSSI_MAX_AGE_MS;
+
+  // ── Cap SL when FXSSI is stale ─────────────────────────────────────────────
+  // Without order book data, SL may fall back to wide Pine swing levels
+  // Cap at 2×ATR to prevent catastrophically wide SL during stale periods
+  if (fxssiStale && sl && close > 0 && atr > 0) {
+    const maxSlDist = atr * 2.0;
+    if (direction === 'LONG' && close - sl > maxSlDist) {
+      sl = Math.round((close - maxSlDist) * 10000) / 10000;
+      console.log(`[Scorer] ${symbol} LONG SL capped (FXSSI stale) — was ${close - (close - maxSlDist) + close}+ away, now ${sl}`);
+    }
+    if (direction === 'SHORT' && sl - close > maxSlDist) {
+      sl = Math.round((close + maxSlDist) * 10000) / 10000;
+      console.log(`[Scorer] ${symbol} SHORT SL capped (FXSSI stale)`);
+    }
+    // Recalculate RR with capped SL
+    if (sl && tp && entry) {
+      const risk   = Math.abs(entry - sl);
+      const reward = Math.abs(tp - entry);
+      rr = risk > 0 ? Math.round((reward / risk) * 10) / 10 : rr;
+    }
+  }
+
   const finalReasoning = fxssiStale
     ? `⚠ FXSSI stale (${Math.round(fxssiAge/60000)}m) — OB scoring neutral · ` + reasoning
     : reasoning;
@@ -1602,6 +1624,38 @@ function entryTouched(signal, currentPrice) {
 
 function saveSignal(scored) {
   if (scored.verdict !== 'PROCEED' && scored.verdict !== 'WATCH') return null;
+
+  // ── Off-hours + FXSSI stale hard block ────────────────────────────────────
+  // During off-hours with stale FXSSI: no order book anchor = dangerously wide SL
+  // Also blocks WATCH signals during off-hours entirely — low liquidity, unreliable
+  if (scored.session === 'offHours') {
+    if (scored.fxssiStale) {
+      console.log(`[Scorer] ${scored.symbol} ${scored.direction} blocked — off-hours + FXSSI stale`);
+      return null;
+    }
+    if (scored.verdict === 'WATCH') {
+      console.log(`[Scorer] ${scored.symbol} ${scored.direction} blocked — WATCH signals not saved during off-hours`);
+      return null;
+    }
+  }
+
+  // ── Minimum 5-minute cooldown between same symbol+direction signals ────────
+  // Prevents signal churn during off-hours or rapid market moves
+  // Checks the most recent signal regardless of outcome (OPEN, EXPIRED, REPLACED etc)
+  try {
+    const { getAllSignals } = require('./db');
+    const recent = getAllSignals(20).find(s =>
+      s.symbol === scored.symbol &&
+      s.direction === scored.direction &&
+      (Date.now() - s.ts) < 5 * 60 * 1000
+    );
+    if (recent) {
+      console.log(`[Scorer] ${scored.symbol} ${scored.direction} cooldown — last signal ${Math.round((Date.now()-recent.ts)/1000)}s ago (id:${recent.id})`);
+      return null;
+    }
+  } catch(e) {
+    console.error('[Scorer] cooldown check error:', e.message);
+  }
 
   // ── Opposite direction conflict guard ─────────────────────────────────────
   // If an OPEN or ACTIVE signal already exists in the opposite direction,
