@@ -809,9 +809,10 @@ function renderRecommendations(sig) {
     var primary = active[0];
     var rest = active.slice(1);
     var icon = primary.urgency === 'HIGH' ? '🚨' : primary.urgency === 'MEDIUM' ? '⚠️' : 'ℹ️';
-    var ageMin = Math.round((Date.now() - primary.ts) / 60000);
-    var ageStr = ageMin < 1 ? 'just now' : ageMin + 'm ago';
-    var timeStr = new Date(primary.ts).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
+    var primaryTs = typeof primary.ts === 'number' ? primary.ts : parseInt(primary.ts, 10);
+    var ageMin = isNaN(primaryTs) ? 0 : Math.round((Date.now() - primaryTs) / 60000);
+    var ageStr = isNaN(primaryTs) ? '' : (ageMin < 1 ? 'just now' : ageMin + 'm ago');
+    var timeStr = isNaN(primaryTs) ? '' : new Date(primaryTs).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
     var primaryId = primary.id || '';
 
     var moreBadge = rest.length > 0
@@ -819,13 +820,16 @@ function renderRecommendations(sig) {
       : '';
 
     var moreHtml = rest.map(function(r2) {
-      var a2 = Math.round((Date.now() - r2.ts) / 60000);
+      var r2ts = typeof r2.ts === 'number' ? r2.ts : parseInt(r2.ts, 10);
+      var a2min = isNaN(r2ts) ? null : Math.round((Date.now() - r2ts) / 60000);
+      var a2str = a2min === null ? '' : (a2min < 1 ? 'just now' : a2min + 'm ago');
+      var t2str = isNaN(r2ts) ? '' : new Date(r2ts).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'});
       var icon2 = r2.urgency === 'HIGH' ? '🚨' : r2.urgency === 'MEDIUM' ? '⚠️' : 'ℹ️';
       var r2id = r2.id || '';
       return '<div class="rec-card rec-' + r2.urgency + '" style="margin-top:4px;opacity:.8;">'
         + icon2 + ' <b>' + r2.type + '</b>'
-        + ' <span class="rec-ts">' + a2 + 'm ago</span> — '
-        + (r2.reason || '').slice(0, 60) + '...'
+        + ' <span class="rec-ts">' + a2str + (t2str ? ' · ' + t2str : '') + '</span> — '
+        + (r2.reason || '').slice(0, 70)
         + '<button style="float:right;background:none;border:none;color:var(--dim);cursor:pointer;font-size:10px;" onclick="dismissRec(' + sig.id + ',&quot;' + r2id + '&quot;)">&#x2715;</button>'
         + '</div>';
     }).join('');
