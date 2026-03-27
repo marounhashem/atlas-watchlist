@@ -541,6 +541,15 @@
     <div id="regime-container"><div class="empty" style="padding:8px">Fires after 30 outcomes</div></div>
   </div>
   <div class="panel">
+    <div class="ptitle" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;" onclick="toggleWatchPanel()">
+      <span>Watch signals <span style="font-size:9px;color:var(--dim);font-weight:400;">monitoring only — not traded</span></span>
+      <span id="watch-toggle" style="font-size:9px;color:var(--dim);">▼ show</span>
+    </div>
+    <div id="watch-panel" style="display:none;">
+      <div id="watch-list" style="font-size:10px;color:var(--text2);font-family:monospace;line-height:1.8;"></div>
+    </div>
+  </div>
+  <div class="panel">
     <div class="ptitle">Webhook</div>
     <div style="font-size:9px;color:var(--muted);line-height:2;">
       POST to:<br>
@@ -1359,6 +1368,38 @@ async function fetchMarketStatus() {
   const entries=Object.entries(status);
   if(!entries.length) return;
   c.innerHTML=entries.map(([sym,s])=>`<div class="mhrow ${s.open?'mhO':'mhC'}"><span class="mhsym">${sym}</span><span class="${s.open?'mhopen':'mhclosed'}">${s.open?'OPEN':s.minutesUntilOpen?s.minutesUntilOpen+'m':'CLOSED'}</span></div>`).join('');
+}
+
+function toggleWatchPanel() {
+  const panel = document.getElementById('watch-panel');
+  const toggle = document.getElementById('watch-toggle');
+  const hidden = panel.style.display === 'none';
+  panel.style.display = hidden ? 'block' : 'none';
+  toggle.textContent = hidden ? '▲ hide' : '▼ show';
+  if (hidden) loadWatchSignals();
+}
+
+function loadWatchSignals() {
+  fetch('/api/watch-signals').then(r => r.json()).then(data => {
+    const list = document.getElementById('watch-list');
+    if (!list) return;
+    if (!data.signals || data.signals.length === 0) {
+      list.innerHTML = '<span style="color:var(--dim)">No watch signals yet</span>';
+      return;
+    }
+    list.innerHTML = data.signals.slice(0, 50).map(s => {
+      const age = Math.round((Date.now() - s.ts) / 60000);
+      const dirColor = s.direction === 'LONG' ? 'var(--proceed)' : 'var(--short)';
+      return `<div style="display:flex;gap:8px;padding:2px 0;border-bottom:1px solid var(--border)">
+        <span style="color:var(--dim);width:40px">${s.symbol}</span>
+        <span style="color:${dirColor};width:30px">${s.direction}</span>
+        <span style="color:var(--text2);width:30px">${s.score}</span>
+        <span style="color:var(--dim);width:50px">${s.session}</span>
+        <span style="color:var(--dim);flex:1;font-size:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.reasoning?.substring(0,80)||''}</span>
+        <span style="color:var(--dim);width:30px">${age}m</span>
+      </div>`;
+    }).join('');
+  }).catch(() => {});
 }
 
 function toggleMoreRecs(el) {
