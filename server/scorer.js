@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260326.9'; // Daily hard gate, cluster entry, raised PROCEED bar to 78, EV learner
+const SCORER_VERSION = '20260326.9'; // Off-hours WATCH block, FXSSI stale block, 5min cooldown, SL cap
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -513,6 +513,34 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
+  // ── Session exhaustion filter ─────────────────────────────────────────────
+  // A trader never chases a large directional move — they fade it or wait.
+  // If the 20-bar range is >3.5×ATR AND price is at the extreme of the range,
+  // the session is exhausted. Block signals in the direction of exhaustion.
+  // "US30 down 600pts — don't LONG the knife. SHORT the dead-cat bounce."
+  try {
+    const rawSess   = JSON.parse(data.raw_payload || '{}');
+    const rangeHigh = rawSess.rangeHigh;
+    const rangeLow  = rawSess.rangeLow;
+    const rRatio    = rawSess.rangeRatio; // 20-bar range / 1h ATR from Pine
+
+    if (rRatio && rRatio > 3.5 && rangeHigh && rangeLow) {
+      const rangeSize  = rangeHigh - rangeLow;
+      const posInRange = rangeSize > 0 ? (close - rangeLow) / rangeSize : 0.5;
+
+      // Price in bottom 25% of a large range = down move exhaustion = no LONG
+      if (posInRange < 0.25 && direction === 'LONG') {
+        console.log(`[Scorer] ${symbol} LONG blocked — session exhaustion (range ${Math.round(rRatio*10)/10}×ATR, price at ${Math.round(posInRange*100)}% of range)`);
+        return null;
+      }
+      // Price in top 75% of a large range = up move exhaustion = no SHORT
+      if (posInRange > 0.75 && direction === 'SHORT') {
+        console.log(`[Scorer] ${symbol} SHORT blocked — session exhaustion (range ${Math.round(rRatio*10)/10}×ATR, price at ${Math.round(posInRange*100)}% of range)`);
+        return null;
+      }
+    }
+  } catch(e) {}
+
   // Sanitise corrupted ob_imbalance
   if (data.ob_imbalance && typeof data.ob_imbalance === 'string' && data.ob_imbalance.startsWith('{')) {
     data.ob_imbalance = 0;
@@ -927,7 +955,39 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
-  // Entry selection: cluster > FVG > ATR buffer
+  // Fallback 2: Swing S/R retest level from Pine
+  // For SHORT: enter at nearest swing high (resistance) above price — wait for the retest
+  // For LONG:  enter at nearest swing low (support) below price — wait for the pullback
+  // This gives tighter SL and better R:R than entering mid-move
+  let swingRetestEntry = null;
+  try {
+    if (data.raw_payload) {
+      const rawSR = JSON.parse(data.raw_payload);
+      const sr    = rawSR.sr || {};
+      const res   = sr.resistance; // nearest swing high above price
+      const sup   = sr.support;   // nearest swing low below price
+
+      if (direction === 'SHORT' && res && res > close) {
+        const dist = res - close;
+        // Only use if retest level is within 1.5×ATR — far away = unlikely to fill
+        if (dist < atr * 1.5 && dist > atr * 0.05) {
+          // Enter just below resistance — not above it (avoid false breakout fill)
+          swingRetestEntry = Math.round((res - atr * 0.05) * 10000) / 10000;
+          if (!heaviestClusterEntry && !fvgEntry) entrySource = 'swing_retest_res';
+        }
+      }
+      if (direction === 'LONG' && sup && sup < close) {
+        const dist = close - sup;
+        if (dist < atr * 1.5 && dist > atr * 0.05) {
+          // Enter just above support
+          swingRetestEntry = Math.round((sup + atr * 0.05) * 10000) / 10000;
+          if (!heaviestClusterEntry && !fvgEntry) entrySource = 'swing_retest_sup';
+        }
+      }
+    }
+  } catch(e) {}
+
+  // Entry selection: cluster > FVG > swing retest > ATR buffer
   if (heaviestClusterEntry) {
     // Validate cluster entry is actually away from current price (min 0.1×ATR)
     if (Math.abs(heaviestClusterEntry - close) >= atr * 0.10) {
@@ -943,6 +1003,8 @@ function scoreSymbol(symbol) {
     }
   } else if (fvgEntry) {
     entry = fvgEntry;
+  } else if (swingRetestEntry) {
+    entry = swingRetestEntry;
   } else {
     // Last resort: ATR buffer
     entry = direction === 'LONG'
@@ -1294,6 +1356,28 @@ function scoreSymbol(symbol) {
     : macroAdjustedScore >= macroEffectiveMin - 8 ? 'WATCH' : 'SKIP';
 
   const fxssiStale = hasFxssi && fxssiAge > FXSSI_MAX_AGE_MS;
+
+  // ── Cap SL when FXSSI is stale ─────────────────────────────────────────────
+  // Without order book data, SL may fall back to wide Pine swing levels
+  // Cap at 2×ATR to prevent catastrophically wide SL during stale periods
+  if (fxssiStale && sl && close > 0 && atr > 0) {
+    const maxSlDist = atr * 2.0;
+    if (direction === 'LONG' && close - sl > maxSlDist) {
+      sl = Math.round((close - maxSlDist) * 10000) / 10000;
+      console.log(`[Scorer] ${symbol} LONG SL capped (FXSSI stale) — was ${close - (close - maxSlDist) + close}+ away, now ${sl}`);
+    }
+    if (direction === 'SHORT' && sl - close > maxSlDist) {
+      sl = Math.round((close + maxSlDist) * 10000) / 10000;
+      console.log(`[Scorer] ${symbol} SHORT SL capped (FXSSI stale)`);
+    }
+    // Recalculate RR with capped SL
+    if (sl && tp && entry) {
+      const risk   = Math.abs(entry - sl);
+      const reward = Math.abs(tp - entry);
+      rr = risk > 0 ? Math.round((reward / risk) * 10) / 10 : rr;
+    }
+  }
+
   const finalReasoning = fxssiStale
     ? `⚠ FXSSI stale (${Math.round(fxssiAge/60000)}m) — OB scoring neutral · ` + reasoning
     : reasoning;
@@ -1540,6 +1624,38 @@ function entryTouched(signal, currentPrice) {
 
 function saveSignal(scored) {
   if (scored.verdict !== 'PROCEED' && scored.verdict !== 'WATCH') return null;
+
+  // ── Off-hours + FXSSI stale hard block ────────────────────────────────────
+  // During off-hours with stale FXSSI: no order book anchor = dangerously wide SL
+  // Also blocks WATCH signals during off-hours entirely — low liquidity, unreliable
+  if (scored.session === 'offHours') {
+    if (scored.fxssiStale) {
+      console.log(`[Scorer] ${scored.symbol} ${scored.direction} blocked — off-hours + FXSSI stale`);
+      return null;
+    }
+    if (scored.verdict === 'WATCH') {
+      console.log(`[Scorer] ${scored.symbol} ${scored.direction} blocked — WATCH signals not saved during off-hours`);
+      return null;
+    }
+  }
+
+  // ── Minimum 5-minute cooldown between same symbol+direction signals ────────
+  // Prevents signal churn during off-hours or rapid market moves
+  // Checks the most recent signal regardless of outcome (OPEN, EXPIRED, REPLACED etc)
+  try {
+    const { getAllSignals } = require('./db');
+    const recent = getAllSignals(20).find(s =>
+      s.symbol === scored.symbol &&
+      s.direction === scored.direction &&
+      (Date.now() - s.ts) < 5 * 60 * 1000
+    );
+    if (recent) {
+      console.log(`[Scorer] ${scored.symbol} ${scored.direction} cooldown — last signal ${Math.round((Date.now()-recent.ts)/1000)}s ago (id:${recent.id})`);
+      return null;
+    }
+  } catch(e) {
+    console.error('[Scorer] cooldown check error:', e.message);
+  }
 
   // ── Opposite direction conflict guard ─────────────────────────────────────
   // If an OPEN or ACTIVE signal already exists in the opposite direction,
