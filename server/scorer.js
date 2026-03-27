@@ -786,9 +786,10 @@ function scoreSymbol(symbol) {
   // Can't be 90%+ confident if only 0-1 TFs agree on direction
   // Requires multi-TF alignment to justify high scores
   // Within each structure tier, FXSSI signal count differentiates quality
-  // ── Structure 0/5 hard block ──────────────────────────────────────────────
-  // Zero timeframes aligned = no conviction = no trade
-  // A trader never enters when not a single TF confirms direction
+  // ── Structure 0/5 → force WATCH verdict ──────────────────────────────────
+  // Zero TF alignment = no conviction = cannot be PROCEED
+  // Still saved to watch_signals for learning — not blocked entirely
+  let structureZero = false;
   try {
     if (data.raw_payload) {
       const rawStruct = JSON.parse(data.raw_payload);
@@ -796,8 +797,8 @@ function scoreSymbol(symbol) {
       const scCheck   = typeof stCheck?.score === 'number' ? Math.abs(stCheck.score)
         : (stCheck ? Math.abs((stCheck['1m']||0)+(stCheck['5m']||0)+(stCheck['15m']||0)+(stCheck['1h']||0)+(stCheck['4h']||0)+(stCheck['1d']||0)) : 0);
       if (scCheck === 0) {
-        console.log(`[Scorer] ${symbol} ${direction} blocked — Structure 0/5 (no TF alignment)`);
-        return null;
+        structureZero = true;
+        console.log(`[Scorer] ${symbol} ${direction} structure 0/5 — capped to WATCH`);
       }
     }
   } catch(e) {}
@@ -932,9 +933,11 @@ function scoreSymbol(symbol) {
   const dailyBiasForThresh = data._dailyBias !== undefined ? data._dailyBias : 0;
   const rangingPenalty = dailyBiasForThresh === 0 ? 4 : 0; // daily ranging = need higher conviction
   const effectiveMinScore = adjustedMinScore + rangingPenalty;
-  const verdict = finalScore >= effectiveMinScore ? 'PROCEED'
+  // Structure 0/5 forces WATCH max — cannot be PROCEED regardless of score
+  const rawVerdict = finalScore >= effectiveMinScore ? 'PROCEED'
     : finalScore >= effectiveMinScore - 8 ? 'WATCH'
     : 'SKIP';
+  const verdict = structureZero && rawVerdict === 'PROCEED' ? 'WATCH' : rawVerdict;
   const reasoning = buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, data, cfg, regimeNote, macroNote });
 
   const close = data.close || 0;
