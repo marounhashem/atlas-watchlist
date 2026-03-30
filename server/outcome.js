@@ -18,6 +18,9 @@ function checkOutcomes(broadcast) {
     if (!data || !data.close) continue;
 
     const price = data.close;
+    // Intrabar high/low — captures TP/SL hits that close back through the level
+    const barHigh = data.high || price;
+    const barLow  = data.low  || price;
     const { direction, entry, sl, tp, id, outcome: currentState } = sig;
     if (!entry || !sl || !tp) continue;
 
@@ -25,8 +28,8 @@ function checkOutcomes(broadcast) {
 
     // ── Check entry touched ──────────────────────────────────────────────────
     let entryTouched = false;
-    if (direction === 'LONG')  entryTouched = price <= entry + tolerance;
-    if (direction === 'SHORT') entryTouched = price >= entry - tolerance;
+    if (direction === 'LONG')  entryTouched = barLow  <= entry + tolerance;
+    if (direction === 'SHORT') entryTouched = barHigh >= entry - tolerance;
 
     if (currentState === 'OPEN' && entryTouched) {
       // Transition OPEN → ACTIVE
@@ -55,8 +58,8 @@ function checkOutcomes(broadcast) {
     // Stored so Claude can distinguish "right direction, bad SL" vs "wrong call"
     if (currentState === 'ACTIVE' && entry) {
       let favorable = 0;
-      if (direction === 'LONG'  && price > entry) favorable = price - entry;
-      if (direction === 'SHORT' && price < entry) favorable = entry - price;
+      if (direction === 'LONG')  favorable = Math.max(0, barHigh - entry); // intrabar peak
+      if (direction === 'SHORT') favorable = Math.max(0, entry - barLow);  // intrabar trough
       if (favorable > 0) {
         const mfePct = Math.round((favorable / entry) * 10000) / 100;
         updateMFE(id, favorable, mfePct);
@@ -91,21 +94,24 @@ function checkOutcomes(broadcast) {
       let outcome = null;
       let pnlPct  = null;
 
+      // Use intrabar high/low — catches TP/SL hits that occur intrabar
+      // but where the bar closes back through the level (e.g. wick through TP).
+      // PnL uses the fixed TP/SL price, not the intrabar extreme.
       if (direction === 'LONG') {
-        if (price >= tp) {
+        if (barHigh >= tp) {
           outcome = 'WIN';
           pnlPct  = Math.round(((tp - entry) / entry) * 10000) / 100;
-        } else if (price <= sl) {
+        } else if (barLow <= sl) {
           outcome = 'LOSS';
-          pnlPct  = Math.round(((sl - entry) / entry) * 10000) / 100;
+          pnlPct  = -Math.round((Math.abs(sl - entry) / entry) * 10000) / 100;
         }
       } else {
-        if (price <= tp) {
+        if (barLow <= tp) {
           outcome = 'WIN';
           pnlPct  = Math.round(((entry - tp) / entry) * 10000) / 100;
-        } else if (price >= sl) {
+        } else if (barHigh >= sl) {
           outcome = 'LOSS';
-          pnlPct  = Math.round(((entry - sl) / entry) * 10000) / 100;
+          pnlPct  = -Math.round((Math.abs(sl - entry) / entry) * 10000) / 100;
         }
       }
 
