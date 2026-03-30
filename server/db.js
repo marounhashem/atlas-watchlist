@@ -372,6 +372,18 @@ function mergeSignals(keepId, absorbId) {
     newRr = risk > 0 ? Math.round((reward / risk) * 10) / 10 : keep.rr;
   }
 
+  // Guard: if merge produced a nonsensical RR, restore TP to match original RR
+  // RR < 1.5 = not worth taking; RR > 4 = TP was blown out by entry averaging
+  // In both cases recalculate TP from newEntry + newSl to restore original keep.rr
+  const targetRr = Math.min(Math.max(keep.rr || 2, 1.5), 4.0);
+  if (newRr < 1.5 || newRr > 4.0) {
+    const risk = Math.abs(newEntry - newSl);
+    const direction = newTp > newEntry ? 1 : -1;
+    newTp = Math.round((newEntry + direction * risk * targetRr) * 10000) / 10000;
+    newRr = targetRr;
+    console.log(`[DB] Merge RR guard: RR was ${newRr} → recalculated TP to ${newTp} (RR ${targetRr})`);
+  }
+
   run('UPDATE signals SET entry=?, sl=?, tp=?, rr=?, reasoning=? WHERE id=?',
     [newEntry, newSl, newTp, newRr,
      `[MERGED] ${keep.reasoning || ''}`,
