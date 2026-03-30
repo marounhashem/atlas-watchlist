@@ -93,6 +93,7 @@ app.post('/webhook/pine', (req, res) => {
     .replace('WTI','OILWTI')
     .replace('OIL_CRUDE','OILWTI')
     .replace('SPX500USD','US500')
+    .replace('ETHUSDT','ETHUSD')
     .replace('NAS100USD','US100')
     .replace('DE30EUR','DE40')
     .replace('UK100GBP','UK100')

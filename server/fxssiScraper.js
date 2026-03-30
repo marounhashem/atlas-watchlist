@@ -5,12 +5,31 @@
 const { upsertMarketData, getLatestMarketData } = require('./db');
 
 const FXSSI_SYMBOLS = {
+  // Core 6
   GOLD:   'XAUUSD',
   SILVER: 'XAGUSD',
   OILWTI: 'XTIUSD',
   BTCUSD: 'BTCUSD',
   US100:  'NAS100',
-  US30:   'US30'
+  US30:   'US30',
+  // Forex majors
+  EURUSD: 'EURUSD',
+  GBPUSD: 'GBPUSD',
+  USDJPY: 'USDJPY',
+  USDCHF: 'USDCHF',
+  USDCAD: 'USDCAD',
+  AUDUSD: 'AUDUSD',
+  NZDUSD: 'NZDUSD',
+  // Forex crosses
+  EURJPY: 'EURJPY',
+  EURGBP: 'EURGBP',
+  EURAUD: 'EURAUD',
+  EURCHF: 'EURCHF',
+  GBPJPY: 'GBPJPY',
+  GBPCHF: 'GBPCHF',
+  AUDJPY: 'AUDJPY',
+  // Crypto
+  ETHUSD: 'ETHUSD'
 };
 
 const API_BASE = 'https://c.fxssi.com/api/order-book';

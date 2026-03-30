@@ -32,6 +32,22 @@ const MARKET_HOURS = {
     noDailyBreakDays: [0],
     peakWindow: { start: { hour: 13, minute: 30 }, end: { hour: 20, minute: 0 } }
   },
+  // Forex pairs — 24h Mon-Fri (same structure as metals)
+  EURUSD: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  GBPUSD: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  USDJPY: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  USDCHF: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  USDCAD: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  AUDUSD: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  NZDUSD: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  EURJPY: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  EURGBP: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  EURAUD: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  EURCHF: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  GBPJPY: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  GBPCHF: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  AUDJPY: { type:'forex', weeklyOpen:{day:0,hour:22,minute:0}, weeklyClose:{day:5,hour:21,minute:0}, dailyBreak:{start:{hour:21,minute:0},end:{hour:22,minute:0}}, noDailyBreakDays:[0] },
+  ETHUSD: { type:'crypto', alwaysOpen: true },
   US100: {
     type: 'index_us',
     weeklyOpen:  { day: 0, hour: 22, minute: 0 },

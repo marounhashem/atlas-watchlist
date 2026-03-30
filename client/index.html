@@ -488,6 +488,49 @@
     .agent-tabs{flex-wrap:wrap;}
     .dossier-box{border-radius:8px;}
   }
+
+  /* ── Main tab switcher ── */
+  .main-tabs{display:flex;gap:0;margin-bottom:0;border-bottom:1px solid var(--border);}
+  .mtab{
+    padding:8px 18px;font-size:11px;font-weight:600;letter-spacing:.08em;
+    cursor:pointer;border-bottom:2px solid transparent;color:var(--muted);
+    transition:color .15s,border-color .15s;text-transform:uppercase;
+  }
+  .mtab:hover{color:var(--text2);}
+  .mtab.active{color:var(--text);border-bottom-color:var(--accent);}
+  .main-pane{display:none;}
+  .main-pane.active{display:block;}
+
+  /* ── Forex board ── */
+  .fx-board{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:4px 0;}
+  @media(max-width:600px){.fx-board{grid-template-columns:1fr;}}
+  .fx-group{margin-bottom:16px;}
+  .fx-group-label{font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--muted);padding:0 2px 6px;border-bottom:1px solid var(--border);margin-bottom:8px;}
+  .fx-row{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:7px 10px;background:var(--surface);border:1px solid var(--border);
+    border-radius:6px;margin-bottom:4px;transition:border-color .2s;cursor:default;
+  }
+  .fx-row:hover{border-color:var(--border2);}
+  .fx-sym{font-size:12px;font-weight:600;font-family:'IBM Plex Mono',monospace;color:var(--text);min-width:72px;}
+  .fx-price{font-size:13px;font-weight:600;font-family:'IBM Plex Mono',monospace;color:var(--text);}
+  .fx-price.up{color:var(--proceed);}
+  .fx-price.dn{color:var(--short);}
+  .fx-rsi{font-size:10px;font-family:'IBM Plex Mono',monospace;
+    padding:2px 6px;border-radius:3px;background:var(--surface2);color:var(--muted);}
+  .fx-rsi.hot{color:var(--short);background:rgba(248,113,113,.08);}
+  .fx-rsi.cold{color:var(--long);background:rgba(56,189,248,.08);}
+  .fx-empty{color:var(--muted);font-size:12px;padding:20px 0;text-align:center;}
+  .fx-ts{font-size:9px;color:var(--dim);margin-top:2px;}
+
+  /* ── FX asset badge ── */
+  .asset-fx{
+    display:inline-block;font-size:8px;font-weight:700;letter-spacing:.1em;
+    padding:1px 5px;border-radius:3px;background:rgba(251,191,36,.12);
+    color:#fbbf24;border:1px solid rgba(251,191,36,.25);
+    vertical-align:middle;margin-left:4px;font-family:'IBM Plex Mono',monospace;
+  }
 </style>
 </head>
 <body>
@@ -509,18 +552,40 @@
 
 <div class="layout">
 <div class="left">
-  <div style="display:flex;align-items:center;justify-content:space-between;">
-    <div class="sec">Live signals</div>
-    <div class="filters">
-      <div class="fbtn on" onclick="setFilter('ALL')">ALL</div>
-      <div class="fbtn" onclick="setFilter('PROCEED')">PROCEED</div>
-      <div class="fbtn" onclick="setFilter('WATCH')">WATCH</div>
-      <div class="fbtn" onclick="setFilter('LONG')">LONG</div>
-      <div class="fbtn" onclick="setFilter('SHORT')">SHORT</div>
-      <div class="fbtn" id="past-tab-btn" onclick="setFilter('PAST')">PAST <span id="past-count" style="opacity:.6;font-size:9px;"></span></div>
-    </div>
+  <div class="main-tabs">
+    <div class="mtab active" id="mtab-signals" onclick="switchMainTab('signals')">SIGNALS</div>
+    <div class="mtab" id="mtab-forex" onclick="switchMainTab('forex')">FOREX <span id="fx-count" style="font-size:9px;color:var(--dim);font-weight:400;"></span></div>
   </div>
-  <div id="signals-container"><div class="empty">Waiting for signals...<br>Pine Script alerts will appear here.</div></div>
+
+  <!-- Signals pane -->
+  <div class="main-pane active" id="pane-signals">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0 4px;">
+      <div class="sec" style="margin:0;">Live signals</div>
+      <div class="filters">
+        <div class="fbtn on" onclick="setFilter('ALL')">ALL</div>
+        <div class="fbtn" onclick="setFilter('PROCEED')">PROCEED</div>
+        <div class="fbtn" onclick="setFilter('WATCH')">WATCH</div>
+        <div class="fbtn" onclick="setFilter('LONG')">LONG</div>
+        <div class="fbtn" onclick="setFilter('SHORT')">SHORT</div>
+        <div class="fbtn" id="past-tab-btn" onclick="setFilter('PAST')">PAST <span id="past-count" style="opacity:.6;font-size:9px;"></span></div>
+      </div>
+    </div>
+    <div id="signals-container"><div class="empty">Waiting for signals...<br>Pine Script alerts will appear here.</div></div>
+  </div>
+
+  <!-- Forex pane — shows FX-tagged signals from the main board -->
+  <div class="main-pane" id="pane-forex">
+    <div style="padding:8px 0 4px;display:flex;align-items:center;justify-content:space-between;">
+      <div class="sec" style="margin:0;">Forex signals</div>
+      <div class="filters" style="margin:0;">
+        <div class="fbtn on" onclick="setFxFilter('ALL')">ALL</div>
+        <div class="fbtn" onclick="setFxFilter('PROCEED')">PROCEED</div>
+        <div class="fbtn" onclick="setFxFilter('LONG')">LONG</div>
+        <div class="fbtn" onclick="setFxFilter('SHORT')">SHORT</div>
+      </div>
+    </div>
+    <div id="forex-signals-container"><div class="empty">Waiting for forex signals...<br>Add forex pairs to your TradingView alerts.</div></div>
+  </div>
 </div>
 
 <div class="right">
@@ -681,6 +746,8 @@ function handleMessage(msg) {
   } else if (msg.type==='DAILY_SUMMARY') {
     showToast(`📋 Daily: ${msg.summary.summary?.slice(0,80)}`);
     fetchLearningLog();
+  } else if (msg.type==='FOREX_TICK') {
+    handleForexTick(msg);
   }
 }
 
@@ -888,7 +955,7 @@ function renderCard(sig, isPast=false) {
 
   return `<div class="card ${v.toLowerCase()} ${outcomeClass}" id="card-${sig.id||sig.symbol}">
     <div class="ctop">
-      <div style="display:flex;align-items:baseline;gap:8px;"><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--dim);">${new Date(sig.ts).toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) + ' ' + new Date(sig.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>${sig.outcome==='ACTIVE'?'<span style="font-size:9px;font-weight:700;color:#ffd740;letter-spacing:.5px;border:1px solid #ffd74055;border-radius:3px;padding:1px 5px;">ACTIVE</span>':sig.outcome==='OPEN'?'<span style="font-size:9px;font-weight:600;color:var(--accent);letter-spacing:.5px;border:1px solid var(--accent-border);border-radius:3px;padding:1px 5px;">OPEN</span>':''}</div>
+      <div style="display:flex;align-items:baseline;gap:8px;"><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span>${['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD','EURJPY','EURGBP','EURAUD','EURCHF','GBPJPY','GBPCHF','AUDJPY','ETHUSD'].includes(sig.symbol)?'<span class="asset-fx">FX</span>':''}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--dim);">${new Date(sig.ts).toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) + ' ' + new Date(sig.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>${sig.outcome==='ACTIVE'?'<span style="font-size:9px;font-weight:700;color:#ffd740;letter-spacing:.5px;border:1px solid #ffd74055;border-radius:3px;padding:1px 5px;">ACTIVE</span>':sig.outcome==='OPEN'?'<span style="font-size:9px;font-weight:600;color:var(--accent);letter-spacing:.5px;border:1px solid var(--accent-border);border-radius:3px;padding:1px 5px;">OPEN</span>':''}</div>
       <div style="display:flex;align-items:center;gap:6px;">${pastBadge}${refineHtml}${outcomeHtml}${timeAgo?`<span style="font-size:8px;color:var(--muted)">${timeAgo}</span>`:''}<span class="verdict ${vcls}">${v}</span></div>
     </div>
     <div class="sbar"><div class="sbfill ${scls}" style="width:${sig.score||0}%"></div></div>
@@ -1465,6 +1532,158 @@ function updateClock() {
 setInterval(fetchMarketStatus,60000);
 setInterval(updateClock,1000);
 updateClock();connect();
+
+// ── Main tab switcher ──────────────────────────────────────────────────────
+let activeMainTab = 'signals';
+function switchMainTab(tab) {
+  activeMainTab = tab;
+  document.querySelectorAll('.mtab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.main-pane').forEach(p => p.classList.remove('active'));
+  document.getElementById('mtab-' + tab).classList.add('active');
+  document.getElementById('pane-' + tab).classList.add('active');
+  if (tab === 'forex') fetchForexData();
+}
+
+// ── Forex data ─────────────────────────────────────────────────────────────
+let fxData = {};
+const FOREX_GROUPS = {
+  majors:     ['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD'],
+  crosses:    ['EURJPY','EURGBP','EURAUD','EURCHF','GBPJPY','GBPCHF','AUDJPY'],
+  crypto:     ['ETHUSD']
+};
+const FOREX_LABELS = {
+  ETHUSD:'ETH/USD', AUDJPY:'AUD/JPY', AUDUSD:'AUD/USD', EURUSD:'EUR/USD',
+  EURGBP:'EUR/GBP', EURAUD:'EUR/AUD', EURJPY:'EUR/JPY', EURCHF:'EUR/CHF',
+  GBPCHF:'GBP/CHF', GBPJPY:'GBP/JPY', GBPUSD:'GBP/USD', NZDUSD:'NZD/USD',
+  USDCAD:'USD/CAD', USDCHF:'USD/CHF', USDJPY:'USD/JPY'
+};
+const fxPrev = {};
+
+function fetchForexData() {
+  fetch('/api/forex-data').then(r=>r.json()).then(data=>{
+    fxData = data || {};
+    renderForex();
+  }).catch(()=>{});
+}
+
+function renderForex() {
+  const container = document.getElementById('forex-container');
+  if (!container) return;
+  const total = Object.keys(fxData).length;
+  const countEl = document.getElementById('fx-count');
+  if (countEl) countEl.textContent = total > 0 ? '(' + total + ')' : '';
+  if (total === 0) {
+    container.innerHTML = '<div class="fx-empty">Waiting for Pine webhook data...<br>Add forex pairs to your TradingView alerts.</div>';
+    return;
+  }
+
+  let html = '';
+  for (const [groupName, symbols] of Object.entries(FOREX_GROUPS)) {
+    const inGroup = symbols.filter(s => fxData[s]);
+    if (inGroup.length === 0) continue;
+    html += `<div class="fx-group">`;
+    html += `<div class="fx-group-label">${groupName}</div>`;
+    html += `<div class="fx-board">`;
+    for (const sym of inGroup) {
+      const d = fxData[sym];
+      const price = d.price;
+      const prev  = fxPrev[sym];
+      const dir   = prev == null ? '' : price > prev ? 'up' : price < prev ? 'dn' : '';
+      fxPrev[sym] = price;
+      const rsi   = d.rsi ? Math.round(d.rsi) : null;
+      const rsiCls = rsi == null ? '' : rsi > 70 ? 'hot' : rsi < 30 ? 'cold' : '';
+      const rsiStr = rsi != null ? `<span class="fx-rsi ${rsiCls}">RSI ${rsi}</span>` : '';
+      const dp    = price < 10 ? 4 : price < 100 ? 4 : price < 1000 ? 3 : 2;
+      const ts    = d.ts ? new Date(d.ts).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+      html += `<div class="fx-row">
+        <div>
+          <div class="fx-sym">${FOREX_LABELS[sym] || sym}</div>
+          <div class="fx-ts">${ts}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          ${rsiStr}
+          <div class="fx-price ${dir}">${price != null ? price.toFixed(dp) : '—'}</div>
+        </div>
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+  container.innerHTML = html;
+}
+
+// Handle live forex ticks from websocket
+function handleForexTick(msg) {
+  fxPrev[msg.symbol] = fxData[msg.symbol]?.price;
+  fxData[msg.symbol] = { price: msg.price, high: msg.high, low: msg.low, rsi: msg.rsi, ts: msg.ts };
+  const countEl = document.getElementById('fx-count');
+  if (countEl) countEl.textContent = '(' + Object.keys(fxData).length + ')';
+  if (activeMainTab === 'forex') renderForex();
+}
+
+
+// ── Forex signals pane ────────────────────────────────────────────────────
+const FX_SYMBOLS = new Set(['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD',
+  'EURJPY','EURGBP','EURAUD','EURCHF','GBPJPY','GBPCHF','AUDJPY','ETHUSD']);
+
+let fxFilter = 'ALL';
+function setFxFilter(f) {
+  fxFilter = f;
+  document.querySelectorAll('#pane-forex .fbtn').forEach(b => b.classList.remove('on'));
+  const btn = [...document.querySelectorAll('#pane-forex .fbtn')].find(b => b.textContent.trim() === f);
+  if (btn) btn.classList.add('on');
+  renderForexSignals();
+}
+
+function renderForexSignals() {
+  const container = document.getElementById('forex-signals-container');
+  if (!container) return;
+
+  // Pull forex signals from allSignals (same data, filtered by symbol)
+  let fxSigs = [...allSignals, ...pastSignals].filter(s => FX_SYMBOLS.has(s.symbol));
+
+  // Apply filter
+  if (fxFilter === 'PROCEED') fxSigs = fxSigs.filter(s => s.verdict === 'PROCEED');
+  else if (fxFilter === 'LONG')    fxSigs = fxSigs.filter(s => s.direction === 'LONG');
+  else if (fxFilter === 'SHORT')   fxSigs = fxSigs.filter(s => s.direction === 'SHORT');
+
+  // Only show live (OPEN/ACTIVE) + recent past
+  const live = fxSigs.filter(s => s.outcome === 'OPEN' || s.outcome === 'ACTIVE');
+  const past = fxSigs.filter(s => s.outcome !== 'OPEN' && s.outcome !== 'ACTIVE').slice(0, 20);
+
+  if (live.length === 0 && past.length === 0) {
+    container.innerHTML = '<div class="empty">No forex signals yet.<br>Add forex pairs to your TradingView alerts.</div>';
+    return;
+  }
+
+  let html = '';
+  if (live.length > 0) {
+    html += live.map(s => renderCard(s, false)).join('');
+  }
+  if (past.length > 0) {
+    html += `<div class="sec" style="margin:16px 0 8px;font-size:11px;color:var(--muted);">PAST</div>`;
+    html += past.map(s => renderCard(s, true)).join('');
+  }
+  container.innerHTML = html;
+
+  // Update tab badge count
+  const countEl = document.getElementById('fx-count');
+  if (countEl) countEl.textContent = live.length > 0 ? '(' + live.length + ')' : '';
+}
+
+// Hook renderForexSignals into existing render cycle
+const _origRenderSignals = renderSignals;
+function renderSignals() {
+  _origRenderSignals();
+  if (activeMainTab === 'forex') renderForexSignals();
+}
+
+// Override switchMainTab to trigger forex render on tab switch
+const _origSwitchMainTab = switchMainTab;
+function switchMainTab(tab) {
+  _origSwitchMainTab(tab);
+  if (tab === 'forex') renderForexSignals();
+}
+
 </script>
 </body>
 </html>
