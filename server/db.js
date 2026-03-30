@@ -612,6 +612,17 @@ function resolveStaleRecommendations(signalId, currentRsi, direction) {
         return r;
       }
 
+      // MOVE_SL recs: extend to 2h — SL moves are actionable for much longer than 20min
+      // The MOVE_SL dedup in addRecommendation prevents re-firing same target anyway
+      if (r.type === 'MOVE_SL') {
+        const moveSLCapMs = 120 * 60 * 1000;
+        if ((now - r.ts) > moveSLCapMs) {
+          changed = true;
+          return { ...r, resolved: true, resolved_ts: now, resolved_reason: 'auto-expired (2h cap)' };
+        }
+        return r;
+      }
+
       // All other rec types: original 20min timer
       if ((now - r.ts) > staleMs) {
         changed = true;
