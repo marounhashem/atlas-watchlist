@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260330.1'; // RSI HIGH invalidation expiry, MOVE_SL dedup, MEDIUM threshold 40→60%
+const SCORER_VERSION = '20260330.2'; // intrabar high/low TP/SL detection, MOVE_SL 2h expiry
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
