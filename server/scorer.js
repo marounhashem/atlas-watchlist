@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260330.2'; // intrabar high/low TP/SL detection, MOVE_SL 2h expiry
+const SCORER_VERSION = '20260330.3'; // forex 15 pairs full scoring, intrabar TP/SL, MOVE_SL 2h
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -370,7 +370,7 @@ function estimateATR(data, assetClass) {
   } catch(e) {}
   const range = (data.high || 0) - (data.low || 0);
   if (range > 0) return range;
-  const fallbacks = { commodity: 2.5, crypto: 300, index: 15 };
+  const fallbacks = { commodity: 2.5, crypto: 300, index: 15, forex: 0.003 };
   return fallbacks[assetClass] || 5;
 }
 
@@ -1377,7 +1377,7 @@ function scoreSymbol(symbol) {
   // Below 1.5 R:R is not worth taking regardless of score
   // Recalculate after all level adjustments are done
   rr = calcRR(entry, sl, tp, direction);
-  const minRRGate = cfg.assetClass === 'index' ? 1.8 : 1.5;
+  const minRRGate = (cfg.assetClass === 'index' || cfg.assetClass === 'forex') ? 1.8 : 1.5;
   if (!rr || rr < minRRGate) {
     console.log(`[Scorer] ${symbol} ${direction} — R:R ${rr} below minimum ${minRRGate}, skipping`);
     return null;
@@ -1385,7 +1385,7 @@ function scoreSymbol(symbol) {
 
   // ── Minimum SL distance per asset class ──────────────────────────────────
   // Prevents SL being placed within normal noise range — guaranteed stop-out
-  const minSlPct = { crypto: 0.008, commodity: 0.005, index: 0.003 }[cfg.assetClass] || 0.004;
+  const minSlPct = { crypto: 0.008, commodity: 0.005, index: 0.003, forex: 0.002 }[cfg.assetClass] || 0.004;
   const slDist = Math.abs(entry - sl) / entry;
   if (slDist < minSlPct) {
     // Widen SL to minimum distance, recalculate TP to maintain R:R
@@ -1698,6 +1698,15 @@ function entryTouched(signal, currentPrice) {
 
 function saveSignal(scored) {
   if (scored.verdict !== 'PROCEED' && scored.verdict !== 'WATCH') return null;
+
+  // ── Hard RR gate — minimum 1.5 before saving anything ────────────────────
+  // Catches cases where TP was capped into resistance and left sub-1 RR
+  // Also catches post-merge artifacts that slip through the merge guard
+  const minRR = 1.5;
+  if (!scored.rr || scored.rr < minRR) {
+    console.log(`[Scorer] ${scored.symbol} ${scored.direction} blocked — RR ${scored.rr} below hard minimum ${minRR}`);
+    return null;
+  }
 
   // ── WATCH signals → separate watch_signals table ──────────────────────────
   // WATCH = uncertain signal — never mixed with live tradeable signals
