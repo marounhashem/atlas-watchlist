@@ -858,6 +858,8 @@ function renderSignals() {
   const c=document.getElementById('signals-container');
   if(!filtered.length){c.innerHTML='<div class="empty">No signals match filter.<br>Scoring runs every 5 minutes.</div>';return;}
   c.innerHTML=filtered.slice(0,30).map(renderCard).join('');
+  // Keep forex pane in sync if visible
+  if (activeMainTab === 'forex') renderForexSignals();
 }
 
 function renderRecommendations(sig) {
@@ -1541,7 +1543,7 @@ function switchMainTab(tab) {
   document.querySelectorAll('.main-pane').forEach(p => p.classList.remove('active'));
   document.getElementById('mtab-' + tab).classList.add('active');
   document.getElementById('pane-' + tab).classList.add('active');
-  if (tab === 'forex') fetchForexData();
+  if (tab === 'forex') renderForexSignals();
 }
 
 // ── Forex data ─────────────────────────────────────────────────────────────
@@ -1670,19 +1672,7 @@ function renderForexSignals() {
   if (countEl) countEl.textContent = live.length > 0 ? '(' + live.length + ')' : '';
 }
 
-// Hook renderForexSignals into existing render cycle
-const _origRenderSignals = renderSignals;
-function renderSignals() {
-  _origRenderSignals();
-  if (activeMainTab === 'forex') renderForexSignals();
-}
 
-// Override switchMainTab to trigger forex render on tab switch
-const _origSwitchMainTab = switchMainTab;
-function switchMainTab(tab) {
-  _origSwitchMainTab(tab);
-  if (tab === 'forex') renderForexSignals();
-}
 
 </script>
 </body>
