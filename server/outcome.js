@@ -66,8 +66,9 @@ function checkOutcomes(broadcast) {
     // ── Trade Monitor: Generate recommendations on ACTIVE signals ───────────────
     // Runs every outcome check cycle — evaluates if original thesis still holds
     if (currentState === 'ACTIVE') {
-      // First resolve stale recommendations (20 min old = condition gone)
-      resolveStaleRecommendations(id);
+      // Resolve stale recommendations — RSI HIGH recs use invalidation, others use 20min timer
+      const currentRsi = data.rsi || null;
+      resolveStaleRecommendations(id, currentRsi, sig.direction);
       const recs = generateRecommendations(sig, data, price);
       for (const rec of recs) {
         const added = addRecommendation(id, rec);
@@ -298,7 +299,10 @@ function generateRecommendations(sig, data, price) {
   } catch(e) {}
 
   // Price moved against trade — fire CLOSE rec early enough to act on
-  // 40% = early warning (MEDIUM), 70% = urgent (HIGH)
+  // 60% = early warning (MEDIUM), 70% = urgent (HIGH)
+  // Raised from 40% → 60%: below 60% is normal oscillation on a 2:1 RR trade.
+  // The RSI HIGH rec already covers early momentum reversals.
+  // MEDIUM fires only when you're genuinely close to the SL.
   const maeProgress = slDist > 0 ? Math.round((-priceDist / slDist) * 100) : 0;
   if (maeProgress > 70) {
     recs.push({
@@ -309,7 +313,7 @@ function generateRecommendations(sig, data, price) {
       mfe_pct: mfePct,
       progress_pct: progressPct
     });
-  } else if (maeProgress > 40) {
+  } else if (maeProgress > 60) {
     recs.push({
       type: 'CLOSE',
       reason: `Price ${maeProgress}% of the way to SL — consider cutting early`,
