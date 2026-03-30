@@ -520,6 +520,18 @@ function addRecommendation(signalId, rec) {
   const recentSame = existing.find(r => r.type === rec.type && r.ts > tenMinAgo);
   if (recentSame) return false; // already issued recently
 
+  // MOVE_SL dedup: never re-issue if the recommended new_sl target is identical
+  // to the most recent unresolved MOVE_SL rec. Prevents the id:2795 pattern where
+  // 100 identical recs fire because price freezes at a level for hours.
+  if (rec.type === 'MOVE_SL' && rec.new_sl != null) {
+    const lastMoveSL = existing
+      .filter(r => r.type === 'MOVE_SL' && !r.resolved && !r.dismissed)
+      .sort((a, b) => b.ts - a.ts)[0];
+    if (lastMoveSL && lastMoveSL.new_sl === rec.new_sl) {
+      return false; // same target already pending — don't add again
+    }
+  }
+
   existing.push({
     ...rec,
     ts: Date.now(),
@@ -554,24 +566,60 @@ function dismissRecommendation(signalId, recId) {
   } catch(e) {}
 }
 
-function resolveStaleRecommendations(signalId) {
-  // Auto-expire recommendations older than 20 minutes that haven't been re-triggered
-  // If condition was still present, addRecommendation would have tried to add again (dedup blocks it)
-  // If condition resolved, no new attempt = recommendation is stale after 20 min
+function resolveStaleRecommendations(signalId, currentRsi, direction) {
+  // Resolve recommendations that are no longer valid.
+  //
+  // RSI HIGH CLOSE recs (RSI extreme against direction) use INVALIDATION-based expiry:
+  //   — LONG trade, RSI was < 30: resolved when RSI recovers above 45 (momentum neutralised)
+  //   — SHORT trade, RSI was > 70: resolved when RSI drops below 55 (momentum neutralised)
+  //   — Fallback: 120min hard cap (prevents zombie recs if RSI data goes stale)
+  //
+  // All other recs use the original 20min timer.
   const signal = get('SELECT recommendations FROM signals WHERE id=?', [signalId]);
   if (!signal?.recommendations) return;
   try {
     const recs = JSON.parse(signal.recommendations);
-    const staleMs = 20 * 60 * 1000;
     const now = Date.now();
+    const staleMs        = 20  * 60 * 1000; // 20min for non-RSI recs
+    const rsiHardCapMs   = 120 * 60 * 1000; // 2h hard cap for RSI HIGH recs
     let changed = false;
+
     const updated = recs.map(r => {
-      if (!r.resolved && !r.dismissed && (now - r.ts) > staleMs) {
+      if (r.resolved || r.dismissed) return r;
+
+      const isRsiHighClose = r.type === 'CLOSE' &&
+                             r.urgency === 'HIGH' &&
+                             r.reason && r.reason.includes('RSI');
+
+      if (isRsiHighClose) {
+        // Invalidation condition: RSI has normalised
+        let rsiNormalised = false;
+        if (currentRsi != null && direction) {
+          if (direction === 'LONG'  && currentRsi > 45) rsiNormalised = true;
+          if (direction === 'SHORT' && currentRsi < 55) rsiNormalised = true;
+        }
+        const hitHardCap = (now - r.ts) > rsiHardCapMs;
+
+        if (rsiNormalised) {
+          changed = true;
+          return { ...r, resolved: true, resolved_ts: now, resolved_reason: `rsi-normalised (RSI ${currentRsi})` };
+        }
+        if (hitHardCap) {
+          changed = true;
+          return { ...r, resolved: true, resolved_ts: now, resolved_reason: 'auto-expired (2h cap)' };
+        }
+        // RSI still extreme — rec stays live
+        return r;
+      }
+
+      // All other rec types: original 20min timer
+      if ((now - r.ts) > staleMs) {
         changed = true;
         return { ...r, resolved: true, resolved_ts: now, resolved_reason: 'auto-expired (20min)' };
       }
       return r;
     });
+
     if (changed) {
       run('UPDATE signals SET recommendations=? WHERE id=?', [JSON.stringify(updated), signalId]);
       persist();
