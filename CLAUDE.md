@@ -10,7 +10,16 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260331.5'`
+`SCORER_VERSION = '20260331.6'`
+
+Changes in 20260331.6:
+- Central bank rate differentials — new module server/rateFetcher.js
+- Fetches 8 currencies from API Ninjas (USD, EUR, GBP, JPY, CHF, CAD, AUD, NZD)
+- Calculates pair differentials in basis points (e.g. USDJPY = USD - JPY = +515bps)
+- Scoring gate: >500bps against carry → ×0.80, >300bps against → ×0.88, >300bps with → ×1.05
+- Injected into macro context prompt alongside COT data
+- New table: rate_data, new endpoints: /api/rate-status, /api/rate-force
+- Daily cron at 06:50 UTC, startup seed at 8s delay
 
 Changes in 20260331.5:
 - COT data refactored to currency-level storage (EUR, GBP, JPY, not EURUSD, GBPUSD)
@@ -93,6 +102,7 @@ Changes in 20260331.2:
 - **Claude learning** uses Haiku for cost efficiency. Weight adjustments are capped at ±0.03 per cycle, 6-hour minimum between cycles, 30+ trades required per symbol.
 - **Webhook auth** is opt-in via `WEBHOOK_SECRET` env var. When set, `/webhook/pine` and `/webhook/fxssi` require `req.body.secret` to match. Include `"secret": "<value>"` in the JSON payload. `/webhook/fxssi-rich` has no auth (browser extension backup).
 - **persist()** is async with write coalescing — multiple rapid persist() calls collapse into a single disk write. The 15s interval flush remains as a safety net.
+- **Rate differentials** fetched daily from API Ninjas (INTEREST_RATE_API_KEY env var). 8 currencies. Scorer applies carry gate: >300bps against signal → ×0.88 penalty, >500bps → ×0.80. Strong carry with signal → ×1.05 bonus. Commodities and crypto have no rate differential — excluded automatically.
 - **COT data** fetched weekly from CFTC public API (disaggregated futures). Stored at **currency level** (EUR, GBP, JPY, CHF, CAD, AUD, NZD, GOLD, SILVER, OIL) — not pair level. Resolved to pair level on read: simple pairs return one leg, USD/XXX pairs invert interpretation, crosses (EURGBP, EURJPY etc) compare both legs. Crypto (BTCUSD, ETHUSD) and indices (US30, US100) have no COT coverage.
 
 ## Rules

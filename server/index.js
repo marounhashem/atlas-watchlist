@@ -14,6 +14,7 @@ const { runLearningCycle } = require('./learner');
 const claudeLearner = require('./claudeLearner');
 const { runFXSSIScrape, processBridgePayload, getFxssiCacheAge } = require('./fxssiScraper');
 const { runCOTFetch, getLatestCOT, getCOTSummary, getCOTCurrencies } = require('./cotFetcher');
+const { runRateFetch, getLatestRates, getRateDifferential } = require('./rateFetcher');
 const { SYMBOLS } = require('./config');
 
 const app = express();
@@ -897,6 +898,27 @@ app.get('/api/cot-test', async (req, res) => {
   res.json(results);
 });
 
+// Rate data status — all currencies + pair differentials
+app.get('/api/rate-status', (req, res) => {
+  const rates = getLatestRates();
+  const differentials = {};
+  for (const sym of Object.keys(SYMBOLS)) {
+    const diff = getRateDifferential(sym);
+    if (diff) differentials[sym] = diff;
+  }
+  res.json({ rates, differentials });
+});
+
+// Force rate fetch
+app.get('/api/rate-force', async (req, res) => {
+  try {
+    const result = await runRateFetch();
+    res.json({ ok: true, ...result });
+  } catch(e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
 // Mark a WATCH signal paper outcome manually (if auto-detection missed it)
 app.post('/api/paper-outcome', (req, res) => {
   const { signalId, paperOutcome } = req.body;
@@ -986,6 +1008,12 @@ cron.schedule('0 17 * * *', async () => {
   await claudeLearner.dailySessionSummary(broadcast);
 });
 
+// Daily rate fetch — fires at 06:50 UTC (10 min before macro context)
+cron.schedule('50 6 * * *', async () => {
+  console.log('[Cron] Running daily rate fetch...');
+  await runRateFetch();
+});
+
 // Daily macro context — fires at 07:00 UTC (before London open)
 // Fetches current macro environment for each symbol via web search
 // Stored in DB and used by scorer as a macro alignment check
@@ -1054,6 +1082,17 @@ async function runMacroContextFetch(broadcast) {
           if (cotAge < 8 * 24 * 60 * 60 * 1000) { // < 8 days
             const summary = getCOTSummary(symbol);
             cotContext = `\n\nCOT INSTITUTIONAL POSITIONING (as of ${cot.reportDate}):\n${summary || 'N/A'}`;
+          }
+        }
+      } catch(e) {}
+
+      // Inject rate differential if available
+      try {
+        const rateDiff = getRateDifferential(symbol);
+        if (rateDiff) {
+          cotContext += `\nRATE DIFFERENTIAL: ${rateDiff.summary}`;
+          if (rateDiff.strength === 'EXTREME') {
+            cotContext += ` — EXTREME carry, counter-trend signals heavily penalised`;
           }
         }
       } catch(e) {}
@@ -1232,6 +1271,22 @@ server.listen(PORT, () => {
         console.error('[Startup] COT seed error:', e.message, e.stack);
       }
     }, 5000);
+    // Seed rate data on startup if empty
+    setTimeout(() => {
+      try {
+        const rateMod = require('./rateFetcher');
+        const rates = rateMod.getLatestRates();
+        console.log('[Startup] Rate seed check —', Object.keys(rates).length, 'currencies cached');
+        if (Object.keys(rates).length === 0) {
+          console.log('[Startup] Rate table empty — running initial fetch...');
+          rateMod.runRateFetch()
+            .then(() => console.log('[Startup] Initial rate fetch complete'))
+            .catch(e => console.error('[Startup] Rate fetch error:', e.message));
+        }
+      } catch(e) {
+        console.error('[Startup] Rate seed error:', e.message);
+      }
+    }, 8000);
     // Expire OPEN signals from old scorer versions — keeps board clean after deploys
     // ACTIVE signals (real trades) are never auto-expired
     try {

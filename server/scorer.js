@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260331.5'; // COT refactored to currency-level, cross pair support
+const SCORER_VERSION = '20260331.6'; // central bank rate differentials — carry gate + macro injection
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -788,6 +788,33 @@ function scoreSymbol(symbol) {
         const bonus = macro.strength >= 7 ? 1.08 : 1.04;
         conflictMultiplier *= bonus;
         macroNote = `✓ Macro ${macro.sentiment} confirms — ${macro.summary}`;
+      }
+    }
+  } catch(e) {}
+
+  // ── Rate differential carry gate ────────────────────────────────────────────
+  // Strong carry differentials penalise counter-carry trades, reward with-carry
+  try {
+    const { getRateDifferential } = require('./rateFetcher');
+    const rateDiff = getRateDifferential(symbol);
+    if (rateDiff && rateDiff.differential !== 0) {
+      const absBps = Math.abs(rateDiff.differential);
+      // Determine if signal fights carry: LONG on base-favoured pair = with carry
+      // BASE_FAVOURED + LONG = with carry, BASE_FAVOURED + SHORT = against carry
+      // QUOTE_FAVOURED + SHORT = with carry, QUOTE_FAVOURED + LONG = against carry
+      const withCarry = (rateDiff.direction === 'BASE_FAVOURED' && direction === 'LONG') ||
+                        (rateDiff.direction === 'QUOTE_FAVOURED' && direction === 'SHORT');
+      const againstCarry = (rateDiff.direction === 'BASE_FAVOURED' && direction === 'SHORT') ||
+                           (rateDiff.direction === 'QUOTE_FAVOURED' && direction === 'LONG');
+
+      if (againstCarry && absBps > 500) {
+        conflictMultiplier *= 0.80;
+        macroNote += ` | ⚠ Extreme carry fight (${rateDiff.differential}bps)`;
+      } else if (againstCarry && absBps > 300) {
+        conflictMultiplier *= 0.88;
+        macroNote += ` | ⚠ Strong carry fight (${rateDiff.differential}bps)`;
+      } else if (withCarry && absBps > 300) {
+        conflictMultiplier *= 1.05;
       }
     }
   } catch(e) {}

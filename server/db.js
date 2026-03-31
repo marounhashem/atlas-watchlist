@@ -125,6 +125,15 @@ function initSchema() {
   db.run(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY, value TEXT, ts INTEGER
   )`);
+  // Central bank interest rates — daily fetch from API Ninjas
+  db.run(`CREATE TABLE IF NOT EXISTS rate_data (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    currency TEXT NOT NULL,
+    rate_pct REAL NOT NULL,
+    last_updated TEXT,
+    ts INTEGER NOT NULL
+  )`);
+
   // COT (Commitment of Traders) — weekly CFTC institutional positioning data
   db.run(`CREATE TABLE IF NOT EXISTS cot_data (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -738,6 +747,21 @@ function updateWatchOutcome(id, outcome, pnlPct) {
   persist();
 }
 
+// ── Rate data ────────────────────────────────────────────────────────────────
+function upsertRateData(currency, data) {
+  run(`INSERT INTO rate_data (currency, rate_pct, last_updated, ts) VALUES (?,?,?,?)`,
+    [currency, data.ratePct, data.lastUpdated || null, Date.now()]);
+  persist();
+}
+
+function getRateData(currency) {
+  return get('SELECT * FROM rate_data WHERE currency=? ORDER BY ts DESC LIMIT 1', [currency]);
+}
+
+function getAllRateData() {
+  return all('SELECT * FROM rate_data WHERE id IN (SELECT MAX(id) FROM rate_data GROUP BY currency) ORDER BY currency');
+}
+
 // ── COT data ─────────────────────────────────────────────────────────────────
 function upsertCOTData(symbol, data) {
   run(`INSERT INTO cot_data
@@ -771,5 +795,6 @@ module.exports = {
   retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals,
   getSetting, setSetting,
   insertWatchSignal, getRecentWatchSignals, updateWatchOutcome,
-  upsertCOTData, getCOTData, getAllCOTData
+  upsertCOTData, getCOTData, getAllCOTData,
+  upsertRateData, getRateData, getAllRateData
 };
