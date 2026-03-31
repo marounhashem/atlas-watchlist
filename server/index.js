@@ -1337,7 +1337,12 @@ async function runMacroContextFetch(broadcast) {
         const ctx = JSON.parse(clean);
         macroContext[symbol] = { ...ctx, ts: Date.now() };
         // Persist to DB so it survives restarts
-        try { db.upsertMacroContext(symbol, macroContext[symbol]); } catch(e) {}
+        try {
+          db.upsertMacroContext(symbol, macroContext[symbol]);
+          console.log(`[Macro] ${symbol} persisted to DB`);
+        } catch(e) {
+          console.error(`[Macro] ${symbol} DB persist error:`, e.message);
+        }
         console.log(`[Macro] ${symbol}: ${ctx.sentiment} (${ctx.strength}/10) — ${ctx.summary}`);
         if (broadcast) broadcast({ type: 'MACRO_UPDATE', symbol, context: macroContext[symbol], ts: Date.now() });
       } catch(e) {

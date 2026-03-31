@@ -780,13 +780,25 @@ function updateWatchOutcome(id, outcome, pnlPct) {
 
 // ── Macro context persistence ────────────────────────────────────────────────
 function upsertMacroContext(symbol, data) {
-  run('DELETE FROM macro_context WHERE symbol=?', [symbol]);
-  run(`INSERT INTO macro_context (symbol, sentiment, strength, summary, key_risks, supports_long, supports_short, avoid_until, ts)
-    VALUES (?,?,?,?,?,?,?,?,?)`,
-    [symbol, data.sentiment, data.strength, data.summary,
-     JSON.stringify(data.key_risks || []),
-     data.supports_long ? 1 : 0, data.supports_short ? 1 : 0,
-     data.avoid_until || null, data.ts || Date.now()]);
+  const keyRisks = JSON.stringify(data.key_risks || []);
+  const ts = data.ts || Date.now();
+  const existing = get('SELECT id FROM macro_context WHERE symbol=?', [symbol]);
+  if (existing) {
+    run(`UPDATE macro_context SET
+      sentiment=?, strength=?, summary=?, key_risks=?,
+      supports_long=?, supports_short=?, avoid_until=?, ts=?
+      WHERE symbol=?`,
+      [data.sentiment, data.strength, data.summary, keyRisks,
+       data.supports_long ? 1 : 0, data.supports_short ? 1 : 0,
+       data.avoid_until || null, ts, symbol]);
+  } else {
+    run(`INSERT INTO macro_context
+      (symbol, sentiment, strength, summary, key_risks, supports_long, supports_short, avoid_until, ts)
+      VALUES (?,?,?,?,?,?,?,?,?)`,
+      [symbol, data.sentiment, data.strength, data.summary, keyRisks,
+       data.supports_long ? 1 : 0, data.supports_short ? 1 : 0,
+       data.avoid_until || null, ts]);
+  }
   persist();
 }
 
