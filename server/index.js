@@ -856,13 +856,20 @@ app.get('/api/cot-force', async (req, res) => {
   }
 });
 
-// Raw CFTC API test — single fetch for GOLD (commodity) + EUR (forex), returns full responses
+// Raw CFTC API test — pass ?currency=GBP to test one, or omit for EUR+GOLD+OIL
 app.get('/api/cot-test', async (req, res) => {
-  const tests = {
-    EUR:  "EURO FX - CHICAGO MERCANTILE EXCHANGE",
-    GOLD: "GOLD - COMMODITY EXCHANGE INC.",
-    OIL:  "WTI-PHYSICAL - NEW YORK MERCANTILE EXCHANGE"
-  };
+  const allCurrencies = getCOTCurrencies();
+  const qCurrency = req.query.currency?.toUpperCase();
+  let tests;
+  if (qCurrency && allCurrencies[qCurrency]) {
+    tests = { [qCurrency]: allCurrencies[qCurrency] };
+  } else {
+    tests = {
+      EUR:  allCurrencies.EUR,
+      GOLD: allCurrencies.GOLD,
+      OIL:  allCurrencies.OIL
+    };
+  }
   const results = {};
   for (const [label, name] of Object.entries(tests)) {
     const testUrl = `https://publicreporting.cftc.gov/resource/jun7-fc8e.json?$where=market_and_exchange_names='${encodeURIComponent(name)}'&$order=report_date_as_yyyy_mm_dd DESC&$limit=1`;
