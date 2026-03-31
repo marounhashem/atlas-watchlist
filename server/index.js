@@ -1317,6 +1317,8 @@ async function runMacroContextFetch(broadcast) {
       try {
         const ctx = JSON.parse(clean);
         macroContext[symbol] = { ...ctx, ts: Date.now() };
+        // Persist to DB so it survives restarts
+        try { db.upsertMacroContext(symbol, macroContext[symbol]); } catch(e) {}
         console.log(`[Macro] ${symbol}: ${ctx.sentiment} (${ctx.strength}/10) — ${ctx.summary}`);
         if (broadcast) broadcast({ type: 'MACRO_UPDATE', symbol, context: macroContext[symbol], ts: Date.now() });
       } catch(e) {
@@ -1514,20 +1516,29 @@ server.listen(PORT, () => {
         console.error('[Startup] Rate load error:', e.message);
       }
     }, 8000);
-    // Seed macro context on startup if empty
-    setTimeout(async () => {
+    // Load macro context from DB on startup — survives restarts
+    setTimeout(() => {
       try {
-        const macroCtx = getMacroContext();
-        const isEmpty = Object.keys(macroCtx).length === 0;
-        if (isEmpty) {
-          console.log('[Startup] Macro context empty — running initial fetch...');
-          await runMacroContextFetch(broadcast);
-          console.log('[Startup] Initial macro context fetch complete');
+        const stored = db.getStoredMacroContext();
+        const count = Object.keys(stored).length;
+        if (count > 0) {
+          Object.assign(macroContext, stored);
+          console.log(`[Startup] Loaded ${count} macro contexts from DB`);
+        } else {
+          console.log('[Startup] No stored macro context — will fetch at 07:00 UTC or hit /api/macro-force');
+        }
+        // If stored context is stale (>26h), trigger a fresh fetch
+        const age = db.getMacroContextAge();
+        if (age > 26 * 3600000) {
+          console.log('[Startup] Macro context stale — running fresh fetch...');
+          runMacroContextFetch(broadcast)
+            .then(() => console.log('[Startup] Macro context fetch complete'))
+            .catch(e => console.error('[Startup] Macro context fetch error:', e.message));
         }
       } catch(e) {
-        console.error('[Startup] Macro context fetch error:', e.message);
+        console.error('[Startup] Macro context load error:', e.message);
       }
-    }, 12000);
+    }, 3000);
     // Expire OPEN signals from old scorer versions — keeps board clean after deploys
     // ACTIVE signals (real trades) are never auto-expired
     try {

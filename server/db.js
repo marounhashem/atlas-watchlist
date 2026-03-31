@@ -125,6 +125,20 @@ function initSchema() {
   db.run(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY, value TEXT, ts INTEGER
   )`);
+  // Macro context — persisted so it survives restarts
+  db.run(`CREATE TABLE IF NOT EXISTS macro_context (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    sentiment TEXT,
+    strength INTEGER,
+    summary TEXT,
+    key_risks TEXT,
+    supports_long INTEGER,
+    supports_short INTEGER,
+    avoid_until TEXT,
+    ts INTEGER NOT NULL
+  )`);
+
   // Central bank consensus — market expectations for upcoming meetings
   db.run(`CREATE TABLE IF NOT EXISTS cb_consensus (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -764,6 +778,41 @@ function updateWatchOutcome(id, outcome, pnlPct) {
   persist();
 }
 
+// ── Macro context persistence ────────────────────────────────────────────────
+function upsertMacroContext(symbol, data) {
+  run('DELETE FROM macro_context WHERE symbol=?', [symbol]);
+  run(`INSERT INTO macro_context (symbol, sentiment, strength, summary, key_risks, supports_long, supports_short, avoid_until, ts)
+    VALUES (?,?,?,?,?,?,?,?,?)`,
+    [symbol, data.sentiment, data.strength, data.summary,
+     JSON.stringify(data.key_risks || []),
+     data.supports_long ? 1 : 0, data.supports_short ? 1 : 0,
+     data.avoid_until || null, data.ts || Date.now()]);
+  persist();
+}
+
+function getStoredMacroContext() {
+  const rows = all('SELECT * FROM macro_context ORDER BY symbol');
+  const result = {};
+  for (const r of rows) {
+    result[r.symbol] = {
+      sentiment: r.sentiment,
+      strength: r.strength,
+      summary: r.summary,
+      key_risks: (() => { try { return JSON.parse(r.key_risks); } catch(e) { return []; } })(),
+      supports_long: r.supports_long === 1,
+      supports_short: r.supports_short === 1,
+      avoid_until: r.avoid_until,
+      ts: r.ts
+    };
+  }
+  return result;
+}
+
+function getMacroContextAge() {
+  const row = get('SELECT MIN(ts) as oldest FROM macro_context');
+  return row?.oldest ? Date.now() - row.oldest : Infinity;
+}
+
 // ── Central bank consensus ───────────────────────────────────────────────────
 function upsertConsensus(currency, meetingDate, data) {
   // Replace existing consensus for same currency+meeting
@@ -831,6 +880,7 @@ module.exports = {
   retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals,
   getSetting, setSetting,
   insertWatchSignal, getRecentWatchSignals, updateWatchOutcome,
+  upsertMacroContext, getStoredMacroContext, getMacroContextAge,
   upsertCOTData, getCOTData, getAllCOTData,
   upsertRateData, getRateData, getAllRateData,
   upsertConsensus, getConsensus, getAllConsensus

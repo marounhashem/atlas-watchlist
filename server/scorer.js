@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260331.9'; // Telegram alerts, morning brief, rec push notifications
+const SCORER_VERSION = '20260331.10'; // macro persists to DB, COT+macro penalties, active dedup, Telegram rec push
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -773,7 +773,7 @@ function scoreSymbol(symbol) {
     // getMacroContext is in-process via index.js — access via global if available
     const macroCtx = global.atlasGetMacroContext ? global.atlasGetMacroContext() : null;
     const macro = macroCtx ? macroCtx[symbol] : null;
-    if (macro && macro.ts) macroContextAvailable = true;
+    if (macro && macro.ts && (Date.now() - macro.ts) < 26 * 3600000) macroContextAvailable = true;
     if (macro && macro.ts && (Date.now() - macro.ts) < 26 * 3600000) { // use if <26h old
       const macroConflict =
         (direction === 'LONG'  && macro.supports_short && !macro.supports_long) ||
@@ -783,13 +783,41 @@ function scoreSymbol(symbol) {
         (direction === 'SHORT' && macro.supports_short && !macro.supports_long);
 
       if (macroConflict) {
-        const penalty = macro.strength >= 7 ? 0.78 : macro.strength >= 4 ? 0.88 : 0.94;
+        // Stronger penalties — macro strength 6+ should meaningfully suppress signals
+        const penalty = macro.strength >= 8 ? 0.70
+                      : macro.strength >= 6 ? 0.78
+                      : macro.strength >= 4 ? 0.88
+                      : 0.94;
         conflictMultiplier *= penalty;
-        macroNote = `⚠ Macro ${macro.sentiment} conflicts — ${macro.summary}`;
+        macroNote = `⚠ Macro ${macro.sentiment} (${macro.strength}/10) conflicts — ${macro.summary}`;
       } else if (macroConfirm) {
         const bonus = macro.strength >= 7 ? 1.08 : 1.04;
         conflictMultiplier *= bonus;
         macroNote = `✓ Macro ${macro.sentiment} confirms — ${macro.summary}`;
+      }
+    }
+  } catch(e) {}
+
+  // ── COT extreme positioning penalty ─────────────────────────────────────────
+  // Specs crowded in same direction as signal = fade risk = penalty
+  // Specs crowded opposite to signal = contrarian fuel = bonus
+  try {
+    const { getLatestCOT } = require('./cotFetcher');
+    const cot = getLatestCOT(symbol);
+    if (cot) {
+      const cotAgainst =
+        (direction === 'LONG'  && cot.netNonComm > 100000) ||
+        (direction === 'SHORT' && cot.netNonComm < -100000);
+      const cotWith =
+        (direction === 'SHORT' && cot.netNonComm > 100000) ||
+        (direction === 'LONG'  && cot.netNonComm < -100000);
+
+      if (cotAgainst) {
+        conflictMultiplier *= 0.88;
+        macroNote += macroNote ? ' · ⚠ COT extreme crowding' : '⚠ COT extreme crowding';
+      } else if (cotWith) {
+        conflictMultiplier *= 1.05;
+        macroNote += macroNote ? ' · ✓ COT extreme favours' : '✓ COT extreme favours';
       }
     }
   } catch(e) {}
@@ -1892,9 +1920,21 @@ function saveSignal(scored) {
     console.error('[Scorer] opposite-dir check error:', e.message);
   }
 
-  // Dedup only checks CURRENT CYCLE signals (cycle=0)
-  // Retired ACTIVE signals (cycle>0) are completely invisible here —
-  // a fresh signal can fire immediately after retirement for same symbol+direction
+  // ── Active signal guard across ALL cycles ──────────────────────────────────
+  // ACTIVE = entry touched = real trade. Don't double up regardless of cycle.
+  try {
+    const activeAny = require('./db').getOpenSignals().find(s =>
+      s.symbol === scored.symbol && s.direction === scored.direction && s.outcome === 'ACTIVE'
+    );
+    if (activeAny) {
+      console.log(`[Scorer] ${scored.symbol} ${scored.direction} blocked — ACTIVE signal exists (id:${activeAny.id})`);
+      return null;
+    }
+  } catch(e) {
+    console.error('[Scorer] active dedup check error:', e.message);
+  }
+
+  // Dedup checks CURRENT CYCLE signals (cycle=0) for OPEN signals
   let last = null;
   try {
     const { getLatestOpenSignal, updateOutcome } = require('./db');

@@ -87,9 +87,13 @@ function checkOutcomes(broadcast) {
             recommendation: rec,
             ts: Date.now()
           });
-          // Telegram push for HIGH urgency recs
-          if (rec.urgency === 'HIGH' && _sendRecAlert) {
-            _sendRecAlert(sig, rec).catch(e => console.error('[Telegram] Rec alert error:', e.message));
+          // Telegram push for HIGH urgency recs + MEDIUM MOVE_SL near TP
+          if (_sendRecAlert) {
+            const pushHigh = rec.urgency === 'HIGH';
+            const pushMoveSl = rec.urgency === 'MEDIUM' && rec.type === 'MOVE_SL' && rec.progress_pct >= 80;
+            if (pushHigh || pushMoveSl) {
+              _sendRecAlert(sig, rec).catch(e => console.error('[Telegram] Rec alert error:', e.message));
+            }
           }
         }
       }
