@@ -55,18 +55,18 @@ async function fetchRate(currency, bankName) {
   }
 
   const data = await res.json();
-  // API Ninjas returns: { central_bank_rates: [{ central_bank, country, rate_pct, last_updated }] }
-  // or for v1: array of objects directly
-  const rates = data.central_bank_rates || data;
-  const match = Array.isArray(rates) ? rates.find(r =>
-    r.central_bank?.toLowerCase().includes(bankName.replace('central_bank_', '').replace(/_/g, ' '))
-    || r.name?.toLowerCase().includes(bankName.replace('central_bank_', '').replace(/_/g, ' '))
-  ) || rates[0] : null;
+  console.log(`[Rate] ${currency} raw response: ${JSON.stringify(data).slice(0, 400)}`);
 
-  if (!match) {
-    console.log(`[Rate] ${currency} — no matching rate in response`);
+  // API Ninjas v1 returns: { central_bank_rates: [{ central_bank, country, rate_pct, last_updated }] }
+  const rates = data.central_bank_rates || (Array.isArray(data) ? data : null);
+  if (!rates || rates.length === 0) {
+    console.log(`[Rate] ${currency} — no rates array in response`);
     return null;
   }
+
+  // First result is the match (we queried by exact name)
+  const match = rates[0];
+  console.log(`[Rate] ${currency} matched: ${match.central_bank || match.name} = ${match.rate_pct ?? match.rate}%`);
 
   return {
     ratePct: parseFloat(match.rate_pct ?? match.rate ?? 0),

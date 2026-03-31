@@ -909,6 +909,19 @@ app.get('/api/rate-status', (req, res) => {
   res.json({ rates, differentials });
 });
 
+// Raw rate API test — returns raw API Ninjas response for debugging
+app.get('/api/rate-test', async (req, res) => {
+  const apiKey = process.env.INTEREST_RATE_API_KEY;
+  if (!apiKey) return res.json({ error: 'No INTEREST_RATE_API_KEY set' });
+  try {
+    const url = 'https://api.api-ninjas.com/v1/interestrate?name=central_bank_us';
+    const r = await fetch(url, { headers: { 'X-Api-Key': apiKey, 'Accept': 'application/json' } });
+    const text = await r.text();
+    try { res.json({ status: r.status, body: JSON.parse(text) }); }
+    catch(e) { res.json({ status: r.status, raw: text.slice(0, 2000) }); }
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 // Force rate fetch
 app.get('/api/rate-force', async (req, res) => {
   try {
