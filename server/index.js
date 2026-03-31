@@ -825,15 +825,15 @@ app.get('/api/macro-debug', (req, res) => {
   }
 });
 
-// Force macro context refresh
-app.post('/api/macro-refresh', async (req, res) => {
+// Force macro context refresh (GET + POST for browser + curl compatibility)
+const macroForceHandler = async (req, res) => {
   res.json({ ok: true, message: 'Macro refresh started' });
   runMacroContextFetch(broadcast).catch(e => console.error('[Macro] Manual refresh error:', e.message));
-});
-app.post('/api/macro-force', async (req, res) => {
-  res.json({ ok: true, message: 'Macro refresh started' });
-  runMacroContextFetch(broadcast).catch(e => console.error('[Macro] Manual refresh error:', e.message));
-});
+};
+app.get('/api/macro-refresh', macroForceHandler);
+app.post('/api/macro-refresh', macroForceHandler);
+app.get('/api/macro-force', macroForceHandler);
+app.post('/api/macro-force', macroForceHandler);
 
 // ── Morning brief builder ─────────────────────────────────────────────────────
 async function buildMorningBrief() {
