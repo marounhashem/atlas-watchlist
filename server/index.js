@@ -810,6 +810,10 @@ app.post('/api/macro-refresh', async (req, res) => {
   res.json({ ok: true, message: 'Macro refresh started' });
   runMacroContextFetch(broadcast).catch(e => console.error('[Macro] Manual refresh error:', e.message));
 });
+app.post('/api/macro-force', async (req, res) => {
+  res.json({ ok: true, message: 'Macro refresh started' });
+  runMacroContextFetch(broadcast).catch(e => console.error('[Macro] Manual refresh error:', e.message));
+});
 
 // COT data status — currency-level positioning + pair-level summaries
 app.get('/api/cot-status', (req, res) => {
@@ -1395,6 +1399,20 @@ server.listen(PORT, () => {
         console.error('[Startup] Rate load error:', e.message);
       }
     }, 8000);
+    // Seed macro context on startup if empty
+    setTimeout(async () => {
+      try {
+        const macroCtx = getMacroContext();
+        const isEmpty = Object.keys(macroCtx).length === 0;
+        if (isEmpty) {
+          console.log('[Startup] Macro context empty — running initial fetch...');
+          await runMacroContextFetch(broadcast);
+          console.log('[Startup] Initial macro context fetch complete');
+        }
+      } catch(e) {
+        console.error('[Startup] Macro context fetch error:', e.message);
+      }
+    }, 12000);
     // Expire OPEN signals from old scorer versions — keeps board clean after deploys
     // ACTIVE signals (real trades) are never auto-expired
     try {
