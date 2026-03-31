@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260331.8'; // startup macro seed, macro-force endpoint
+const SCORER_VERSION = '20260331.8'; // macro_context_available flag, ACTIVE dedup across all cycles
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -768,10 +768,12 @@ function scoreSymbol(symbol) {
   // If macro contradicts signal direction, apply penalty.
   // If macro confirms, apply small bonus.
   let macroNote = '';
+  let macroContextAvailable = false;
   try {
     // getMacroContext is in-process via index.js — access via global if available
     const macroCtx = global.atlasGetMacroContext ? global.atlasGetMacroContext() : null;
     const macro = macroCtx ? macroCtx[symbol] : null;
+    if (macro && macro.ts) macroContextAvailable = true;
     if (macro && macro.ts && (Date.now() - macro.ts) < 26 * 3600000) { // use if <26h old
       const macroConflict =
         (direction === 'LONG'  && macro.supports_short && !macro.supports_long) ||
@@ -1590,6 +1592,7 @@ function scoreSymbol(symbol) {
     entrySource: entrySource || 'price',
     fxssiStale: fxssiStale || false,
     regimeAdj: regimeMultiplier !== 1.0 ? { multiplier: regimeMultiplier, note: regimeNote } : null,
+    macroContextAvailable,
     ts: Date.now()
   };
 }

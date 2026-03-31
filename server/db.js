@@ -215,6 +215,7 @@ function initSchema() {
   try { db.run('ALTER TABLE signals ADD COLUMN recommendations TEXT DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN rec_followed INTEGER DEFAULT 0'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN refine_ts INTEGER DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN macro_context_available INTEGER DEFAULT 0'); } catch(e) {}
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
   try { db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL'); } catch(e) { console.error('[DB] Backfill error:', e.message); }
 
@@ -275,11 +276,11 @@ function getLatestMarketData(symbol) {
 }
 
 function insertSignal(signal) {
-  run(`INSERT INTO signals (symbol,ts,direction,score,verdict,entry,sl,tp,rr,session,reasoning,scorer_version)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+  run(`INSERT INTO signals (symbol,ts,direction,score,verdict,entry,sl,tp,rr,session,reasoning,scorer_version,macro_context_available)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [signal.symbol, Date.now(), signal.direction, signal.score, signal.verdict,
      signal.entry, signal.sl, signal.tp, signal.rr, signal.session, signal.reasoning,
-     signal.scorerVersion || null]);
+     signal.scorerVersion || null, signal.macroContextAvailable ? 1 : 0]);
   const row = get("SELECT last_insert_rowid() as id");
   persist();
   return row ? row.id : null;
@@ -340,9 +341,11 @@ function insertLearningLog(entry) {
 // Get latest signal for current cycle only — retired signals invisible to dedup
 // Get latest signal for current cycle only — retired signals invisible to dedup
 function getLatestOpenSignal(symbol, direction) {
-  // Block new signals if ACTIVE already exists for this symbol+direction
+  // Block new signals if ACTIVE already exists for this symbol+direction in ANY cycle
+  // An ACTIVE signal = entry touched = real position — must not create duplicates
+  // regardless of whether the signal was retired to a past cycle
   const active = get(
-    "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='ACTIVE' AND (cycle IS NULL OR cycle=0) ORDER BY ts DESC LIMIT 1",
+    "SELECT * FROM signals WHERE symbol=? AND direction=? AND outcome='ACTIVE' ORDER BY ts DESC LIMIT 1",
     [symbol, direction]
   );
   if (active) return active;
