@@ -833,10 +833,28 @@ app.get('/api/cot-status', (req, res) => {
   res.json({ currencies, pairs });
 });
 
-// Force COT fetch
+// Force COT fetch — waits for completion and returns results
+app.post('/api/cot-force', async (req, res) => {
+  try {
+    await runCOTFetch();
+    const { getAllCOTData } = require('./db');
+    const rows = getAllCOTData();
+    res.json({ ok: true, fetched: rows.length, currencies: rows.map(r => r.symbol) });
+  } catch(e) {
+    console.error('[COT] Manual fetch error:', e.message);
+    res.json({ ok: false, error: e.message });
+  }
+});
+// Keep GET for backwards compatibility
 app.get('/api/cot-force', async (req, res) => {
-  res.json({ ok: true, message: 'COT fetch started' });
-  runCOTFetch().catch(e => console.error('[COT] Manual fetch error:', e.message));
+  try {
+    await runCOTFetch();
+    const { getAllCOTData } = require('./db');
+    const rows = getAllCOTData();
+    res.json({ ok: true, fetched: rows.length, currencies: rows.map(r => r.symbol) });
+  } catch(e) {
+    res.json({ ok: false, error: e.message });
+  }
 });
 
 // Mark a WATCH signal paper outcome manually (if auto-detection missed it)

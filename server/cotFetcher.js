@@ -54,18 +54,29 @@ const cotCache = {}; // { currency: { netNonComm, netComm, ... , ts } }
 async function fetchCOTForCurrency(currency, contractName) {
   const where = `market_and_exchange_names = "${contractName}"`;
   const url = `${COT_API}?where=${encodeURIComponent(where)}&order_by=report_date_as_yyyy_mm_dd DESC&limit=2`;
+  console.log(`[COT] ${currency} fetching: ${url}`);
 
   const res = await fetch(url, {
     headers: { 'Accept': 'application/json' }
   });
 
+  console.log(`[COT] ${currency} HTTP ${res.status} ${res.statusText}`);
+
   if (!res.ok) {
-    console.error(`[COT] ${currency} HTTP ${res.status}`);
+    const body = await res.text().catch(() => '(no body)');
+    console.error(`[COT] ${currency} error body: ${body.slice(0, 500)}`);
     return null;
   }
 
   const data = await res.json();
+  const topKeys = Object.keys(data);
   const records = data.results || data.records || [];
+  console.log(`[COT] ${currency} response keys: [${topKeys.join(',')}] records: ${records.length}`);
+
+  if (records.length > 0) {
+    console.log(`[COT] ${currency} first record keys: [${Object.keys(records[0]).join(',')}]`);
+    console.log(`[COT] ${currency} first record sample: ${JSON.stringify(records[0]).slice(0, 400)}`);
+  }
 
   if (records.length === 0) {
     console.log(`[COT] ${currency} — no records found for "${contractName}"`);
