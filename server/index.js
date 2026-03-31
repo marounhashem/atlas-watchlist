@@ -826,12 +826,23 @@ app.get('/api/macro-debug', (req, res) => {
 });
 
 // Force macro context refresh (GET + POST for browser + curl compatibility)
-const macroForceHandler = async (req, res) => {
+// macro-refresh: fire-and-forget (fast response)
+const macroRefreshHandler = async (req, res) => {
   res.json({ ok: true, message: 'Macro refresh started' });
   runMacroContextFetch(broadcast).catch(e => console.error('[Macro] Manual refresh error:', e.message));
 };
-app.get('/api/macro-refresh', macroForceHandler);
-app.post('/api/macro-refresh', macroForceHandler);
+app.get('/api/macro-refresh', macroRefreshHandler);
+app.post('/api/macro-refresh', macroRefreshHandler);
+// macro-force: waits and returns result (for debugging)
+const macroForceHandler = async (req, res) => {
+  try {
+    await runMacroContextFetch(broadcast);
+    const ctx = getMacroContext();
+    res.json({ ok: true, symbols: Object.keys(ctx).length, data: ctx });
+  } catch(e) {
+    res.json({ ok: false, error: e.message });
+  }
+};
 app.get('/api/macro-force', macroForceHandler);
 app.post('/api/macro-force', macroForceHandler);
 
@@ -1330,23 +1341,26 @@ async function runMacroContextFetch(broadcast) {
       });
 
       const data = await response.json();
+      console.log(`[Macro] ${symbol} API status: ${response.status}, content blocks: ${data.content?.length || 0}, stop_reason: ${data.stop_reason}`);
       const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+      console.log(`[Macro] ${symbol} text length: ${text.length}, first 200: ${text.slice(0, 200)}`);
       const clean = text.replace(/```json|```/g, '').trim();
 
       try {
         const ctx = JSON.parse(clean);
+        console.log(`[Macro] ${symbol} parsed OK: sentiment=${ctx.sentiment} strength=${ctx.strength}`);
         macroContext[symbol] = { ...ctx, ts: Date.now() };
         // Persist to DB so it survives restarts
         try {
           db.upsertMacroContext(symbol, macroContext[symbol]);
           console.log(`[Macro] ${symbol} persisted to DB`);
         } catch(e) {
-          console.error(`[Macro] ${symbol} DB persist error:`, e.message);
+          console.error(`[Macro] ${symbol} DB persist error:`, e.message, e.stack);
         }
         console.log(`[Macro] ${symbol}: ${ctx.sentiment} (${ctx.strength}/10) — ${ctx.summary}`);
         if (broadcast) broadcast({ type: 'MACRO_UPDATE', symbol, context: macroContext[symbol], ts: Date.now() });
       } catch(e) {
-        console.error(`[Macro] ${symbol} parse error:`, e.message);
+        console.error(`[Macro] ${symbol} parse error:`, e.message, '| clean:', clean.slice(0, 200));
       }
 
       // Small delay between symbols to avoid rate limiting
