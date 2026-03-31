@@ -45,16 +45,16 @@ Changes in 20260331.2:
 | 4 | structScore used 2/6 TFs | scorer.js | Removed orphaned line that overwrote 6-TF sum | aeb2e79 |
 | 5 | structureZero undefined | scorer.js | Hoisted before counter-trend gate | aeb2e79 |
 | 6 | Watch signal ID always null | db.js | Switched to `get()` consistent with insertSignal | aeb2e79 |
-| 7 | No webhook authentication | index.js | Bearer token middleware on all /webhook/* routes | pending |
-| 8 | XSS via innerHTML | index.html | `esc()` sanitiser on symbol, label, reasoning, error msgs | pending |
-| 9 | Error stack leak on /api/score-now | index.js | Log internally, return generic error to client | pending |
-| 10 | Synchronous persist() blocks event loop | db.js | Async fs.writeFile with write coalescing | pending |
-| 14 | Gravity penalty double-dip | scorer.js | Removed +0.10 from scoreFXSSI (post-score gate handles it) | pending |
-| 15 | RR recalc discards FXSSI levels | scorer.js | Trim TP to cap/floor RR instead of full ATR rebuild | pending |
-| 17 | FXSSI scrape timing tight | fxssiScraper.js | Duration tracking + >30s warning | pending |
-| 18 | WebSocket reconnect no backoff | index.html | Exponential backoff 1s → 60s | pending |
-| 20 | Agent API no timeout | index.html | 30s AbortController on fetch | pending |
-| 21 | Health email hardcoded | index.js | Moved to ALERT_EMAIL env var | pending |
+| 7 | No webhook authentication | index.js | Bearer token middleware on all /webhook/* routes (opt-in via WEBHOOK_SECRET env) | f8733e9 |
+| 8 | XSS via innerHTML | index.html | `esc()` sanitiser on symbol, label, reasoning, error msgs | f8733e9 |
+| 9 | Error stack leak on /api/score-now | index.js | Log internally, return generic error to client | f8733e9 |
+| 10 | Synchronous persist() blocks event loop | db.js | Async fs.writeFile with write coalescing | f8733e9 |
+| 14 | Gravity penalty double-dip | scorer.js | Removed +0.10 from scoreFXSSI (post-score gate handles it) | f8733e9 |
+| 15 | RR recalc discards FXSSI levels | scorer.js | Trim TP to cap/floor RR instead of full ATR rebuild | f8733e9 |
+| 17 | FXSSI scrape timing tight | fxssiScraper.js | Duration tracking + >30s warning | f8733e9 |
+| 18 | WebSocket reconnect no backoff | index.html | Exponential backoff 1s → 60s | f8733e9 |
+| 20 | Agent API no timeout | index.html | 30s AbortController on fetch | f8733e9 |
+| 21 | Health email hardcoded | index.js | Moved to ALERT_EMAIL env var | f8733e9 |
 
 ### Deferred issues
 
