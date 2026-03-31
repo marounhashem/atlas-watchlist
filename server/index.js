@@ -909,6 +909,22 @@ app.get('/api/rate-status', (req, res) => {
   res.json({ rates, differentials });
 });
 
+// Raw Myfxbook HTML test — returns status + first 2000 chars for debugging
+app.get('/api/rate-test', async (req, res) => {
+  try {
+    const r = await fetch('https://www.myfxbook.com/forex-economic-calendar/interest-rates', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html'
+      }
+    });
+    const text = await r.text();
+    res.json({ status: r.status, length: text.length, body: text.slice(0, 2000) });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Force rate scrape from Myfxbook
 app.get('/api/rate-force', async (req, res) => {
   try {
