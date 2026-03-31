@@ -29,13 +29,25 @@ async function init() {
   }
 }
 
+let _persistPending = false;
+let _persistWriting = false;
+
 function persist() {
   if (!db) return;
+  // Coalesce: if a write is already in flight, just flag that another is needed
+  if (_persistWriting) { _persistPending = true; return; }
+  _persistWriting = true;
   try {
     const data = db.export();
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    fs.writeFileSync(DB_PATH, Buffer.from(data));
+    fs.writeFile(DB_PATH, Buffer.from(data), (err) => {
+      _persistWriting = false;
+      if (err) console.error('[DB] Persist error:', err.message);
+      // If another persist was requested while we were writing, flush again
+      if (_persistPending) { _persistPending = false; persist(); }
+    });
   } catch (e) {
+    _persistWriting = false;
     console.error('[DB] Persist error:', e.message);
   }
 }

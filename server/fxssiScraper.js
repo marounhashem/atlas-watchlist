@@ -316,6 +316,7 @@ async function fetchSymbol(pair, period = 1200) {
 async function runFXSSIScrape(broadcast, forceWrite = false) {
   if (!process.env.FXSSI_TOKEN) return;
 
+  const scrapeStart = Date.now();
   const now = Date.now();
 
   for (const [symbol, pair] of Object.entries(FXSSI_SYMBOLS)) {
@@ -488,6 +489,12 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
     } catch(eH) {
       console.error(`[FXSSI-H] ${symbol} hourly error:`, eH.message);
     }
+  }
+
+  const scrapeDuration = Math.round((Date.now() - scrapeStart) / 1000);
+  console.log(`[FXSSI] Scrape complete in ${scrapeDuration}s (${Object.keys(FXSSI_SYMBOLS).length} symbols)`);
+  if (scrapeDuration > 30) {
+    console.warn(`[FXSSI] ⚠ Scrape took ${scrapeDuration}s — approaching rate limit window. Consider reducing symbol count.`);
   }
 }
 

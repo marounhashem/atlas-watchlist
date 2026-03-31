@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260331.2'; // fix: structScore all 6 TFs, structureZero hoisted, watch signal ID
+const SCORER_VERSION = '20260331.3'; // webhook auth, XSS sanitise, async persist, gravity dedupe, RR trim-not-recalc
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -151,11 +151,11 @@ function scoreFXSSI(data, direction) {
     if (inProfit < 35) score += 0.10;
   }
 
-  // 3. SL cluster gravity in direction
+  // 3. SL cluster / losing cluster / limit wall scoring
+  // NOTE: gravity direction bonus removed here — handled by post-score ×0.88 gate
+  // to avoid double-counting the same SL cluster data
   if (fxssi && data.close) {
     const cp = data.close;
-    if (direction === 'LONG'  && fxssi.nearestSLAbove?.price) score += 0.10;
-    if (direction === 'SHORT' && fxssi.nearestSLBelow?.price) score += 0.10;
     if (direction === 'LONG'  && fxssi.losingClusters?.some(l => l.price < cp)) score += 0.08;
     if (direction === 'SHORT' && fxssi.losingClusters?.some(l => l.price > cp)) score += 0.08;
     if (direction === 'LONG'  && fxssi.nearestLimitAbove?.price) score -= 0.08;
@@ -1356,14 +1356,40 @@ function scoreSymbol(symbol) {
   const rrMax = claudeOpt?.ideal_rr_max || 4.0;
 
   if (!rr || rr < rrMin || rr > rrMax) {
-    const slMult = claudeOpt?.sl_multiplier || 1.5;
-    const tpMult = claudeOpt?.tp_multiplier || 3.0;
-    if (direction === 'LONG') {
-      sl = Math.round((entry - atr * slMult) * 10000) / 10000;
-      tp = Math.round((entry + atr * tpMult) * 10000) / 10000;
+    const risk = Math.abs(entry - sl);
+    if (risk > 0 && sl && tp) {
+      // Trim TP to cap RR at rrMax, or extend TP to reach rrMin — preserve FXSSI-based SL
+      if (rr && rr > rrMax) {
+        // RR too high — pull TP closer (keep SL)
+        const dir = direction === 'LONG' ? 1 : -1;
+        tp = Math.round((entry + dir * risk * rrMax) * 10000) / 10000;
+      } else if (rr && rr < rrMin) {
+        // RR too low — push TP further (keep SL)
+        const dir = direction === 'LONG' ? 1 : -1;
+        tp = Math.round((entry + dir * risk * rrMin) * 10000) / 10000;
+      } else {
+        // rr is null/NaN — fall back to ATR-based recalc
+        const slMult = claudeOpt?.sl_multiplier || 1.5;
+        const tpMult = claudeOpt?.tp_multiplier || 3.0;
+        if (direction === 'LONG') {
+          sl = Math.round((entry - atr * slMult) * 10000) / 10000;
+          tp = Math.round((entry + atr * tpMult) * 10000) / 10000;
+        } else {
+          sl = Math.round((entry + atr * slMult) * 10000) / 10000;
+          tp = Math.round((entry - atr * tpMult) * 10000) / 10000;
+        }
+      }
     } else {
-      sl = Math.round((entry + atr * slMult) * 10000) / 10000;
-      tp = Math.round((entry - atr * tpMult) * 10000) / 10000;
+      // No valid SL — full ATR recalc
+      const slMult = claudeOpt?.sl_multiplier || 1.5;
+      const tpMult = claudeOpt?.tp_multiplier || 3.0;
+      if (direction === 'LONG') {
+        sl = Math.round((entry - atr * slMult) * 10000) / 10000;
+        tp = Math.round((entry + atr * tpMult) * 10000) / 10000;
+      } else {
+        sl = Math.round((entry + atr * slMult) * 10000) / 10000;
+        tp = Math.round((entry - atr * tpMult) * 10000) / 10000;
+      }
     }
     rr = calcRR(entry, sl, tp, direction);
   }

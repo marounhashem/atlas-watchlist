@@ -647,14 +647,22 @@ function setCached(symbol, type, data) {
 
 // Account size — persisted in localStorage-equivalent (in-memory for Railway)
 let accountSize = 10000;
+
+// ── XSS sanitisation ──────────────────────────────────────────────────────────
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 document.getElementById('account-size').addEventListener('change', e => {
   accountSize = Math.max(100, parseInt(e.target.value)||10000);
   renderSignals();
 });
 
+let _wsBackoff = 1000;
 function connect() {
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
+    _wsBackoff = 1000; // reset on successful connect
     document.getElementById('conn-status').textContent = 'LIVE';
     document.getElementById('dot').style.background = 'var(--proceed)';
     document.getElementById('webhook-url').textContent = location.origin+'/webhook/pine';
@@ -663,7 +671,8 @@ function connect() {
   ws.onclose = () => {
     document.getElementById('conn-status').textContent = 'RECONNECTING';
     document.getElementById('dot').style.background = 'var(--short)';
-    setTimeout(connect, 3000);
+    setTimeout(connect, _wsBackoff);
+    _wsBackoff = Math.min(_wsBackoff * 1.5, 60000); // backoff up to 60s
   };
 }
 
@@ -923,7 +932,7 @@ function renderRecommendations(sig) {
 
 function renderCard(sig, isPast=false) {
   const v=sig.verdict||'SKIP';
-  if(v==='CLOSED') return `<div class="card closed"><div class="ctop"><div><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span></div><span class="verdict vC">CLOSED</span></div><div style="font-size:9px;color:var(--muted)">${sig.reasoning||'Market closed'}</div></div>`;
+  if(v==='CLOSED') return `<div class="card closed"><div class="ctop"><div><span class="csym">${esc(sig.symbol)}</span><span class="clabel">${esc(sig.label)}</span></div><span class="verdict vC">CLOSED</span></div><div style="font-size:9px;color:var(--muted)">${esc(sig.reasoning||'Market closed')}</div></div>`;
 
   const d=sig.direction||'—';
   const bd=sig.breakdown||{};
@@ -957,7 +966,7 @@ function renderCard(sig, isPast=false) {
 
   return `<div class="card ${v.toLowerCase()} ${outcomeClass}" id="card-${sig.id||sig.symbol}">
     <div class="ctop">
-      <div style="display:flex;align-items:baseline;gap:8px;"><span class="csym">${sig.symbol}</span><span class="clabel">${sig.label||''}</span>${['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD','EURJPY','EURGBP','EURAUD','EURCHF','GBPJPY','GBPCHF','AUDJPY','ETHUSD'].includes(sig.symbol)?'<span class="asset-fx">FX</span>':''}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--dim);">${new Date(sig.ts).toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) + ' ' + new Date(sig.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>${sig.outcome==='ACTIVE'?'<span style="font-size:9px;font-weight:700;color:#ffd740;letter-spacing:.5px;border:1px solid #ffd74055;border-radius:3px;padding:1px 5px;">ACTIVE</span>':sig.outcome==='OPEN'?'<span style="font-size:9px;font-weight:600;color:var(--accent);letter-spacing:.5px;border:1px solid var(--accent-border);border-radius:3px;padding:1px 5px;">OPEN</span>':''}</div>
+      <div style="display:flex;align-items:baseline;gap:8px;"><span class="csym">${esc(sig.symbol)}</span><span class="clabel">${esc(sig.label)}</span>${['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD','EURJPY','EURGBP','EURAUD','EURCHF','GBPJPY','GBPCHF','AUDJPY','ETHUSD'].includes(sig.symbol)?'<span class="asset-fx">FX</span>':''}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--dim);">${new Date(sig.ts).toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) + ' ' + new Date(sig.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>${sig.outcome==='ACTIVE'?'<span style="font-size:9px;font-weight:700;color:#ffd740;letter-spacing:.5px;border:1px solid #ffd74055;border-radius:3px;padding:1px 5px;">ACTIVE</span>':sig.outcome==='OPEN'?'<span style="font-size:9px;font-weight:600;color:var(--accent);letter-spacing:.5px;border:1px solid var(--accent-border);border-radius:3px;padding:1px 5px;">OPEN</span>':''}</div>
       <div style="display:flex;align-items:center;gap:6px;">${pastBadge}${refineHtml}${outcomeHtml}${timeAgo?`<span style="font-size:8px;color:var(--muted)">${timeAgo}</span>`:''}<span class="verdict ${vcls}">${v}</span></div>
     </div>
     <div class="sbar"><div class="sbfill ${scls}" style="width:${sig.score||0}%"></div></div>
@@ -972,7 +981,7 @@ function renderCard(sig, isPast=false) {
     ${bd.bias!=null?`<div class="bkd">
       ${['bias','fxssi','ob','session'].map(k=>`<div class="bi"><span class="bl">${{bias:'Pine',fxssi:'FXSSI',ob:'OB',session:'Session'}[k]}</span><div class="bw"><div class="bf" style="width:${Math.round((bd[k]||0)*100)}%"></div></div></div>`).join('')}
     </div>`:''}
-    ${sig.reasoning?`<div class="reason">${sig.reasoning}</div>`:''}
+    ${sig.reasoning?`<div class="reason">${esc(sig.reasoning)}</div>`:''}
     <div class="card-actions">
       ${sig.outcome==='ACTIVE'?`<span style="font-size:9px;color:#ffd740;letter-spacing:.5px;">● MONITORING TP/SL</span>`:''}
       ${renderRecommendations(sig)}
@@ -1093,11 +1102,15 @@ Calculate and return ONLY this JSON structure (no explanation, no markdown):
   };
 
   try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 30000);
     const res = await fetch('/api/agent', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({type, prompt: prompts[type], symbol: sig.symbol, accountSize: acct})
+      body:JSON.stringify({type, prompt: prompts[type], symbol: sig.symbol, accountSize: acct}),
+      signal: ac.signal
     });
+    clearTimeout(timer);
     const data = await res.json();
     setCached(sig.symbol, type, data.result);
     if(type==='risk') renderRisk(box, data.result, sig, acct);
@@ -1108,7 +1121,7 @@ Calculate and return ONLY this JSON structure (no explanation, no markdown):
       box.innerHTML += `<div style="font-size:8px;color:var(--muted);text-align:right;margin-top:4px;">live · cached for ${mins}m</div>`;
     }
   } catch(e) {
-    box.innerHTML = `<div style="color:var(--short);font-size:9px;">Agent error: ${e.message}</div>`;
+    box.innerHTML = `<div style="color:var(--short);font-size:9px;">Agent error: ${esc(e.message)}</div>`;
   }
 }
 
