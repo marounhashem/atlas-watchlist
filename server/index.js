@@ -806,6 +806,39 @@ app.get('/api/macro-context', (req, res) => {
   res.json(getMacroContext());
 });
 
+// Raw Claude API test for macro — returns full API response for debugging
+app.get('/api/macro-test', async (req, res) => {
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 400,
+        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        system: 'You are a macro analyst. Search for current market conditions and return ONLY a JSON object.',
+        messages: [{ role: 'user', content: 'Search: "gold XAU price macro outlook today". Return ONLY this JSON: {"sentiment":"BULLISH|BEARISH|NEUTRAL","strength":5,"summary":"one sentence"}' }]
+      })
+    });
+    const data = await response.json();
+    res.json({
+      status: response.status,
+      stop_reason: data.stop_reason,
+      content_blocks: data.content?.length,
+      block_types: data.content?.map(b => b.type),
+      text_blocks: data.content?.filter(b => b.type === 'text').map(b => b.text),
+      error: data.error,
+      raw_first_500: JSON.stringify(data).slice(0, 500)
+    });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 app.get('/api/macro-debug', (req, res) => {
   try {
     const stored = db.getStoredMacroContext();
