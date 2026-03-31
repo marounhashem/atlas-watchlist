@@ -1157,6 +1157,21 @@ server.listen(PORT, () => {
         .then(() => console.log('[Startup] Initial FXSSI scrape complete — order book ready'))
         .catch(e => console.error('[Startup] FXSSI scrape error:', e.message));
     }, 2000);
+    // Seed COT data on first deploy if table is empty
+    setTimeout(async () => {
+      try {
+        const { getLatestCOT } = require('./cotFetcher');
+        const goldCOT = getLatestCOT('GOLD');
+        if (!goldCOT) {
+          console.log('[Startup] COT table empty — running initial fetch...');
+          const { runCOTFetch } = require('./cotFetcher');
+          await runCOTFetch();
+          console.log('[Startup] Initial COT fetch complete');
+        }
+      } catch(e) {
+        console.error('[Startup] COT fetch error:', e.message);
+      }
+    }, 5000);
     // Expire OPEN signals from old scorer versions — keeps board clean after deploys
     // ACTIVE signals (real trades) are never auto-expired
     try {
