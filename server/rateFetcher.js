@@ -1,19 +1,25 @@
 // Central Bank Interest Rate Tracker
-// Fetches rates from API Ninjas, calculates pair differentials
+// Scrapes Myfxbook interest rates page, falls back to hardcoded rates
 // Used by scorer for carry trade alignment and macro context enrichment
 
-const RATE_API = 'https://api.api-ninjas.com/v1/interestrate';
+const MYFXBOOK_URL = 'https://www.myfxbook.com/forex-economic-calendar/interest-rates';
 
-// Map currencies to API Ninjas central bank names
-const RATE_ENDPOINTS = {
-  USD: 'central_bank_us',
-  EUR: 'central_bank_euro_area',
-  GBP: 'central_bank_uk',
-  JPY: 'central_bank_japan',
-  CHF: 'central_bank_switzerland',
-  CAD: 'central_bank_canada',
-  AUD: 'central_bank_australia',
-  NZD: 'central_bank_new_zealand'
+// Country name → currency mapping (matches Myfxbook table rows)
+const COUNTRY_MAP = {
+  'United States':  'USD',
+  'Euro Zone':      'EUR',
+  'United Kingdom': 'GBP',
+  'Japan':          'JPY',
+  'Switzerland':    'CHF',
+  'Canada':         'CAD',
+  'Australia':      'AUD',
+  'New Zealand':    'NZD'
+};
+
+// Fallback rates — updated manually when central banks announce
+const FALLBACK_RATES = {
+  USD: 4.33, EUR: 2.65, GBP: 4.50, JPY: 0.50,
+  CHF: 0.25, CAD: 2.75, AUD: 4.10, NZD: 3.75
 };
 
 // Map ATLAS pair symbols to base/quote currencies for differential calc
@@ -34,106 +40,146 @@ const RATE_PAIRS = {
   AUDJPY: { base: 'AUD', quote: 'JPY' }
 };
 
-// In-memory cache: { currency: { ratePct, lastUpdated, ts } }
+// In-memory cache: { currency: { ratePct, source, ts } }
 const rateCache = {};
 
-async function fetchRate(currency, bankName) {
-  const apiKey = process.env.INTEREST_RATE_API_KEY;
-  if (!apiKey) return null;
-
-  const url = `${RATE_API}?name=${encodeURIComponent(bankName)}`;
-  const res = await fetch(url, {
-    headers: { 'X-Api-Key': apiKey, 'Accept': 'application/json' }
+// ── Scrape Myfxbook interest rates page ─────────────────────────────────────
+async function scrapeMyfxbook() {
+  console.log('[Rate] Scraping Myfxbook interest rates...');
+  const res = await fetch(MYFXBOOK_URL, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+      'Accept': 'text/html'
+    }
   });
 
-  console.log(`[Rate] ${currency} HTTP ${res.status}`);
-
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    console.error(`[Rate] ${currency} error: ${body.slice(0, 300)}`);
+    console.error(`[Rate] Myfxbook HTTP ${res.status}`);
     return null;
   }
 
-  const data = await res.json();
-  console.log(`[Rate] ${currency} raw response: ${JSON.stringify(data).slice(0, 400)}`);
+  const html = await res.text();
+  console.log(`[Rate] Myfxbook HTML length: ${html.length}`);
 
-  // API Ninjas v1 returns: { central_bank_rates: [{ central_bank, country, rate_pct, last_updated }] }
-  const rates = data.central_bank_rates || (Array.isArray(data) ? data : null);
-  if (!rates || rates.length === 0) {
-    console.log(`[Rate] ${currency} — no rates array in response`);
-    return null;
+  const rates = {};
+
+  for (const [country, currency] of Object.entries(COUNTRY_MAP)) {
+    try {
+      // Find the country name in the HTML, then extract the rate value nearby
+      // Myfxbook table rows contain country name and rate percentage
+      // Pattern: country name appears, followed by a rate like "4.33%" in a nearby cell
+      const countryIdx = html.indexOf(country);
+      if (countryIdx === -1) {
+        console.log(`[Rate] ${currency} — "${country}" not found in HTML`);
+        continue;
+      }
+
+      // Look for percentage pattern within 500 chars after country name
+      const searchWindow = html.slice(countryIdx, countryIdx + 500);
+      // Match patterns like: >4.33%< or >4.33 %< or "4.33%" or just digits with %
+      const rateMatch = searchWindow.match(/(\d+\.?\d*)\s*%/);
+      if (rateMatch) {
+        const ratePct = parseFloat(rateMatch[1]);
+        if (!isNaN(ratePct) && ratePct >= 0 && ratePct < 30) { // sanity check
+          rates[currency] = ratePct;
+          console.log(`[Rate] ✓ ${currency} (${country}): ${ratePct}%`);
+        }
+      } else {
+        console.log(`[Rate] ${currency} — no rate pattern found near "${country}"`);
+      }
+    } catch(e) {
+      console.error(`[Rate] ${currency} parse error:`, e.message);
+    }
   }
 
-  // First result is the match (we queried by exact name)
-  const match = rates[0];
-  console.log(`[Rate] ${currency} matched: ${match.central_bank || match.name} = ${match.rate_pct ?? match.rate}%`);
-
-  return {
-    ratePct: parseFloat(match.rate_pct ?? match.rate ?? 0),
-    lastUpdated: match.last_updated || match.date || null
-  };
+  return Object.keys(rates).length > 0 ? rates : null;
 }
 
 async function runRateFetch() {
-  const apiKey = process.env.INTEREST_RATE_API_KEY;
-  if (!apiKey) {
-    console.log('[Rate] No INTEREST_RATE_API_KEY — skipping rate fetch');
-    return { fetched: 0, total: Object.keys(RATE_ENDPOINTS).length, errors: [] };
-  }
-
-  console.log('[Rate] Fetching rates for', Object.keys(RATE_ENDPOINTS).length, 'currencies');
+  console.log('[Rate] Starting rate fetch for', Object.keys(COUNTRY_MAP).length, 'currencies');
   let fetched = 0;
+  let source = 'scrape';
   const errors = [];
 
-  for (const [currency, bankName] of Object.entries(RATE_ENDPOINTS)) {
+  // Try scraping Myfxbook first
+  let scraped = null;
+  try {
+    scraped = await scrapeMyfxbook();
+  } catch(e) {
+    console.error('[Rate] Scrape failed:', e.message);
+  }
+
+  for (const currency of Object.keys(FALLBACK_RATES)) {
+    let ratePct = scraped?.[currency];
+    let rateSource = 'myfxbook';
+
+    // Fall back to hardcoded if scrape missed this currency
+    if (ratePct == null) {
+      ratePct = FALLBACK_RATES[currency];
+      rateSource = 'fallback';
+      if (!scraped) errors.push({ currency, error: 'scrape failed, using fallback' });
+    }
+
+    rateCache[currency] = { ratePct, source: rateSource, ts: Date.now() };
+    fetched++;
+
     try {
-      const result = await fetchRate(currency, bankName);
-      if (result && result.ratePct != null) {
-        rateCache[currency] = { ...result, ts: Date.now() };
-        fetched++;
-        console.log(`[Rate] ✓ ${currency} — ${result.ratePct}% (updated: ${result.lastUpdated})`);
+      const { upsertRateData } = require('./db');
+      upsertRateData(currency, { ratePct, lastUpdated: new Date().toISOString().slice(0, 10) });
+    } catch(e) { console.error(`[Rate] ${currency} DB write error:`, e.message); }
 
-        try {
-          const { upsertRateData } = require('./db');
-          upsertRateData(currency, result);
-        } catch(e) { console.error(`[Rate] ${currency} DB write error:`, e.message); }
-      } else {
-        errors.push({ currency, error: 'no rate returned' });
+    console.log(`[Rate] ${currency}: ${ratePct}% (${rateSource})`);
+  }
+
+  console.log(`[Rate] Fetch complete — ${fetched}/${Object.keys(FALLBACK_RATES).length} currencies (source: ${scraped ? 'myfxbook' : 'fallback'})`);
+  return { fetched, total: Object.keys(FALLBACK_RATES).length, source: scraped ? 'myfxbook' : 'fallback', errors };
+}
+
+// ── Load from DB on startup (no scrape) ─────────────────────────────────────
+function loadRatesFromDB() {
+  let loaded = 0;
+  const maxAge = 25 * 60 * 60 * 1000; // 25 hours
+  for (const currency of Object.keys(FALLBACK_RATES)) {
+    if (rateCache[currency]) { loaded++; continue; }
+    try {
+      const { getRateData } = require('./db');
+      const row = getRateData(currency);
+      if (row && (Date.now() - row.ts) < maxAge) {
+        rateCache[currency] = {
+          ratePct:     row.rate_pct,
+          source:      'db',
+          ts:          row.ts
+        };
+        loaded++;
       }
+    } catch(e) {}
+  }
 
-      await new Promise(r => setTimeout(r, 300));
-    } catch(e) {
-      errors.push({ currency, error: e.message });
-      console.error(`[Rate] ✗ ${currency} error:`, e.message);
+  // Fill gaps with hardcoded fallback
+  for (const [currency, rate] of Object.entries(FALLBACK_RATES)) {
+    if (!rateCache[currency]) {
+      rateCache[currency] = { ratePct: rate, source: 'fallback', ts: 0 };
     }
   }
 
-  console.log(`[Rate] Fetch complete — ${fetched}/${Object.keys(RATE_ENDPOINTS).length} currencies`);
-  return { fetched, total: Object.keys(RATE_ENDPOINTS).length, errors };
+  console.log(`[Rate] Loaded ${loaded}/${Object.keys(FALLBACK_RATES).length} from DB, rest from fallback`);
+  return loaded;
 }
 
-// ── Get cached or DB rate for a currency ────────────────────────────────────
+// ── Get rate for a currency ─────────────────────────────────────────────────
 function getCurrencyRate(currency) {
   if (rateCache[currency]) return rateCache[currency];
-  try {
-    const { getRateData } = require('./db');
-    const row = getRateData(currency);
-    if (row) {
-      rateCache[currency] = {
-        ratePct:     row.rate_pct,
-        lastUpdated: row.last_updated,
-        ts:          row.ts
-      };
-      return rateCache[currency];
-    }
-  } catch(e) {}
+  // Final fallback
+  if (FALLBACK_RATES[currency]) {
+    return { ratePct: FALLBACK_RATES[currency], source: 'fallback', ts: 0 };
+  }
   return null;
 }
 
 // ── Get all rates ───────────────────────────────────────────────────────────
 function getLatestRates() {
   const rates = {};
-  for (const currency of Object.keys(RATE_ENDPOINTS)) {
+  for (const currency of Object.keys(FALLBACK_RATES)) {
     const r = getCurrencyRate(currency);
     if (r) rates[currency] = r;
   }
@@ -150,7 +196,7 @@ function getRateDifferential(symbol) {
   if (!baseRate || !quoteRate) return null;
 
   const diffPct = baseRate.ratePct - quoteRate.ratePct;
-  const diffBps = Math.round(diffPct * 100); // basis points
+  const diffBps = Math.round(diffPct * 100);
   const absBps = Math.abs(diffBps);
 
   let direction, strength;
@@ -165,8 +211,6 @@ function getRateDifferential(symbol) {
     else                   strength = 'WEAK';
   }
 
-  // Build summary
-  const favoured = diffBps > 0 ? pair.base : pair.quote;
   const carryDir = diffBps > 0 ? 'long' : 'short';
   const summary = `${pair.base} ${diffBps > 0 ? '+' : ''}${diffBps}bps vs ${pair.quote} — ${strength.toLowerCase()} carry favours ${symbol} ${carryDir}`;
 
@@ -182,4 +226,4 @@ function getRateDifferential(symbol) {
   };
 }
 
-module.exports = { runRateFetch, getLatestRates, getRateDifferential };
+module.exports = { runRateFetch, loadRatesFromDB, getLatestRates, getRateDifferential };

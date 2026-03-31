@@ -14,7 +14,7 @@ const { runLearningCycle } = require('./learner');
 const claudeLearner = require('./claudeLearner');
 const { runFXSSIScrape, processBridgePayload, getFxssiCacheAge } = require('./fxssiScraper');
 const { runCOTFetch, getLatestCOT, getCOTSummary, getCOTCurrencies } = require('./cotFetcher');
-const { runRateFetch, getLatestRates, getRateDifferential } = require('./rateFetcher');
+const { runRateFetch, loadRatesFromDB, getLatestRates, getRateDifferential } = require('./rateFetcher');
 const { SYMBOLS } = require('./config');
 
 const app = express();
@@ -909,24 +909,30 @@ app.get('/api/rate-status', (req, res) => {
   res.json({ rates, differentials });
 });
 
-// Raw rate API test — returns raw API Ninjas response for debugging
-app.get('/api/rate-test', async (req, res) => {
-  const apiKey = process.env.INTEREST_RATE_API_KEY;
-  if (!apiKey) return res.json({ error: 'No INTEREST_RATE_API_KEY set' });
-  try {
-    const url = 'https://api.api-ninjas.com/v1/interestrate?name=central_bank_us';
-    const r = await fetch(url, { headers: { 'X-Api-Key': apiKey, 'Accept': 'application/json' } });
-    const text = await r.text();
-    try { res.json({ status: r.status, body: JSON.parse(text) }); }
-    catch(e) { res.json({ status: r.status, raw: text.slice(0, 2000) }); }
-  } catch(e) { res.json({ error: e.message }); }
-});
-
-// Force rate fetch
+// Force rate scrape from Myfxbook
 app.get('/api/rate-force', async (req, res) => {
   try {
     const result = await runRateFetch();
     res.json({ ok: true, ...result });
+  } catch(e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// Manual rate override — for BOJ/ECB announcements before next API fetch
+// POST /api/rate-update { currency: "JPY", ratePct: 0.75 }
+app.post('/api/rate-update', (req, res) => {
+  const { currency, ratePct } = req.body;
+  if (!currency || ratePct == null) return res.status(400).json({ error: 'Need currency and ratePct' });
+  const cur = currency.toUpperCase();
+  try {
+    const { upsertRateData } = require('./db');
+    upsertRateData(cur, { ratePct: parseFloat(ratePct), lastUpdated: new Date().toISOString().slice(0, 10), source: 'manual' });
+    // Also update in-memory cache
+    const rateMod = require('./rateFetcher');
+    // Force cache refresh by clearing and reloading
+    rateMod.loadRatesFromDB();
+    res.json({ ok: true, currency: cur, ratePct: parseFloat(ratePct) });
   } catch(e) {
     res.json({ ok: false, error: e.message });
   }
@@ -1284,20 +1290,18 @@ server.listen(PORT, () => {
         console.error('[Startup] COT seed error:', e.message, e.stack);
       }
     }, 5000);
-    // Seed rate data on startup if empty
+    // Load rate data from DB on startup — scrape only if DB empty/stale
     setTimeout(() => {
       try {
-        const rateMod = require('./rateFetcher');
-        const rates = rateMod.getLatestRates();
-        console.log('[Startup] Rate seed check —', Object.keys(rates).length, 'currencies cached');
-        if (Object.keys(rates).length === 0) {
-          console.log('[Startup] Rate table empty — running initial fetch...');
-          rateMod.runRateFetch()
-            .then(() => console.log('[Startup] Initial rate fetch complete'))
-            .catch(e => console.error('[Startup] Rate fetch error:', e.message));
+        const loaded = loadRatesFromDB();
+        if (loaded === 0) {
+          console.log('[Startup] No fresh rates in DB — scraping Myfxbook...');
+          runRateFetch()
+            .then(r => console.log(`[Startup] Rate scrape complete — ${r.fetched} currencies (${r.source})`))
+            .catch(e => console.error('[Startup] Rate scrape error:', e.message));
         }
       } catch(e) {
-        console.error('[Startup] Rate seed error:', e.message);
+        console.error('[Startup] Rate load error:', e.message);
       }
     }, 8000);
     // Expire OPEN signals from old scorer versions — keeps board clean after deploys
