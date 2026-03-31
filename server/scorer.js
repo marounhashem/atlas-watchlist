@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260331.6'; // rate differentials via Myfxbook scrape — carry gate + macro injection
+const SCORER_VERSION = '20260331.7'; // central bank calendar — event risk gate, forward guidance, consensus fetch
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -1521,7 +1521,35 @@ function scoreSymbol(symbol) {
   // Structure 0/5 caps verdict to WATCH maximum — cannot be PROCEED
   const macroRawVerdict = macroAdjustedScore >= macroEffectiveMin ? 'PROCEED'
     : macroAdjustedScore >= macroEffectiveMin - 8 ? 'WATCH' : 'SKIP';
-  const macroVerdict = structureZero && macroRawVerdict === 'PROCEED' ? 'WATCH' : macroRawVerdict;
+  let macroVerdict = structureZero && macroRawVerdict === 'PROCEED' ? 'WATCH' : macroRawVerdict;
+
+  // ── Central bank event risk gate ────────────────────────────────────────────
+  // Cap to WATCH if a central bank meeting is within 48h for any affected currency
+  let eventRiskNote = '';
+  try {
+    const { isPairEventRisk } = require('./centralBankCalendar');
+    const eventRisk = isPairEventRisk(symbol, 48);
+    if (eventRisk && macroVerdict === 'PROCEED') {
+      macroVerdict = 'WATCH';
+      eventRiskNote = `⚠ ${eventRisk.bank} meeting in ${eventRisk.daysUntil < 1 ? '<24h' : eventRisk.daysUntil + 'd'} — event risk, capped to WATCH`;
+      console.log(`[Scorer] ${symbol} ${direction} — ${eventRiskNote}`);
+    }
+  } catch(e) {}
+
+  // ── Forward guidance from consensus ─────────────────────────────────────────
+  try {
+    const { getConsensusImpact } = require('./centralBankCalendar');
+    const consensus = getConsensusImpact(symbol, direction);
+    if (consensus) {
+      if (consensus.impact === 'CONFIRMS') {
+        macroAdjustedScore = Math.round(macroAdjustedScore * 1.08);
+        eventRiskNote += (eventRiskNote ? ' · ' : '') + `${consensus.bank} ${consensus.decision} expected — confirms ${direction}`;
+      } else if (consensus.impact === 'CONTRADICTS') {
+        macroAdjustedScore = Math.round(macroAdjustedScore * 0.88);
+        eventRiskNote += (eventRiskNote ? ' · ' : '') + `${consensus.bank} ${consensus.decision} expected — contradicts ${direction}`;
+      }
+    }
+  } catch(e) {}
 
   const fxssiStale = hasFxssi && fxssiAge > FXSSI_MAX_AGE_MS;
 
@@ -1547,9 +1575,10 @@ function scoreSymbol(symbol) {
     }
   }
 
-  const finalReasoning = fxssiStale
+  let finalReasoning = fxssiStale
     ? `⚠ FXSSI stale (${Math.round(fxssiAge/60000)}m) — OB scoring neutral · ` + reasoning
     : reasoning;
+  if (eventRiskNote) finalReasoning = eventRiskNote + ' · ' + finalReasoning;
 
   return {
     symbol, label: cfg.label, direction, score: macroAdjustedScore, verdict: macroVerdict,

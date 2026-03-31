@@ -10,7 +10,16 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260331.6'`
+`SCORER_VERSION = '20260331.7'`
+
+Changes in 20260331.7:
+- Central bank meeting calendar — server/centralBankCalendar.js
+- Hardcoded 2026 meeting dates for Fed, ECB, BOE, BOJ, RBA, RBNZ, BOC, SNB
+- Event risk gate: signals capped to WATCH when CB meeting within 48h
+- Forward guidance: consensus HIKE/CUT adjusts score ×1.08 (confirms) or ×0.88 (contradicts)
+- Consensus auto-fetched via Claude web search for meetings within 21 days
+- New table: cb_consensus, new endpoint: GET /api/cb-calendar
+- cb_consensus stores expected_decision, expected_bps, confidence per meeting
 
 Changes in 20260331.6:
 - Central bank rate differentials — server/rateFetcher.js scrapes Trading Economics
@@ -103,6 +112,7 @@ Changes in 20260331.2:
 - **Claude learning** uses Haiku for cost efficiency. Weight adjustments are capped at ±0.03 per cycle, 6-hour minimum between cycles, 30+ trades required per symbol.
 - **Webhook auth** is opt-in via `WEBHOOK_SECRET` env var. When set, `/webhook/pine` and `/webhook/fxssi` require `req.body.secret` to match. Include `"secret": "<value>"` in the JSON payload. `/webhook/fxssi-rich` has no auth (browser extension backup).
 - **persist()** is async with write coalescing — multiple rapid persist() calls collapse into a single disk write. The 15s interval flush remains as a safety net.
+- **Central bank calendar** hardcoded 2026 meeting dates for 8 banks. Event risk gate caps signals to WATCH within 48h of a meeting. Consensus (HIKE/CUT/HOLD) auto-fetched via Claude web search for meetings within 21 days — stored in `cb_consensus` table. Forward guidance adjusts score ×1.08 (confirms direction) or ×0.88 (contradicts).
 - **Rate differentials** scraped daily from Trading Economics `var data` JSON (no API key needed). 8 currencies with hardcoded fallback. Scorer applies carry gate: >300bps against signal → ×0.88 penalty, >500bps → ×0.80. Strong carry with signal → ×1.05 bonus. Commodities and crypto have no rate differential — excluded automatically. Manual override via POST `/api/rate-update` for intra-day central bank announcements.
 - **COT data** fetched weekly from CFTC public API (disaggregated futures). Stored at **currency level** (EUR, GBP, JPY, CHF, CAD, AUD, NZD, GOLD, SILVER, OIL) — not pair level. Resolved to pair level on read: simple pairs return one leg, USD/XXX pairs invert interpretation, crosses (EURGBP, EURJPY etc) compare both legs. Crypto (BTCUSD, ETHUSD) and indices (US30, US100) have no COT coverage.
 

@@ -125,7 +125,21 @@ function initSchema() {
   db.run(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY, value TEXT, ts INTEGER
   )`);
-  // Central bank interest rates — daily fetch from API Ninjas
+  // Central bank consensus — market expectations for upcoming meetings
+  db.run(`CREATE TABLE IF NOT EXISTS cb_consensus (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    currency TEXT NOT NULL,
+    bank TEXT NOT NULL,
+    meeting_date TEXT NOT NULL,
+    expected_decision TEXT,
+    expected_bps INTEGER,
+    confidence TEXT,
+    summary TEXT,
+    source TEXT,
+    ts INTEGER NOT NULL
+  )`);
+
+  // Central bank interest rates — daily fetch from Trading Economics
   db.run(`CREATE TABLE IF NOT EXISTS rate_data (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     currency TEXT NOT NULL,
@@ -747,6 +761,25 @@ function updateWatchOutcome(id, outcome, pnlPct) {
   persist();
 }
 
+// ── Central bank consensus ───────────────────────────────────────────────────
+function upsertConsensus(currency, meetingDate, data) {
+  // Replace existing consensus for same currency+meeting
+  run('DELETE FROM cb_consensus WHERE currency=? AND meeting_date=?', [currency, meetingDate]);
+  run(`INSERT INTO cb_consensus (currency, bank, meeting_date, expected_decision, expected_bps, confidence, summary, source, ts)
+    VALUES (?,?,?,?,?,?,?,?,?)`,
+    [currency, data.bank, meetingDate, data.expected_decision, data.expected_bps || 0,
+     data.confidence || 'LOW', data.summary || '', data.source || 'claude', Date.now()]);
+  persist();
+}
+
+function getConsensus(currency) {
+  return get('SELECT * FROM cb_consensus WHERE currency=? ORDER BY ts DESC LIMIT 1', [currency]);
+}
+
+function getAllConsensus() {
+  return all('SELECT * FROM cb_consensus WHERE id IN (SELECT MAX(id) FROM cb_consensus GROUP BY currency) ORDER BY meeting_date');
+}
+
 // ── Rate data ────────────────────────────────────────────────────────────────
 function upsertRateData(currency, data) {
   run(`INSERT INTO rate_data (currency, rate_pct, last_updated, ts) VALUES (?,?,?,?)`,
@@ -796,5 +829,6 @@ module.exports = {
   getSetting, setSetting,
   insertWatchSignal, getRecentWatchSignals, updateWatchOutcome,
   upsertCOTData, getCOTData, getAllCOTData,
-  upsertRateData, getRateData, getAllRateData
+  upsertRateData, getRateData, getAllRateData,
+  upsertConsensus, getConsensus, getAllConsensus
 };

@@ -15,6 +15,7 @@ const claudeLearner = require('./claudeLearner');
 const { runFXSSIScrape, processBridgePayload, getFxssiCacheAge } = require('./fxssiScraper');
 const { runCOTFetch, getLatestCOT, getCOTSummary, getCOTCurrencies } = require('./cotFetcher');
 const { runRateFetch, loadRatesFromDB, getLatestRates, getRateDifferential } = require('./rateFetcher');
+const { getUpcomingMeetings, isPairEventRisk, getMeetingContext } = require('./centralBankCalendar');
 const { SYMBOLS } = require('./config');
 
 const app = express();
@@ -948,6 +949,26 @@ app.get('/api/rate-force', async (req, res) => {
   }
 });
 
+// Central bank calendar — upcoming meetings with consensus
+app.get('/api/cb-calendar', (req, res) => {
+  const days = parseInt(req.query.days) || 30;
+  const upcoming = getUpcomingMeetings(days);
+  // Attach consensus where available
+  const { getAllConsensus } = require('./db');
+  const allCons = getAllConsensus();
+  const consMap = {};
+  for (const c of allCons) consMap[c.currency + '_' + c.meeting_date] = c;
+  const result = upcoming.map(m => {
+    const cons = consMap[m.currency + '_' + m.date];
+    return {
+      ...m,
+      consensus: cons ? `${cons.expected_decision} ${cons.expected_bps ? cons.expected_bps + 'bps' : ''} (${cons.confidence} confidence)` : null,
+      summary: cons?.summary || null
+    };
+  });
+  res.json({ upcoming: result });
+});
+
 // Manual rate override — for BOJ/ECB announcements before next API fetch
 // POST /api/rate-update { currency: "JPY", ratePct: 0.75 }
 app.post('/api/rate-update', (req, res) => {
@@ -1195,6 +1216,47 @@ async function runMacroContextFetch(broadcast) {
   }
 
   console.log(`[Macro] Context refresh complete for ${Object.keys(macroContext).length} symbols`);
+
+  // ── Consensus fetch for upcoming meetings (within 21 days) ────────────────
+  // Only fires when meetings are near — typically 0-2 calls per day
+  if (!process.env.ANTHROPIC_API_KEY) return;
+  try {
+    const cbUpcoming = getUpcomingMeetings(21);
+    for (const meeting of cbUpcoming) {
+      try {
+        const query = `${meeting.bank} ${meeting.currency} interest rate decision ${meeting.date} market consensus expectations`;
+        console.log(`[Macro] Fetching consensus for ${meeting.bank} ${meeting.date}...`);
+        const consRes = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': process.env.ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 300,
+            tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+            system: 'You are a rates analyst. Search for the market consensus and return ONLY a JSON object. No markdown.',
+            messages: [{ role: 'user', content: `Search: "${query}". Return ONLY this JSON:
+{"expected_decision":"HIKE|CUT|HOLD","expected_bps":25,"confidence":"HIGH|MEDIUM|LOW","summary":"one sentence max 20 words"}` }]
+          })
+        });
+        const consData = await consRes.json();
+        const consText = (consData.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+        const consClean = consText.replace(/```json|```/g, '').trim();
+        const cons = JSON.parse(consClean);
+        console.log(`[Macro] ${meeting.bank} consensus: ${cons.expected_decision} ${cons.expected_bps || 0}bps (${cons.confidence})`);
+        const { upsertConsensus } = require('./db');
+        upsertConsensus(meeting.currency, meeting.date, { bank: meeting.bank, ...cons, source: 'claude' });
+        await new Promise(r => setTimeout(r, 1500));
+      } catch(e) {
+        console.error(`[Macro] ${meeting.bank} consensus error:`, e.message);
+      }
+    }
+  } catch(e) {
+    console.error('[Macro] Consensus fetch error:', e.message);
+  }
 }
 
 function getMacroContext() { return macroContext; }
