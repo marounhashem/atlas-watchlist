@@ -833,25 +833,24 @@ app.get('/api/cot-status', (req, res) => {
   res.json({ currencies, pairs });
 });
 
-// Force COT fetch — waits for completion and returns results
+// Force COT fetch — waits for completion and returns results with per-currency errors
 app.post('/api/cot-force', async (req, res) => {
   try {
-    await runCOTFetch();
+    const result = await runCOTFetch();
     const { getAllCOTData } = require('./db');
     const rows = getAllCOTData();
-    res.json({ ok: true, fetched: rows.length, currencies: rows.map(r => r.symbol) });
+    res.json({ ok: true, ...result, stored: rows.length, currencies: rows.map(r => r.symbol) });
   } catch(e) {
     console.error('[COT] Manual fetch error:', e.message);
     res.json({ ok: false, error: e.message });
   }
 });
-// Keep GET for backwards compatibility
 app.get('/api/cot-force', async (req, res) => {
   try {
-    await runCOTFetch();
+    const result = await runCOTFetch();
     const { getAllCOTData } = require('./db');
     const rows = getAllCOTData();
-    res.json({ ok: true, fetched: rows.length, currencies: rows.map(r => r.symbol) });
+    res.json({ ok: true, ...result, stored: rows.length, currencies: rows.map(r => r.symbol) });
   } catch(e) {
     res.json({ ok: false, error: e.message });
   }
@@ -859,9 +858,9 @@ app.get('/api/cot-force', async (req, res) => {
 
 // Raw CFTC API test — single fetch for EUR, returns full response for debugging
 app.get('/api/cot-test', async (req, res) => {
-  const testUrl = "https://publicreporting.cftc.gov/resource/jun7-fc8e.json?" +
-    "$where=" + encodeURIComponent("market_and_exchange_names='EURO FX - CHICAGO MERCANTILE EXCHANGE'") +
-    "&$order=report_date_as_yyyy_mm_dd%20DESC&$limit=1";
+  const testUrl = "https://publicreporting.cftc.gov/api/explore/dataset/fut_disagg_pos_hist_2006_to_present/records" +
+    "?limit=1&order_by=report_date_as_yyyy_mm_dd+desc&refine=market_and_exchange_names=" +
+    encodeURIComponent("EURO FX - CHICAGO MERCANTILE EXCHANGE");
   try {
     console.log('[COT-test] Fetching:', testUrl);
     const r = await fetch(testUrl, { headers: { 'Accept': 'application/json' } });

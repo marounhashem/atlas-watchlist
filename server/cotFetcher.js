@@ -3,8 +3,8 @@
 // Stored at CURRENCY level (EUR, GBP, JPY) not pair level (EURUSD, GBPUSD)
 // Resolved to pair level on read via getLatestCOT(symbol)
 
-// CFTC Socrata SODA API — Disaggregated Futures (Combined) dataset
-const COT_API = 'https://publicreporting.cftc.gov/resource/jun7-fc8e.json';
+// CFTC public explore API — Disaggregated Futures Positions (2006-present)
+const COT_BASE = 'https://publicreporting.cftc.gov/api/explore/dataset/fut_disagg_pos_hist_2006_to_present/records';
 
 // Map currency codes to CFTC contract names — stored at currency level
 const COT_CURRENCIES = {
@@ -53,10 +53,9 @@ const PAIR_MAP = {
 const cotCache = {}; // { currency: { netNonComm, netComm, ... , ts } }
 
 async function fetchCOTForCurrency(currency, contractName) {
-  // SODA API uses $ prefixed params and single-quoted string values in $where
-  const where = `market_and_exchange_names='${contractName}'`;
-  const url = `${COT_API}?$where=${encodeURIComponent(where)}&$order=report_date_as_yyyy_mm_dd DESC&$limit=2`;
-  console.log(`[COT] ${currency} fetching: ${url.slice(0, 200)}...`);
+  // CFTC explore API: refine= for filtering, order_by= for sorting
+  const url = `${COT_BASE}?limit=2&order_by=report_date_as_yyyy_mm_dd+desc&refine=market_and_exchange_names=${encodeURIComponent(contractName)}`;
+  console.log(`[COT] ${currency} fetching: ${url.slice(0, 250)}`);
 
   const res = await fetch(url, {
     headers: { 'Accept': 'application/json' }
@@ -70,84 +69,90 @@ async function fetchCOTForCurrency(currency, contractName) {
     return null;
   }
 
-  // SODA returns a flat array of record objects
-  const records = await res.json();
-  console.log(`[COT] ${currency} records: ${records.length}`);
+  const data = await res.json();
+  // Explore API returns { total_count, records: [{ record: { fields: {...} } }] }
+  const records = data.records || data.results || [];
+  console.log(`[COT] ${currency} total_count: ${data.total_count} records: ${records.length}`);
 
-  if (!Array.isArray(records) || records.length === 0) {
+  if (records.length === 0) {
     console.log(`[COT] ${currency} — no records found for "${contractName}"`);
     return null;
   }
 
-  if (records.length > 0) {
-    console.log(`[COT] ${currency} date: ${records[0].report_date_as_yyyy_mm_dd} noncomm_long: ${records[0].noncomm_positions_long_all} noncomm_short: ${records[0].noncomm_positions_short_all}`);
-  }
+  // Extract fields — explore API nests under record.fields
+  const f = records[0].record?.fields || records[0].fields || records[0];
+  console.log(`[COT] ${currency} date: ${f.report_date_as_yyyy_mm_dd} noncomm_long: ${f.noncomm_positions_long_all} noncomm_short: ${f.noncomm_positions_short_all}`);
 
-  function parseRecord(r) {
-    return {
-      reportDate:     r.report_date_as_yyyy_mm_dd ? r.report_date_as_yyyy_mm_dd.slice(0, 10) : null,
-      noncommLong:    parseInt(r.noncomm_positions_long_all || 0),
-      noncommShort:   parseInt(r.noncomm_positions_short_all || 0),
-      commLong:       parseInt(r.comm_positions_long_all || 0),
-      commShort:      parseInt(r.comm_positions_short_all || 0),
-      openInterest:   parseInt(r.open_interest_all || 0)
-    };
-  }
+  const noncommLong  = parseInt(f.noncomm_positions_long_all || 0);
+  const noncommShort = parseInt(f.noncomm_positions_short_all || 0);
+  const commLong     = parseInt(f.comm_positions_long_all || 0);
+  const commShort    = parseInt(f.comm_positions_short_all || 0);
+  const openInterest = parseInt(f.open_interest_all || 0);
 
-  const current  = parseRecord(records[0]);
-  const previous = records.length > 1 ? parseRecord(records[1]) : null;
+  const netNonComm = noncommLong - noncommShort;
+  const netComm    = commLong - commShort;
 
-  const netNonComm = current.noncommLong - current.noncommShort;
-  const netComm    = current.commLong - current.commShort;
-  const changeNetNonComm = previous
-    ? netNonComm - (previous.noncommLong - previous.noncommShort)
-    : 0;
+  // Weekly change: use the API's built-in change fields (this week vs last week)
+  // changeNetNonComm = change_in_noncomm_long - change_in_noncomm_short
+  const changeLong  = parseInt(f.change_in_noncomm_long_all || 0);
+  const changeShort = parseInt(f.change_in_noncomm_short_all || 0);
+  const changeNetNonComm = changeLong - changeShort;
+
+  // Extract report date — may be ISO timestamp or date string
+  let reportDate = f.report_date_as_yyyy_mm_dd || null;
+  if (reportDate && reportDate.length > 10) reportDate = reportDate.slice(0, 10);
 
   return {
-    reportDate: current.reportDate,
+    reportDate,
     netNonComm,
     netComm,
-    openInterest: current.openInterest,
+    openInterest,
     changeNetNonComm,
-    noncommLong:  current.noncommLong,
-    noncommShort: current.noncommShort,
-    commLong:     current.commLong,
-    commShort:    current.commShort
+    noncommLong,
+    noncommShort,
+    commLong,
+    commShort
   };
 }
 
 async function runCOTFetch() {
   console.log('[COT] runCOTFetch() called — starting fetch for', Object.keys(COT_CURRENCIES).length, 'currencies');
   let fetched = 0;
+  const errors = [];
 
   try {
-  for (const [currency, contractName] of Object.entries(COT_CURRENCIES)) {
-    try {
-      const result = await fetchCOTForCurrency(currency, contractName);
-      if (result) {
-        cotCache[currency] = { ...result, ts: Date.now() };
-        fetched++;
-        console.log(`[COT] ${currency} — date:${result.reportDate} netNonComm:${result.netNonComm > 0 ? '+' : ''}${result.netNonComm} change:${result.changeNetNonComm > 0 ? '+' : ''}${result.changeNetNonComm} OI:${result.openInterest}`);
+    for (const [currency, contractName] of Object.entries(COT_CURRENCIES)) {
+      try {
+        const result = await fetchCOTForCurrency(currency, contractName);
+        if (result) {
+          cotCache[currency] = { ...result, ts: Date.now() };
+          fetched++;
+          console.log(`[COT] ${currency} — date:${result.reportDate} netNonComm:${result.netNonComm > 0 ? '+' : ''}${result.netNonComm} change:${result.changeNetNonComm > 0 ? '+' : ''}${result.changeNetNonComm} OI:${result.openInterest}`);
 
-        // Persist to DB keyed by currency code
-        try {
-          const { upsertCOTData } = require('./db');
-          upsertCOTData(currency, result);
-        } catch(e) {}
-      } else {
-        console.log(`[COT] ${currency} — no data returned`);
+          // Persist to DB keyed by currency code
+          try {
+            const { upsertCOTData } = require('./db');
+            upsertCOTData(currency, result);
+          } catch(e) { console.error(`[COT] ${currency} DB write error:`, e.message); }
+        } else {
+          errors.push({ currency, error: 'no data returned' });
+          console.log(`[COT] ${currency} — no data returned`);
+        }
+
+        await new Promise(r => setTimeout(r, 500));
+      } catch(e) {
+        errors.push({ currency, error: e.message });
+        console.error(`[COT] ${currency} error:`, e.message);
       }
-
-      await new Promise(r => setTimeout(r, 500));
-    } catch(e) {
-      console.error(`[COT] ${currency} error:`, e.message);
     }
-  }
 
-  console.log(`[COT] Fetch complete — ${fetched}/${Object.keys(COT_CURRENCIES).length} currencies updated`);
+    console.log(`[COT] Fetch complete — ${fetched}/${Object.keys(COT_CURRENCIES).length} currencies updated`);
   } catch(e) {
     console.error('[COT] FATAL fetch error:', e.message, e.stack);
+    errors.push({ currency: 'FATAL', error: e.message });
   }
+
+  return { fetched, total: Object.keys(COT_CURRENCIES).length, errors };
 }
 
 // ── Get raw COT data for a single currency ──────────────────────────────────
@@ -186,9 +191,6 @@ function getLatestCOT(symbol) {
 
   if (!baseCOT && !quoteCOT) return null;
 
-  // For simple pairs (one side only), return that side's data directly
-  // For inverted pairs (USDJPY etc), the caller sees the raw data but
-  // getCOTSummary handles the interpretation flip
   const primary = baseCOT || quoteCOT;
   return {
     base:       mapping.base,
@@ -196,7 +198,6 @@ function getLatestCOT(symbol) {
     inverted:   mapping.inverted || false,
     baseCOT,
     quoteCOT,
-    // Convenience fields from the primary (or only) currency
     reportDate:       primary.reportDate,
     netNonComm:       primary.netNonComm,
     netComm:          primary.netComm,
@@ -243,7 +244,6 @@ function getCOTSummary(symbol) {
   }
 
   // ── USD/XXX inverted pairs (only quote has COT) ─────────────────────────
-  // Specs long JPY = bearish USDJPY, so invert the interpretation
   if (!baseCOT && quoteCOT && mapping.inverted) {
     const net = quoteCOT.netNonComm;
     const change = quoteCOT.changeNetNonComm;
@@ -257,8 +257,6 @@ function getCOTSummary(symbol) {
     const basePart  = `${mapping.base} specs ${baseCOT.netNonComm > 0 ? 'NET LONG' : 'NET SHORT'} ${fmtK(baseCOT.netNonComm)} (${fmtChangeK(baseCOT.changeNetNonComm)})`;
     const quotePart = `${mapping.quote} specs ${quoteCOT.netNonComm > 0 ? 'NET LONG' : 'NET SHORT'} ${fmtK(quoteCOT.netNonComm)} (${fmtChangeK(quoteCOT.changeNetNonComm)})`;
 
-    // Compare net positioning to determine pair bias
-    // For a cross: base stronger than quote = bullish for the pair
     const baseBias  = baseCOT.netNonComm;
     const quoteBias = quoteCOT.netNonComm;
     let crossBias;
@@ -273,7 +271,6 @@ function getCOTSummary(symbol) {
     return `${basePart} vs ${quotePart} — ${crossBias}`;
   }
 
-  // Fallback: one side only on a cross (shouldn't happen but handle gracefully)
   const available = baseCOT || quoteCOT;
   const label = baseCOT ? mapping.base : mapping.quote;
   return singleCurrencySummary(label, available);
