@@ -806,6 +806,25 @@ app.get('/api/macro-context', (req, res) => {
   res.json(getMacroContext());
 });
 
+app.get('/api/macro-debug', (req, res) => {
+  try {
+    const stored = db.getStoredMacroContext();
+    const age = db.getMacroContextAge();
+    const inMemory = getMacroContext();
+    res.json({
+      dbCount: Object.keys(stored).length,
+      dbSymbols: Object.keys(stored),
+      dbSample: Object.entries(stored).slice(0, 2).map(([k, v]) => ({ symbol: k, sentiment: v.sentiment, strength: v.strength, ts: v.ts })),
+      dbAgeHours: Math.round(age / 3600000),
+      inMemoryCount: Object.keys(inMemory).length,
+      inMemorySymbols: Object.keys(inMemory),
+      inMemorySample: Object.entries(inMemory).slice(0, 2).map(([k, v]) => ({ symbol: k, sentiment: v.sentiment, strength: v.strength, ts: v.ts }))
+    });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // Force macro context refresh
 app.post('/api/macro-refresh', async (req, res) => {
   res.json({ ok: true, message: 'Macro refresh started' });
@@ -1520,23 +1539,29 @@ server.listen(PORT, () => {
     setTimeout(() => {
       try {
         const stored = db.getStoredMacroContext();
-        const count = Object.keys(stored).length;
+        console.log('[Startup] getStoredMacroContext returned:', JSON.stringify(stored).slice(0, 200));
+        const count = Object.keys(stored || {}).length;
+        console.log('[Startup] Macro context count:', count);
         if (count > 0) {
           Object.assign(macroContext, stored);
-          console.log(`[Startup] Loaded ${count} macro contexts from DB`);
+          console.log('[Startup] macroContext keys after assign:', Object.keys(macroContext));
         } else {
-          console.log('[Startup] No stored macro context — will fetch at 07:00 UTC or hit /api/macro-force');
+          console.log('[Startup] No stored macro context — table empty, triggering fetch...');
+          runMacroContextFetch(broadcast)
+            .then(() => console.log('[Startup] Initial macro context fetch complete'))
+            .catch(e => console.error('[Startup] Macro context fetch error:', e.message));
         }
         // If stored context is stale (>26h), trigger a fresh fetch
         const age = db.getMacroContextAge();
-        if (age > 26 * 3600000) {
+        console.log('[Startup] Macro context age:', Math.round(age / 3600000), 'hours');
+        if (count > 0 && age > 26 * 3600000) {
           console.log('[Startup] Macro context stale — running fresh fetch...');
           runMacroContextFetch(broadcast)
             .then(() => console.log('[Startup] Macro context fetch complete'))
             .catch(e => console.error('[Startup] Macro context fetch error:', e.message));
         }
       } catch(e) {
-        console.error('[Startup] Macro context load error:', e.message);
+        console.error('[Startup] Macro context load error:', e.message, e.stack);
       }
     }, 3000);
     // Expire OPEN signals from old scorer versions — keeps board clean after deploys
