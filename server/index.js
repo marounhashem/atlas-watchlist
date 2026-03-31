@@ -13,7 +13,7 @@ const { checkOutcomes } = require('./outcome');
 const { runLearningCycle } = require('./learner');
 const claudeLearner = require('./claudeLearner');
 const { runFXSSIScrape, processBridgePayload, getFxssiCacheAge } = require('./fxssiScraper');
-const { runCOTFetch, getLatestCOT, getCOTSummary } = require('./cotFetcher');
+const { runCOTFetch, getLatestCOT, getCOTSummary, getCOTCurrencies } = require('./cotFetcher');
 const { SYMBOLS } = require('./config');
 
 const app = express();
@@ -809,23 +809,28 @@ app.post('/api/macro-refresh', async (req, res) => {
   runMacroContextFetch(broadcast).catch(e => console.error('[Macro] Manual refresh error:', e.message));
 });
 
-// COT data status — latest positioning for all tracked symbols
+// COT data status — currency-level positioning + pair-level summaries
 app.get('/api/cot-status', (req, res) => {
   const { getAllCOTData } = require('./db');
   const rows = getAllCOTData();
-  const summaries = {};
+  const currencies = {};
   for (const row of rows) {
-    summaries[row.symbol] = {
+    currencies[row.symbol] = {
       reportDate: row.report_date,
       netNonComm: row.net_noncomm,
       netComm: row.net_comm,
       openInterest: row.open_interest,
       changeNetNonComm: row.change_net_noncomm,
-      summary: getCOTSummary(row.symbol),
       ts: row.ts
     };
   }
-  res.json(summaries);
+  // Build pair-level summaries for all ATLAS symbols that have COT coverage
+  const pairs = {};
+  for (const sym of Object.keys(SYMBOLS)) {
+    const summary = getCOTSummary(sym);
+    if (summary) pairs[sym] = summary;
+  }
+  res.json({ currencies, pairs });
 });
 
 // Force COT fetch
@@ -990,7 +995,7 @@ async function runMacroContextFetch(broadcast) {
           const cotAge = Date.now() - (cot.ts || 0);
           if (cotAge < 8 * 24 * 60 * 60 * 1000) { // < 8 days
             const summary = getCOTSummary(symbol);
-            cotContext = `\n\nCOT INSTITUTIONAL POSITIONING (as of ${cot.reportDate}):\nNon-commercial (speculators) net: ${cot.netNonComm > 0 ? '+' : ''}${cot.netNonComm} contracts (${cot.changeNetNonComm > 0 ? '+' : ''}${cot.changeNetNonComm} vs last week)\nCommercial (hedgers) net: ${cot.netComm > 0 ? '+' : ''}${cot.netComm} contracts\nInterpretation: ${summary || 'N/A'}`;
+            cotContext = `\n\nCOT INSTITUTIONAL POSITIONING (as of ${cot.reportDate}):\n${summary || 'N/A'}`;
           }
         }
       } catch(e) {}

@@ -10,12 +10,18 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260331.4'`
+`SCORER_VERSION = '20260331.5'`
+
+Changes in 20260331.5:
+- COT data refactored to currency-level storage (EUR, GBP, JPY, not EURUSD, GBPUSD)
+- Cross pair support: EURGBP, EURJPY, GBPJPY etc resolve both currency legs
+- USD/XXX pairs (USDJPY, USDCHF, USDCAD) invert interpretation automatically
+- getCOTSummary() for crosses shows both legs + which bias is stronger
 
 Changes in 20260331.4:
 - COT (Commitment of Traders) data integration — CFTC weekly institutional positioning
-- New module: server/cotFetcher.js (fetches 10 symbols from CFTC public API)
-- New table: cot_data (stores weekly positioning snapshots)
+- New module: server/cotFetcher.js (fetches 10 currencies from CFTC public API)
+- New table: cot_data (stores weekly positioning snapshots per currency)
 - New endpoints: /api/cot-status, /api/cot-force
 - Cron: Fridays 20:45 UTC (15 min after CFTC release)
 - COT data injected into macro context Claude prompt when fresh (< 8 days)
@@ -87,7 +93,7 @@ Changes in 20260331.2:
 - **Claude learning** uses Haiku for cost efficiency. Weight adjustments are capped at ±0.03 per cycle, 6-hour minimum between cycles, 30+ trades required per symbol.
 - **Webhook auth** is opt-in via `WEBHOOK_SECRET` env var. When set, `/webhook/pine` and `/webhook/fxssi` require `req.body.secret` to match. Include `"secret": "<value>"` in the JSON payload. `/webhook/fxssi-rich` has no auth (browser extension backup).
 - **persist()** is async with write coalescing — multiple rapid persist() calls collapse into a single disk write. The 15s interval flush remains as a safety net.
-- **COT data** fetched weekly from CFTC public API (disaggregated futures). Covers 10 symbols (commodities + forex majors). Injected into macro context prompt to give Claude institutional positioning awareness. Crypto and forex crosses have no COT coverage — they are excluded automatically.
+- **COT data** fetched weekly from CFTC public API (disaggregated futures). Stored at **currency level** (EUR, GBP, JPY, CHF, CAD, AUD, NZD, GOLD, SILVER, OIL) — not pair level. Resolved to pair level on read: simple pairs return one leg, USD/XXX pairs invert interpretation, crosses (EURGBP, EURJPY etc) compare both legs. Crypto (BTCUSD, ETHUSD) and indices (US30, US100) have no COT coverage.
 
 ## Rules
 

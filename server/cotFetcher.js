@@ -1,27 +1,57 @@
 // COT (Commitment of Traders) Data Fetcher — CFTC weekly reports
 // Fetches disaggregated futures positioning from CFTC public API
-// Used by macro context to show institutional positioning
+// Stored at CURRENCY level (EUR, GBP, JPY) not pair level (EURUSD, GBPUSD)
+// Resolved to pair level on read via getLatestCOT(symbol)
 
 const COT_API = 'https://publicreporting.cftc.gov/api/explore/v2.1/catalog/datasets/fut_disagg_txt_hist_2006_2016/records';
 
-// Map ATLAS symbols to CFTC contract market names
-const COT_SYMBOLS = {
-  GOLD:   'GOLD - COMMODITY EXCHANGE INC.',
-  SILVER: 'SILVER - COMMODITY EXCHANGE INC.',
-  OILWTI: 'CRUDE OIL, LIGHT SWEET - NEW YORK MERCANTILE EXCHANGE',
-  EURUSD: 'EURO FX - CHICAGO MERCANTILE EXCHANGE',
-  GBPUSD: 'BRITISH POUND STERLING - CHICAGO MERCANTILE EXCHANGE',
-  USDJPY: 'JAPANESE YEN - CHICAGO MERCANTILE EXCHANGE',
-  USDCHF: 'SWISS FRANC - CHICAGO MERCANTILE EXCHANGE',
-  USDCAD: 'CANADIAN DOLLAR - CHICAGO MERCANTILE EXCHANGE',
-  AUDUSD: 'AUSTRALIAN DOLLAR - CHICAGO MERCANTILE EXCHANGE',
-  NZDUSD: 'NEW ZEALAND DOLLAR - CHICAGO MERCANTILE EXCHANGE'
+// Map currency codes to CFTC contract names — stored at currency level
+const COT_CURRENCIES = {
+  EUR:    'EURO FX - CHICAGO MERCANTILE EXCHANGE',
+  GBP:    'BRITISH POUND - CHICAGO MERCANTILE EXCHANGE',
+  JPY:    'JAPANESE YEN - CHICAGO MERCANTILE EXCHANGE',
+  CHF:    'SWISS FRANC - CHICAGO MERCANTILE EXCHANGE',
+  CAD:    'CANADIAN DOLLAR - CHICAGO MERCANTILE EXCHANGE',
+  AUD:    'AUSTRALIAN DOLLAR - CHICAGO MERCANTILE EXCHANGE',
+  NZD:    'NEW ZEALAND DOLLAR - CHICAGO MERCANTILE EXCHANGE',
+  GOLD:   'GOLD - CHICAGO MERCANTILE EXCHANGE',
+  SILVER: 'SILVER - CHICAGO MERCANTILE EXCHANGE',
+  OIL:    'CRUDE OIL, LIGHT SWEET - ICE FUTURES EUROPE'
 };
 
-// In-memory cache of latest COT data per symbol
-const cotCache = {}; // { symbol: { current, previous, summary, ts } }
+// Map ATLAS pair symbols to their currency components
+// base: currency that is "bought" when going LONG on the pair
+// quote: currency that is "sold" when going LONG on the pair
+// inverted: if true, specs long on the quote currency = bearish for the pair
+const PAIR_MAP = {
+  // XXX/USD pairs — base has COT, USD does not
+  EURUSD: { base: 'EUR', quote: null },
+  GBPUSD: { base: 'GBP', quote: null },
+  AUDUSD: { base: 'AUD', quote: null },
+  NZDUSD: { base: 'NZD', quote: null },
+  // USD/XXX pairs — quote has COT, interpretation is inverted
+  // specs long JPY = bearish USDJPY
+  USDJPY: { base: null, quote: 'JPY', inverted: true },
+  USDCHF: { base: null, quote: 'CHF', inverted: true },
+  USDCAD: { base: null, quote: 'CAD', inverted: true },
+  // Crosses — both sides have COT
+  EURGBP: { base: 'EUR', quote: 'GBP' },
+  EURJPY: { base: 'EUR', quote: 'JPY' },
+  EURAUD: { base: 'EUR', quote: 'AUD' },
+  EURCHF: { base: 'EUR', quote: 'CHF' },
+  GBPJPY: { base: 'GBP', quote: 'JPY' },
+  GBPCHF: { base: 'GBP', quote: 'CHF' },
+  AUDJPY: { base: 'AUD', quote: 'JPY' },
+  // Commodities — direct mapping
+  GOLD:   { base: 'GOLD',   quote: null },
+  SILVER: { base: 'SILVER', quote: null },
+  OILWTI: { base: 'OIL',    quote: null }
+};
 
-async function fetchCOTForSymbol(symbol, contractName) {
+// In-memory cache of latest COT data per currency
+const cotCache = {}; // { currency: { netNonComm, netComm, ... , ts } }
+
+async function fetchCOTForCurrency(currency, contractName) {
   const where = `market_and_exchange_names = "${contractName}"`;
   const url = `${COT_API}?where=${encodeURIComponent(where)}&order_by=report_date_as_yyyy_mm_dd DESC&limit=2`;
 
@@ -30,7 +60,7 @@ async function fetchCOTForSymbol(symbol, contractName) {
   });
 
   if (!res.ok) {
-    console.error(`[COT] ${symbol} HTTP ${res.status}`);
+    console.error(`[COT] ${currency} HTTP ${res.status}`);
     return null;
   }
 
@@ -38,12 +68,11 @@ async function fetchCOTForSymbol(symbol, contractName) {
   const records = data.results || data.records || [];
 
   if (records.length === 0) {
-    console.log(`[COT] ${symbol} — no records found for "${contractName}"`);
+    console.log(`[COT] ${currency} — no records found for "${contractName}"`);
     return null;
   }
 
   function parseRecord(r) {
-    // Handle both flat and nested field structures
     const f = r.fields || r;
     return {
       reportDate:     f.report_date_as_yyyy_mm_dd || f.report_date || null,
@@ -81,41 +110,40 @@ async function runCOTFetch() {
   console.log('[COT] Starting weekly COT data fetch...');
   let fetched = 0;
 
-  for (const [symbol, contractName] of Object.entries(COT_SYMBOLS)) {
+  for (const [currency, contractName] of Object.entries(COT_CURRENCIES)) {
     try {
-      const result = await fetchCOTForSymbol(symbol, contractName);
+      const result = await fetchCOTForCurrency(currency, contractName);
       if (result) {
-        cotCache[symbol] = { ...result, ts: Date.now() };
+        cotCache[currency] = { ...result, ts: Date.now() };
         fetched++;
-        console.log(`[COT] ${symbol} — date:${result.reportDate} netNonComm:${result.netNonComm > 0 ? '+' : ''}${result.netNonComm} change:${result.changeNetNonComm > 0 ? '+' : ''}${result.changeNetNonComm} OI:${result.openInterest}`);
+        console.log(`[COT] ${currency} — date:${result.reportDate} netNonComm:${result.netNonComm > 0 ? '+' : ''}${result.netNonComm} change:${result.changeNetNonComm > 0 ? '+' : ''}${result.changeNetNonComm} OI:${result.openInterest}`);
 
-        // Persist to DB if available
+        // Persist to DB keyed by currency code
         try {
           const { upsertCOTData } = require('./db');
-          upsertCOTData(symbol, result);
+          upsertCOTData(currency, result);
         } catch(e) {}
       } else {
-        console.log(`[COT] ${symbol} — no data returned`);
+        console.log(`[COT] ${currency} — no data returned`);
       }
 
-      // 500ms delay between symbols to be polite to CFTC API
       await new Promise(r => setTimeout(r, 500));
     } catch(e) {
-      console.error(`[COT] ${symbol} error:`, e.message);
+      console.error(`[COT] ${currency} error:`, e.message);
     }
   }
 
-  console.log(`[COT] Fetch complete — ${fetched}/${Object.keys(COT_SYMBOLS).length} symbols updated`);
+  console.log(`[COT] Fetch complete — ${fetched}/${Object.keys(COT_CURRENCIES).length} currencies updated`);
 }
 
-function getLatestCOT(symbol) {
-  // Try cache first, then DB
-  if (cotCache[symbol]) return cotCache[symbol];
+// ── Get raw COT data for a single currency ──────────────────────────────────
+function getCurrencyCOT(currency) {
+  if (cotCache[currency]) return cotCache[currency];
   try {
     const { getCOTData } = require('./db');
-    const dbRow = getCOTData(symbol);
+    const dbRow = getCOTData(currency);
     if (dbRow) {
-      cotCache[symbol] = {
+      cotCache[currency] = {
         reportDate:       dbRow.report_date,
         netNonComm:       dbRow.net_noncomm,
         netComm:          dbRow.net_comm,
@@ -127,49 +155,116 @@ function getLatestCOT(symbol) {
         commShort:        dbRow.comm_short,
         ts:               dbRow.ts
       };
-      return cotCache[symbol];
+      return cotCache[currency];
     }
   } catch(e) {}
   return null;
 }
 
-function getCOTSummary(symbol) {
-  const cot = getLatestCOT(symbol);
-  if (!cot) return null;
+// ── Resolve ATLAS pair symbol to COT data ───────────────────────────────────
+// Returns { base, quote, baseCOT, quoteCOT, inverted } or null
+function getLatestCOT(symbol) {
+  const mapping = PAIR_MAP[symbol];
+  if (!mapping) return null;
 
-  const net = cot.netNonComm;
-  const change = cot.changeNetNonComm;
-  const absNet = Math.abs(net);
-  const absChange = Math.abs(change);
+  const baseCOT  = mapping.base  ? getCurrencyCOT(mapping.base)  : null;
+  const quoteCOT = mapping.quote ? getCurrencyCOT(mapping.quote) : null;
 
-  // Format numbers as k (thousands)
-  const netStr = `${net > 0 ? '+' : ''}${Math.round(net / 1000)}k`;
-  const changeStr = `${change > 0 ? 'up' : 'down'} ${change > 0 ? '+' : ''}${Math.round(change / 1000)}k WoW`;
-  const side = net > 0 ? 'NET LONG' : 'NET SHORT';
+  if (!baseCOT && !quoteCOT) return null;
 
-  // Assess positioning extremity
-  let assessment;
-  if (absNet > 100000) {
-    assessment = net > 0
-      ? 'extreme long positioning, crowding/mean-reversion risk'
-      : 'extreme short positioning, potential squeeze';
-  } else if (absNet > 50000) {
-    assessment = net > 0
-      ? 'elevated long positioning, crowding risk'
-      : 'elevated short positioning, squeeze potential';
-  } else {
-    assessment = 'moderate positioning';
-  }
-
-  // Add momentum note if change is significant
-  let momentum = '';
-  if (absChange > 10000) {
-    momentum = change > 0 ? ' — specs adding longs aggressively' : ' — specs liquidating / adding shorts';
-  }
-
-  return `Specs ${side} ${netStr} (${changeStr}) — ${assessment}${momentum}`;
+  // For simple pairs (one side only), return that side's data directly
+  // For inverted pairs (USDJPY etc), the caller sees the raw data but
+  // getCOTSummary handles the interpretation flip
+  const primary = baseCOT || quoteCOT;
+  return {
+    base:       mapping.base,
+    quote:      mapping.quote,
+    inverted:   mapping.inverted || false,
+    baseCOT,
+    quoteCOT,
+    // Convenience fields from the primary (or only) currency
+    reportDate:       primary.reportDate,
+    netNonComm:       primary.netNonComm,
+    netComm:          primary.netComm,
+    openInterest:     primary.openInterest,
+    changeNetNonComm: primary.changeNetNonComm,
+    ts:               primary.ts
+  };
 }
 
-function getCOTSymbols() { return COT_SYMBOLS; }
+// ── Format helpers ──────────────────────────────────────────────────────────
+function fmtK(n) { return `${n > 0 ? '+' : ''}${Math.round(n / 1000)}k`; }
+function fmtChangeK(n) { return `${n > 0 ? '↑' : '↓'}${Math.abs(Math.round(n / 1000))}k WoW`; }
 
-module.exports = { runCOTFetch, getLatestCOT, getCOTSummary, getCOTSymbols };
+function singleCurrencySummary(label, cot) {
+  if (!cot) return null;
+  const net = cot.netNonComm;
+  const change = cot.changeNetNonComm;
+  const side = net > 0 ? 'NET LONG' : 'NET SHORT';
+
+  let assessment = 'moderate positioning';
+  const absNet = Math.abs(net);
+  if (absNet > 100000) {
+    assessment = net > 0 ? 'extreme long, crowding risk' : 'extreme short, squeeze potential';
+  } else if (absNet > 50000) {
+    assessment = net > 0 ? 'elevated long, crowding risk' : 'elevated short, squeeze potential';
+  }
+
+  return `${label} specs ${side} ${fmtK(net)} (${fmtChangeK(change)}) — ${assessment}`;
+}
+
+// ── Public summary for an ATLAS pair symbol ─────────────────────────────────
+function getCOTSummary(symbol) {
+  const mapping = PAIR_MAP[symbol];
+  if (!mapping) return null;
+
+  const baseCOT  = mapping.base  ? getCurrencyCOT(mapping.base)  : null;
+  const quoteCOT = mapping.quote ? getCurrencyCOT(mapping.quote) : null;
+
+  if (!baseCOT && !quoteCOT) return null;
+
+  // ── Commodities and simple XXX/USD pairs (only base has COT) ────────────
+  if (baseCOT && !quoteCOT && !mapping.inverted) {
+    return singleCurrencySummary(mapping.base, baseCOT);
+  }
+
+  // ── USD/XXX inverted pairs (only quote has COT) ─────────────────────────
+  // Specs long JPY = bearish USDJPY, so invert the interpretation
+  if (!baseCOT && quoteCOT && mapping.inverted) {
+    const net = quoteCOT.netNonComm;
+    const change = quoteCOT.changeNetNonComm;
+    const side = net > 0 ? 'NET LONG' : 'NET SHORT';
+    const pairBias = net > 0 ? `bearish ${symbol}` : `bullish ${symbol}`;
+    return `${mapping.quote} specs ${side} ${fmtK(net)} (${fmtChangeK(change)}) — ${pairBias} (USD weakening vs ${mapping.quote})`;
+  }
+
+  // ── Crosses — both sides have COT ──────────────────────────────────────
+  if (baseCOT && quoteCOT) {
+    const basePart  = `${mapping.base} specs ${baseCOT.netNonComm > 0 ? 'NET LONG' : 'NET SHORT'} ${fmtK(baseCOT.netNonComm)} (${fmtChangeK(baseCOT.changeNetNonComm)})`;
+    const quotePart = `${mapping.quote} specs ${quoteCOT.netNonComm > 0 ? 'NET LONG' : 'NET SHORT'} ${fmtK(quoteCOT.netNonComm)} (${fmtChangeK(quoteCOT.changeNetNonComm)})`;
+
+    // Compare net positioning to determine pair bias
+    // For a cross: base stronger than quote = bullish for the pair
+    const baseBias  = baseCOT.netNonComm;
+    const quoteBias = quoteCOT.netNonComm;
+    let crossBias;
+    if (baseBias > quoteBias + 10000) {
+      crossBias = `${mapping.base} bias stronger, favours ${symbol} long`;
+    } else if (quoteBias > baseBias + 10000) {
+      crossBias = `${mapping.quote} bias stronger, favours ${symbol} short`;
+    } else {
+      crossBias = 'positioning roughly balanced';
+    }
+
+    return `${basePart} vs ${quotePart} — ${crossBias}`;
+  }
+
+  // Fallback: one side only on a cross (shouldn't happen but handle gracefully)
+  const available = baseCOT || quoteCOT;
+  const label = baseCOT ? mapping.base : mapping.quote;
+  return singleCurrencySummary(label, available);
+}
+
+function getCOTCurrencies() { return COT_CURRENCIES; }
+
+module.exports = { runCOTFetch, getLatestCOT, getCOTSummary, getCOTCurrencies };
