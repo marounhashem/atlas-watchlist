@@ -13,6 +13,7 @@ const { checkOutcomes } = require('./outcome');
 const { runLearningCycle } = require('./learner');
 const claudeLearner = require('./claudeLearner');
 const { runFXSSIScrape, processBridgePayload, getFxssiCacheAge } = require('./fxssiScraper');
+const { runCOTFetch, getLatestCOT, getCOTSummary } = require('./cotFetcher');
 const { SYMBOLS } = require('./config');
 
 const app = express();
@@ -808,6 +809,31 @@ app.post('/api/macro-refresh', async (req, res) => {
   runMacroContextFetch(broadcast).catch(e => console.error('[Macro] Manual refresh error:', e.message));
 });
 
+// COT data status — latest positioning for all tracked symbols
+app.get('/api/cot-status', (req, res) => {
+  const { getAllCOTData } = require('./db');
+  const rows = getAllCOTData();
+  const summaries = {};
+  for (const row of rows) {
+    summaries[row.symbol] = {
+      reportDate: row.report_date,
+      netNonComm: row.net_noncomm,
+      netComm: row.net_comm,
+      openInterest: row.open_interest,
+      changeNetNonComm: row.change_net_noncomm,
+      summary: getCOTSummary(row.symbol),
+      ts: row.ts
+    };
+  }
+  res.json(summaries);
+});
+
+// Force COT fetch
+app.get('/api/cot-force', async (req, res) => {
+  res.json({ ok: true, message: 'COT fetch started' });
+  runCOTFetch().catch(e => console.error('[COT] Manual fetch error:', e.message));
+});
+
 // Mark a WATCH signal paper outcome manually (if auto-detection missed it)
 app.post('/api/paper-outcome', (req, res) => {
   const { signalId, paperOutcome } = req.body;
@@ -905,6 +931,12 @@ cron.schedule('0 7 * * *', async () => {
   await runMacroContextFetch(broadcast);
 });
 
+// Weekly COT fetch — every Friday at 20:45 UTC (15 min after CFTC 15:30 EST release)
+cron.schedule('45 20 * * 5', async () => {
+  console.log('[Cron] Running weekly COT data fetch...');
+  await runCOTFetch();
+});
+
 // ── Signal retirement ─────────────────────────────────────────────────────────
 // At :02/:22/:42 — after fresh FXSSI data arrives — retire ACTIVE signals
 // for all open-market symbols. Retired signals move to Past Trades tab but
@@ -950,6 +982,19 @@ async function runMacroContextFetch(broadcast) {
 
   for (const [symbol, query] of Object.entries(symbolQueries)) {
     try {
+      // Inject COT positioning data if available and fresh (< 8 days old)
+      let cotContext = '';
+      try {
+        const cot = getLatestCOT(symbol);
+        if (cot && cot.reportDate) {
+          const cotAge = Date.now() - (cot.ts || 0);
+          if (cotAge < 8 * 24 * 60 * 60 * 1000) { // < 8 days
+            const summary = getCOTSummary(symbol);
+            cotContext = `\n\nCOT INSTITUTIONAL POSITIONING (as of ${cot.reportDate}):\nNon-commercial (speculators) net: ${cot.netNonComm > 0 ? '+' : ''}${cot.netNonComm} contracts (${cot.changeNetNonComm > 0 ? '+' : ''}${cot.changeNetNonComm} vs last week)\nCommercial (hedgers) net: ${cot.netComm > 0 ? '+' : ''}${cot.netComm} contracts\nInterpretation: ${summary || 'N/A'}`;
+          }
+        }
+      } catch(e) {}
+
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -964,7 +1009,7 @@ async function runMacroContextFetch(broadcast) {
           system: `You are a macro analyst. Search for current market conditions and return ONLY a JSON object. No markdown, no explanation.`,
           messages: [{
             role: 'user',
-            content: `Search: "${query}". Return ONLY this JSON:
+            content: `Search: "${query}".${cotContext} Return ONLY this JSON:
 {
   "sentiment": "BULLISH|BEARISH|NEUTRAL",
   "strength": <1-10, how strong is the macro bias>,

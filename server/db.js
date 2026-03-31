@@ -125,6 +125,22 @@ function initSchema() {
   db.run(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY, value TEXT, ts INTEGER
   )`);
+  // COT (Commitment of Traders) — weekly CFTC institutional positioning data
+  db.run(`CREATE TABLE IF NOT EXISTS cot_data (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    report_date TEXT NOT NULL,
+    net_noncomm INTEGER,
+    net_comm INTEGER,
+    open_interest INTEGER,
+    change_net_noncomm INTEGER,
+    noncomm_long INTEGER,
+    noncomm_short INTEGER,
+    comm_long INTEGER,
+    comm_short INTEGER,
+    ts INTEGER NOT NULL
+  )`);
+
   // WATCH signals — separate table, not mixed with live tradeable signals
   // Used for learning and pattern analysis only — never shown as active trades
   db.run(`CREATE TABLE IF NOT EXISTS watch_signals (
@@ -722,6 +738,26 @@ function updateWatchOutcome(id, outcome, pnlPct) {
   persist();
 }
 
+// ── COT data ─────────────────────────────────────────────────────────────────
+function upsertCOTData(symbol, data) {
+  run(`INSERT INTO cot_data
+    (symbol, report_date, net_noncomm, net_comm, open_interest, change_net_noncomm,
+     noncomm_long, noncomm_short, comm_long, comm_short, ts)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+    [symbol, data.reportDate, data.netNonComm, data.netComm, data.openInterest,
+     data.changeNetNonComm, data.noncommLong, data.noncommShort,
+     data.commLong, data.commShort, Date.now()]);
+  persist();
+}
+
+function getCOTData(symbol) {
+  return get('SELECT * FROM cot_data WHERE symbol=? ORDER BY ts DESC LIMIT 1', [symbol]);
+}
+
+function getAllCOTData() {
+  return all('SELECT * FROM cot_data WHERE id IN (SELECT MAX(id) FROM cot_data GROUP BY symbol) ORDER BY symbol');
+}
+
 module.exports = {
   init, isReady, persist, run,
   upsertMarketData, getLatestMarketData,
@@ -734,5 +770,6 @@ module.exports = {
   dismissRecommendation, resolveStaleRecommendations,
   retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals,
   getSetting, setSetting,
-  insertWatchSignal, getRecentWatchSignals, updateWatchOutcome
+  insertWatchSignal, getRecentWatchSignals, updateWatchOutcome,
+  upsertCOTData, getCOTData, getAllCOTData
 };

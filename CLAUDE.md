@@ -10,7 +10,15 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260331.3'`
+`SCORER_VERSION = '20260331.4'`
+
+Changes in 20260331.4:
+- COT (Commitment of Traders) data integration — CFTC weekly institutional positioning
+- New module: server/cotFetcher.js (fetches 10 symbols from CFTC public API)
+- New table: cot_data (stores weekly positioning snapshots)
+- New endpoints: /api/cot-status, /api/cot-force
+- Cron: Fridays 20:45 UTC (15 min after CFTC release)
+- COT data injected into macro context Claude prompt when fresh (< 8 days)
 
 Changes in 20260331.3:
 - Webhook authentication via body secret (WEBHOOK_SECRET env var, req.body.secret check)
@@ -79,6 +87,7 @@ Changes in 20260331.2:
 - **Claude learning** uses Haiku for cost efficiency. Weight adjustments are capped at ±0.03 per cycle, 6-hour minimum between cycles, 30+ trades required per symbol.
 - **Webhook auth** is opt-in via `WEBHOOK_SECRET` env var. When set, `/webhook/pine` and `/webhook/fxssi` require `req.body.secret` to match. Include `"secret": "<value>"` in the JSON payload. `/webhook/fxssi-rich` has no auth (browser extension backup).
 - **persist()** is async with write coalescing — multiple rapid persist() calls collapse into a single disk write. The 15s interval flush remains as a safety net.
+- **COT data** fetched weekly from CFTC public API (disaggregated futures). Covers 10 symbols (commodities + forex majors). Injected into macro context prompt to give Claude institutional positioning awareness. Crypto and forex crosses have no COT coverage — they are excluded automatically.
 
 ## Rules
 
