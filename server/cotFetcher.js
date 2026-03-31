@@ -3,7 +3,8 @@
 // Stored at CURRENCY level (EUR, GBP, JPY) not pair level (EURUSD, GBPUSD)
 // Resolved to pair level on read via getLatestCOT(symbol)
 
-const COT_API = 'https://publicreporting.cftc.gov/api/explore/v2.1/catalog/datasets/fut_disagg_txt_hist_2006_2016/records';
+// CFTC Socrata SODA API — Disaggregated Futures (Combined) dataset
+const COT_API = 'https://publicreporting.cftc.gov/resource/jun7-fc8e.json';
 
 // Map currency codes to CFTC contract names — stored at currency level
 const COT_CURRENCIES = {
@@ -52,9 +53,10 @@ const PAIR_MAP = {
 const cotCache = {}; // { currency: { netNonComm, netComm, ... , ts } }
 
 async function fetchCOTForCurrency(currency, contractName) {
-  const where = `market_and_exchange_names = "${contractName}"`;
-  const url = `${COT_API}?where=${encodeURIComponent(where)}&order_by=report_date_as_yyyy_mm_dd DESC&limit=2`;
-  console.log(`[COT] ${currency} fetching: ${url}`);
+  // SODA API uses $ prefixed params and single-quoted string values in $where
+  const where = `market_and_exchange_names='${contractName}'`;
+  const url = `${COT_API}?$where=${encodeURIComponent(where)}&$order=report_date_as_yyyy_mm_dd DESC&$limit=2`;
+  console.log(`[COT] ${currency} fetching: ${url.slice(0, 200)}...`);
 
   const res = await fetch(url, {
     headers: { 'Accept': 'application/json' }
@@ -68,30 +70,27 @@ async function fetchCOTForCurrency(currency, contractName) {
     return null;
   }
 
-  const data = await res.json();
-  const topKeys = Object.keys(data);
-  const records = data.results || data.records || [];
-  console.log(`[COT] ${currency} response keys: [${topKeys.join(',')}] records: ${records.length}`);
+  // SODA returns a flat array of record objects
+  const records = await res.json();
+  console.log(`[COT] ${currency} records: ${records.length}`);
 
-  if (records.length > 0) {
-    console.log(`[COT] ${currency} first record keys: [${Object.keys(records[0]).join(',')}]`);
-    console.log(`[COT] ${currency} first record sample: ${JSON.stringify(records[0]).slice(0, 400)}`);
-  }
-
-  if (records.length === 0) {
+  if (!Array.isArray(records) || records.length === 0) {
     console.log(`[COT] ${currency} — no records found for "${contractName}"`);
     return null;
   }
 
+  if (records.length > 0) {
+    console.log(`[COT] ${currency} date: ${records[0].report_date_as_yyyy_mm_dd} noncomm_long: ${records[0].noncomm_positions_long_all} noncomm_short: ${records[0].noncomm_positions_short_all}`);
+  }
+
   function parseRecord(r) {
-    const f = r.fields || r;
     return {
-      reportDate:     f.report_date_as_yyyy_mm_dd || f.report_date || null,
-      noncommLong:    parseInt(f.noncomm_positions_long_all || f.ncomm_positions_long_all || 0),
-      noncommShort:   parseInt(f.noncomm_positions_short_all || f.ncomm_positions_short_all || 0),
-      commLong:       parseInt(f.comm_positions_long_all || 0),
-      commShort:      parseInt(f.comm_positions_short_all || 0),
-      openInterest:   parseInt(f.open_interest_all || f.oi_all || 0)
+      reportDate:     r.report_date_as_yyyy_mm_dd ? r.report_date_as_yyyy_mm_dd.slice(0, 10) : null,
+      noncommLong:    parseInt(r.noncomm_positions_long_all || 0),
+      noncommShort:   parseInt(r.noncomm_positions_short_all || 0),
+      commLong:       parseInt(r.comm_positions_long_all || 0),
+      commShort:      parseInt(r.comm_positions_short_all || 0),
+      openInterest:   parseInt(r.open_interest_all || 0)
     };
   }
 

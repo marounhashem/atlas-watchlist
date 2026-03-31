@@ -859,9 +859,9 @@ app.get('/api/cot-force', async (req, res) => {
 
 // Raw CFTC API test — single fetch for EUR, returns full response for debugging
 app.get('/api/cot-test', async (req, res) => {
-  const testUrl = 'https://publicreporting.cftc.gov/api/explore/v2.1/catalog/datasets/fut_disagg_txt_hist_2006_2016/records?where=' +
-    encodeURIComponent('market_and_exchange_names = "EURO FX - CHICAGO MERCANTILE EXCHANGE"') +
-    '&order_by=report_date_as_yyyy_mm_dd DESC&limit=1';
+  const testUrl = "https://publicreporting.cftc.gov/resource/jun7-fc8e.json?" +
+    "$where=" + encodeURIComponent("market_and_exchange_names='EURO FX - CHICAGO MERCANTILE EXCHANGE'") +
+    "&$order=report_date_as_yyyy_mm_dd%20DESC&$limit=1";
   try {
     console.log('[COT-test] Fetching:', testUrl);
     const r = await fetch(testUrl, { headers: { 'Accept': 'application/json' } });
