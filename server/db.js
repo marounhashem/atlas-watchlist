@@ -380,8 +380,21 @@ function mergeSignals(keepId, absorbId) {
     const risk = Math.abs(newEntry - newSl);
     const direction = newTp > newEntry ? 1 : -1;
     newTp = Math.round((newEntry + direction * risk * targetRr) * 10000) / 10000;
-    newRr = targetRr;
-    console.log(`[DB] Merge RR guard: RR was ${newRr} → recalculated TP to ${newTp} (RR ${targetRr})`);
+    // Recheck RR after TP recalculation
+    const recalcRisk   = Math.abs(newEntry - newSl);
+    const recalcReward = Math.abs(newTp - newEntry);
+    newRr = recalcRisk > 0 ? Math.round((recalcReward / recalcRisk) * 10) / 10 : newRr;
+    console.log(`[DB] Merge RR guard: recalculated TP to ${newTp} (RR ${newRr})`);
+
+    // If RR still cannot reach 1.5 after TP recalculation, block merge entirely
+    // Mark absorbed signal as REPLACED — do NOT create an untradeable merged position
+    if (newRr < 1.5) {
+      console.log(`[DB] Merge BLOCKED: RR ${newRr} < 1.5 after TP recalc — marking ${absorbId} as REPLACED without merging`);
+      run("UPDATE signals SET outcome='REPLACED', outcome_ts=? WHERE id=?",
+        [Date.now(), absorbId]);
+      persist();
+      return false;
+    }
   }
 
   run('UPDATE signals SET entry=?, sl=?, tp=?, rr=?, reasoning=? WHERE id=?',

@@ -36,6 +36,14 @@ const API_BASE = 'https://c.fxssi.com/api/order-book';
 const cache       = {}; // 20-min book: { symbol: { raw, analysed, ts } }
 const cacheHourly = {}; // 1-hour book:  { symbol: { raw, analysed, ts } }
 
+// ── Null streak tracker ─────────────────────────────────────────────────────
+// Counts consecutive null returns per symbol — used by scorer to detect prolonged outage
+const nullStreaks = {}; // { symbol: number }
+
+function getFxssiNullStreak(symbol) {
+  return nullStreaks[symbol] || 0;
+}
+
 function shouldFetch(symbol) {
   if (process.env.FXSSI_FORCE === '1') return true;
   // Always fetch if cache is empty (startup / restart)
@@ -252,7 +260,7 @@ function analyseOrderBook(data) {
   };
 }
 
-// ── Fetch from FXSSI API ─────────────────────────────────────────────────────
+// ── Fetch from FXSSI API (with retry) ───────────────────────────────────────
 async function fetchSymbol(pair, period = 1200) {
   const token  = process.env.FXSSI_TOKEN;
   const userId = process.env.FXSSI_USER_ID || '118460';
@@ -260,23 +268,48 @@ async function fetchSymbol(pair, period = 1200) {
 
   const url = `${API_BASE}?pair=${pair}&view=all&rand=${Math.random()}&token=${token}&user_id=${userId}&period=${period}`;
 
-  const res = await fetch(url, {
-    headers: {
-      'Accept': 'application/json, text/javascript, */*; q=0.01',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
-      'Referer': 'https://fxssi.com/'
+  const MAX_RETRIES = 2;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          'Accept': 'application/json, text/javascript, */*; q=0.01',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+          'Referer': 'https://fxssi.com/'
+        }
+      });
+
+      if (res.status === 429 || res.status === 503) {
+        const wait = (attempt + 1) * 2000; // 2s, 4s, 6s backoff
+        console.log(`[FXSSI] ${pair} HTTP ${res.status} — retry ${attempt + 1}/${MAX_RETRIES} in ${wait}ms`);
+        if (attempt < MAX_RETRIES) {
+          await new Promise(r => setTimeout(r, wait));
+          continue;
+        }
+        return null;
+      }
+
+      if (!res.ok) { console.error(`[FXSSI] ${pair} HTTP ${res.status}`); return null; }
+
+      const data = await res.json();
+
+      // Reject stale snapshots (>25 min old)
+      const ageMin = (Date.now() / 1000 - (data.time || 0)) / 60;
+      if (ageMin > 25) { console.log(`[FXSSI] ${pair} stale (${Math.round(ageMin)}m)`); return null; }
+
+      return data;
+    } catch (e) {
+      if (attempt < MAX_RETRIES) {
+        const wait = (attempt + 1) * 1500;
+        console.log(`[FXSSI] ${pair} fetch error (${e.message}) — retry ${attempt + 1}/${MAX_RETRIES} in ${wait}ms`);
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      console.error(`[FXSSI] ${pair} fetch failed after ${MAX_RETRIES + 1} attempts:`, e.message);
+      return null;
     }
-  });
-
-  if (!res.ok) { console.error(`[FXSSI] ${pair} HTTP ${res.status}`); return null; }
-
-  const data = await res.json();
-
-  // Reject stale snapshots (>25 min old)
-  const ageMin = (Date.now() / 1000 - (data.time || 0)) / 60;
-  if (ageMin > 25) { console.log(`[FXSSI] ${pair} stale (${Math.round(ageMin)}m)`); return null; }
-
-  return data;
+  }
+  return null;
 }
 
 // ── Main scrape loop ─────────────────────────────────────────────────────────
@@ -287,6 +320,9 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
 
   for (const [symbol, pair] of Object.entries(FXSSI_SYMBOLS)) {
     try {
+      // 300ms inter-symbol delay to avoid rate limiting
+      await new Promise(r => setTimeout(r, 300));
+
       const cached   = cache[symbol];
       const cacheAge = cached ? (now - cached.ts) / 60000 : 999;
 
@@ -294,6 +330,7 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
       if (shouldFetch(symbol) || cacheAge > 21) {
         raw = await fetchSymbol(pair);
         if (raw) {
+          nullStreaks[symbol] = 0; // reset on success
           const analysed = analyseOrderBook(raw);
 
           // Check freshness BEFORE updating cache
@@ -355,7 +392,8 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
             // fall through to DB write below
           }
         } else {
-          console.log(`[FXSSI] ${symbol} — fetch returned null`);
+          nullStreaks[symbol] = (nullStreaks[symbol] || 0) + 1;
+          console.log(`[FXSSI] ${symbol} — fetch returned null (streak: ${nullStreaks[symbol]})`);
         }
       } else {
         raw = cached?.raw;
@@ -394,59 +432,61 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
           fxssiAnalysis: JSON.stringify(analysed)
         });
 
-      // ── Hourly order book scrape ─────────────────────────────────────────
-      // Scrape period=3600 for the same symbol — staggered with small delay
-      // Institutional levels show up in 1h book, not 20-min book
-      // Store separately — used by scorer for level confirmation
-      try {
-        await new Promise(r => setTimeout(r, 800)); // small delay — avoid rate limit
-        const cachedH  = cacheHourly[symbol];
-        const cacheAgeH = cachedH ? (now - cachedH.ts) / 60000 : 999;
-        if (forceWrite || cacheAgeH > 55) { // scrape hourly once per hour
-          const rawH = await fetchSymbol(pair, 3600);
-          if (rawH) {
-            const analysedH = analyseOrderBook(rawH);
-            const prevSnapH = cacheHourly[symbol]?.analysed?.snapshotTime;
-            const isNewH    = forceWrite || !prevSnapH || rawH.time !== prevSnapH;
-            cacheHourly[symbol] = { raw: rawH, analysed: analysedH, ts: now };
-            if (isNewH) {
-              console.log(`[FXSSI-H] ${symbol} — NEW hourly snapshot. bias:${analysedH?.signals?.bias} levels:${rawH.levels?.length} gravity:${analysedH?.gravity?.price}`);
-              // Merge hourly analysis into existing market data
-              const existingH = getLatestMarketData(symbol);
-              if (existingH) {
-                upsertMarketData(symbol, {
-                  close: existingH.close, high: existingH.high, low: existingH.low,
-                  volume: existingH.volume, ema200: existingH.ema200, vwap: existingH.vwap,
-                  rsi: existingH.rsi, macdHist: existingH.macd_hist,
-                  bias: existingH.bias, biasScore: existingH.bias_score,
-                  structure: existingH.structure,
-                  fvgPresent: existingH.fvg_present === 1,
-                  fvgHigh: existingH.fvg_high || null,
-                  fvgLow: existingH.fvg_low || null,
-                  fvgMid: existingH.fvg_mid || null,
-                  fxssiLongPct: existingH.fxssi_long_pct,
-                  fxssiShortPct: existingH.fxssi_short_pct,
-                  fxssiTrapped: existingH.fxssi_trapped,
-                  obAbsorption: existingH.ob_absorption,
-                  obImbalance: existingH.ob_imbalance,
-                  obLargeOrders: existingH.ob_large_orders,
-                  fxssiAnalysis: existingH.fxssi_analysis,
-                  fxssiHourlyAnalysis: JSON.stringify(analysedH)
-                });
-              }
-            } else {
-              console.log(`[FXSSI-H] ${symbol} — same hourly snapshot, skipping write`);
-            }
-          }
-        }
-      } catch(eH) {
-        console.error(`[FXSSI-H] ${symbol} hourly error:`, eH.message);
-      }
-
       if (broadcast) broadcast({ type: 'FXSSI_UPDATE', symbol, analysed, ts: now });
 
     } catch (e) {
       console.error(`[FXSSI] ${symbol} error:`, e.message);
+    }
+  }
+
+  // ── Separated hourly scrape pass ────────────────────────────────────────────
+  // Run hourly book scrapes as a separate pass with 500ms inter-symbol delay
+  // to avoid rate limiting and keep 20-min + hourly fetches decoupled
+  for (const [symbol, pair] of Object.entries(FXSSI_SYMBOLS)) {
+    try {
+      const cachedH   = cacheHourly[symbol];
+      const cacheAgeH = cachedH ? (now - cachedH.ts) / 60000 : 999;
+      if (!forceWrite && cacheAgeH <= 55) continue; // hourly: once per hour
+
+      await new Promise(r => setTimeout(r, 500)); // 500ms inter-symbol delay for hourly pass
+
+      const rawH = await fetchSymbol(pair, 3600);
+      if (rawH) {
+        const analysedH = analyseOrderBook(rawH);
+        const prevSnapH = cacheHourly[symbol]?.analysed?.snapshotTime;
+        const isNewH    = forceWrite || !prevSnapH || rawH.time !== prevSnapH;
+        cacheHourly[symbol] = { raw: rawH, analysed: analysedH, ts: now };
+        if (isNewH) {
+          console.log(`[FXSSI-H] ${symbol} — NEW hourly snapshot. bias:${analysedH?.signals?.bias} levels:${rawH.levels?.length} gravity:${analysedH?.gravity?.price}`);
+          // Merge hourly analysis into existing market data
+          const existingH = getLatestMarketData(symbol);
+          if (existingH) {
+            upsertMarketData(symbol, {
+              close: existingH.close, high: existingH.high, low: existingH.low,
+              volume: existingH.volume, ema200: existingH.ema200, vwap: existingH.vwap,
+              rsi: existingH.rsi, macdHist: existingH.macd_hist,
+              bias: existingH.bias, biasScore: existingH.bias_score,
+              structure: existingH.structure,
+              fvgPresent: existingH.fvg_present === 1,
+              fvgHigh: existingH.fvg_high || null,
+              fvgLow: existingH.fvg_low || null,
+              fvgMid: existingH.fvg_mid || null,
+              fxssiLongPct: existingH.fxssi_long_pct,
+              fxssiShortPct: existingH.fxssi_short_pct,
+              fxssiTrapped: existingH.fxssi_trapped,
+              obAbsorption: existingH.ob_absorption,
+              obImbalance: existingH.ob_imbalance,
+              obLargeOrders: existingH.ob_large_orders,
+              fxssiAnalysis: existingH.fxssi_analysis,
+              fxssiHourlyAnalysis: JSON.stringify(analysedH)
+            });
+          }
+        } else {
+          console.log(`[FXSSI-H] ${symbol} — same hourly snapshot, skipping write`);
+        }
+      }
+    } catch(eH) {
+      console.error(`[FXSSI-H] ${symbol} hourly error:`, eH.message);
     }
   }
 }
@@ -542,4 +582,4 @@ function getFxssiCacheAge(symbol) {
   return Date.now() - cached.ts;
 }
 
-module.exports = { runFXSSIScrape, processBridgePayload, getFxssiCacheAge };
+module.exports = { runFXSSIScrape, processBridgePayload, getFxssiCacheAge, getFxssiNullStreak };

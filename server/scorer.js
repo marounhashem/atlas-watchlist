@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260330.3'; // forex 15 pairs full scoring, intrabar TP/SL, MOVE_SL 2h
+const SCORER_VERSION = '20260331.1'; // FXSSI stale penalty + gravity direction gate + merge RR guard
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -375,6 +375,7 @@ function estimateATR(data, assetClass) {
 }
 
 const FXSSI_MAX_AGE_MS = 25 * 60 * 1000; // 25 minutes — FXSSI updates at :00/:20/:40, we fetch at :01/:21/:41
+const FXSSI_STALE_PENALTY = 0.82; // multiply score when FXSSI data is stale — less confident without order book
 
 function scoreSymbol(symbol) {
   let data;
@@ -1421,7 +1422,45 @@ function scoreSymbol(symbol) {
       }
     }
   } catch(e) {}
-  const macroAdjustedScore = Math.min(structureCap, Math.min(95, Math.max(0, finalScore + macroScoreAdj)));
+  let macroAdjustedScore = Math.min(structureCap, Math.min(95, Math.max(0, finalScore + macroScoreAdj)));
+
+  // ── FXSSI stale penalty ─────────────────────────────────────────────────────
+  // Without fresh order book, reduce confidence in the score
+  if (hasFxssi && fxssiAge > FXSSI_MAX_AGE_MS) {
+    macroAdjustedScore = Math.round(macroAdjustedScore * FXSSI_STALE_PENALTY);
+    console.log(`[Scorer] ${symbol} — FXSSI stale penalty applied (×${FXSSI_STALE_PENALTY})`);
+  }
+
+  // ── Gravity direction gate ──────────────────────────────────────────────────
+  // Penalise score when FXSSI gravity (price magnet) points against trade direction
+  // Gravity below + LONG = price pulled down against you = 0.88 penalty
+  // Gravity above + SHORT = price pulled up against you = 0.88 penalty
+  try {
+    if (fxssiLevels?.gravity?.price && close > 0) {
+      const gp = fxssiLevels.gravity.price;
+      const gravityAgainst = (direction === 'LONG' && gp < close) || (direction === 'SHORT' && gp > close);
+      if (gravityAgainst) {
+        macroAdjustedScore = Math.round(macroAdjustedScore * 0.88);
+        console.log(`[Scorer] ${symbol} ${direction} — gravity direction gate (gravity ${gp} vs close ${close}) → ×0.88`);
+      }
+    }
+  } catch(e) {}
+
+  // ── Losing cluster proximity penalty ────────────────────────────────────────
+  // If losing clusters (trapped traders) are within 0.3% of entry, the stop-hunt zone
+  // is dangerously close — penalise by 0.85 to discourage entry near the kill zone
+  try {
+    if (fxssiLevels?.losingClusters?.length > 0 && entry && close > 0) {
+      const tooClose = fxssiLevels.losingClusters.some(c =>
+        Math.abs(c.price - entry) / entry <= 0.003
+      );
+      if (tooClose) {
+        macroAdjustedScore = Math.round(macroAdjustedScore * 0.85);
+        console.log(`[Scorer] ${symbol} ${direction} — losing cluster within 0.3% of entry → ×0.85`);
+      }
+    }
+  } catch(e) {}
+
   const macroRangingPenalty = data._dailyBias === 0 ? 4 : 0;
   const macroEffectiveMin = adjustedMinScore + macroRangingPenalty;
   // Structure 0/5 caps verdict to WATCH maximum — cannot be PROCEED
