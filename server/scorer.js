@@ -5,7 +5,7 @@ const { getLatestMarketData, getWeights, insertSignal } = require('./db');
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260331.1'; // FXSSI stale penalty + gravity direction gate + merge RR guard
+const SCORER_VERSION = '20260331.2'; // fix: structScore all 6 TFs, structureZero hoisted, watch signal ID
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -558,6 +558,18 @@ function scoreSymbol(symbol) {
   const obSc      = scoreOrderBook(data, direction);
   const sessionSc = scoreSession(symbol);
 
+  // ── Structure zero pre-check (needed by counter-trend gate below) ────────
+  let structureZero = false;
+  try {
+    if (data.raw_payload) {
+      const rawSZ = JSON.parse(data.raw_payload);
+      const stSZ  = rawSZ.structure;
+      const scSZ  = typeof stSZ?.score === 'number' ? Math.abs(stSZ.score)
+        : (stSZ ? Math.abs((stSZ['1m']||0)+(stSZ['5m']||0)+(stSZ['15m']||0)+(stSZ['1h']||0)+(stSZ['4h']||0)+(stSZ['1d']||0)) : 0);
+      if (scSZ === 0) structureZero = true;
+    }
+  } catch(e) {}
+
   // ── Counter-trend crowd trap gate ────────────────────────────────────────
   // Going against structure requires genuine crowd extremity to fuel the reversal
   // Below 65% trapped = crowd is not squeezed enough = counter-trend has no fuel
@@ -718,7 +730,6 @@ function scoreSymbol(symbol) {
         structScore = st.score;
       } else {
         structScore = (st?.['1m']||0) + (st?.['5m']||0) + (st?.['15m']||0) + (st?.['1h']||0) + (st?.['4h']||0) + (st?.['1d']||0);
-                      (st?.['1h']||0) + (st?.['4h']||0);
       }
     }
   } catch(e) {}
@@ -797,19 +808,10 @@ function scoreSymbol(symbol) {
   // ── Structure 0/5 → force WATCH verdict ──────────────────────────────────
   // Zero TF alignment = no conviction = cannot be PROCEED
   // Still saved to watch_signals for learning — not blocked entirely
-  let structureZero = false;
-  try {
-    if (data.raw_payload) {
-      const rawStruct = JSON.parse(data.raw_payload);
-      const stCheck   = rawStruct.structure;
-      const scCheck   = typeof stCheck?.score === 'number' ? Math.abs(stCheck.score)
-        : (stCheck ? Math.abs((stCheck['1m']||0)+(stCheck['5m']||0)+(stCheck['15m']||0)+(stCheck['1h']||0)+(stCheck['4h']||0)+(stCheck['1d']||0)) : 0);
-      if (scCheck === 0) {
-        structureZero = true;
-        console.log(`[Scorer] ${symbol} ${direction} structure 0/5 — capped to WATCH`);
-      }
-    }
-  } catch(e) {}
+  // structureZero already computed above (pre counter-trend gate)
+  if (structureZero) {
+    console.log(`[Scorer] ${symbol} ${direction} structure 0/5 — capped to WATCH`);
+  }
 
   let structureCap = 95;
   let structTier = 5; // default: 5 TFs aligned
@@ -1476,8 +1478,9 @@ function scoreSymbol(symbol) {
   if (fxssiStale && sl && close > 0 && atr > 0) {
     const maxSlDist = atr * 2.0;
     if (direction === 'LONG' && close - sl > maxSlDist) {
+      const oldSl = sl;
       sl = Math.round((close - maxSlDist) * 10000) / 10000;
-      console.log(`[Scorer] ${symbol} LONG SL capped (FXSSI stale) — was ${close - (close - maxSlDist) + close}+ away, now ${sl}`);
+      console.log(`[Scorer] ${symbol} LONG SL capped (FXSSI stale) — was ${oldSl} (${Math.round(close - oldSl)} away), now ${sl}`);
     }
     if (direction === 'SHORT' && sl - close > maxSlDist) {
       sl = Math.round((close + maxSlDist) * 10000) / 10000;

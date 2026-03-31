@@ -377,6 +377,7 @@ function mergeSignals(keepId, absorbId) {
   // In both cases recalculate TP from newEntry + newSl to restore original keep.rr
   const targetRr = Math.min(Math.max(keep.rr || 2, 1.5), 4.0);
   if (newRr < 1.5 || newRr > 4.0) {
+    const oldRr = newRr;
     const risk = Math.abs(newEntry - newSl);
     const direction = newTp > newEntry ? 1 : -1;
     newTp = Math.round((newEntry + direction * risk * targetRr) * 10000) / 10000;
@@ -384,7 +385,7 @@ function mergeSignals(keepId, absorbId) {
     const recalcRisk   = Math.abs(newEntry - newSl);
     const recalcReward = Math.abs(newTp - newEntry);
     newRr = recalcRisk > 0 ? Math.round((recalcReward / recalcRisk) * 10) / 10 : newRr;
-    console.log(`[DB] Merge RR guard: recalculated TP to ${newTp} (RR ${newRr})`);
+    console.log(`[DB] Merge RR guard: RR was ${oldRr} → recalculated TP to ${newTp} (RR ${newRr})`);
 
     // If RR still cannot reach 1.5 after TP recalculation, block merge entirely
     // Mark absorbed signal as REPLACED — do NOT create an untradeable merged position
@@ -687,9 +688,9 @@ function insertWatchSignal(signal) {
     [signal.symbol, Date.now(), signal.direction, signal.score,
      signal.entry, signal.sl, signal.tp, signal.rr,
      signal.session, signal.reasoning, signal.scorerVersion || null]);
-  const row = db.exec('SELECT last_insert_rowid() as id')[0]?.values?.[0]?.[0];
+  const row = get("SELECT last_insert_rowid() as id");
   persist();
-  return row || null;
+  return row ? row.id : null;
 }
 
 function getRecentWatchSignals(limit = 50) {
