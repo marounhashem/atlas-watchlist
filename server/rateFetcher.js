@@ -19,8 +19,8 @@ const COUNTRY_MAP = {
 
 // Fallback rates — updated when scrape confirms new values
 const FALLBACK_RATES = {
-  USD: 4.33, EUR: 2.65, GBP: 4.50, JPY: 0.50,
-  CHF: 0.25, CAD: 2.75, AUD: 4.10, NZD: 3.75
+  USD: 3.75, EUR: 2.15, GBP: 3.75, JPY: 0.75,
+  CHF: 0.00, CAD: 2.25, AUD: 4.10, NZD: 2.25
 };
 
 // Map ATLAS pair symbols to base/quote currencies for differential calc
