@@ -1,4 +1,6 @@
 const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, updateMFE, run, addRecommendation, getRecommendations, markRecommendationFollowed, dismissRecommendation, resolveStaleRecommendations } = require('./db');
+let _sendRecAlert = null;
+try { _sendRecAlert = require('./telegram').sendRecAlert; } catch(e) {}
 const claudeLearner = require('./claudeLearner');
 
 // checkOutcomes runs across ALL cycles — retired signals still get WIN/LOSS detected
@@ -85,6 +87,10 @@ function checkOutcomes(broadcast) {
             recommendation: rec,
             ts: Date.now()
           });
+          // Telegram push for HIGH urgency recs
+          if (rec.urgency === 'HIGH' && _sendRecAlert) {
+            _sendRecAlert(sig, rec).catch(e => console.error('[Telegram] Rec alert error:', e.message));
+          }
         }
       }
     }

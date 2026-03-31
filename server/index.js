@@ -16,6 +16,7 @@ const { runFXSSIScrape, processBridgePayload, getFxssiCacheAge } = require('./fx
 const { runCOTFetch, getLatestCOT, getCOTSummary, getCOTCurrencies } = require('./cotFetcher');
 const { runRateFetch, loadRatesFromDB, getLatestRates, getRateDifferential } = require('./rateFetcher');
 const { getUpcomingMeetings, isPairEventRisk, getMeetingContext } = require('./centralBankCalendar');
+const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTest } = require('./telegram');
 const { SYMBOLS } = require('./config');
 
 const app = express();
@@ -815,6 +816,101 @@ app.post('/api/macro-force', async (req, res) => {
   runMacroContextFetch(broadcast).catch(e => console.error('[Macro] Manual refresh error:', e.message));
 });
 
+// ── Morning brief builder ─────────────────────────────────────────────────────
+async function buildMorningBrief() {
+  const macro = getMacroContext();
+  const lines = [];
+  lines.push(`<b>🌅 ATLAS // MORNING BRIEF</b>`);
+  lines.push(`${new Date().toUTCString().slice(0, 16)} — Dubai ${new Date().toLocaleString('en-GB', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' })}`);
+  lines.push('');
+
+  // Macro biases
+  lines.push('<b>📊 MACRO BIAS</b>');
+  for (const sym of ['GOLD', 'SILVER', 'OILWTI', 'BTCUSD', 'US30', 'US100']) {
+    const m = macro[sym];
+    if (!m) continue;
+    const icon = m.sentiment === 'BULLISH' ? '↑' : m.sentiment === 'BEARISH' ? '↓' : '○';
+    const bias = m.supports_long ? 'LONG' : m.supports_short ? 'SHORT' : 'AVOID';
+    lines.push(`${icon} <b>${sym}</b> — ${m.sentiment} (${m.strength}/10) → ${bias}`);
+  }
+  lines.push('');
+
+  // COT extremes
+  lines.push('<b>📈 COT EXTREMES</b>');
+  let cotCount = 0;
+  for (const sym of ['GOLD', 'SILVER', 'OIL', 'EUR', 'GBP', 'JPY', 'AUD']) {
+    try {
+      const cot = getLatestCOT(sym);
+      if (!cot || Math.abs(cot.netNonComm) < 50000) continue;
+      const dir = cot.netNonComm > 0 ? 'LONG' : 'SHORT';
+      const chg = cot.changeNetNonComm > 0 ? `↑${Math.abs(Math.round(cot.changeNetNonComm / 1000))}k` : `↓${Math.abs(Math.round(cot.changeNetNonComm / 1000))}k`;
+      lines.push(`⚠ <b>${sym}</b> specs NET ${dir} ${Math.round(cot.netNonComm / 1000)}k (${chg} WoW)`);
+      cotCount++;
+    } catch(e) {}
+  }
+  if (cotCount === 0) lines.push('No extreme positioning detected');
+  lines.push('');
+
+  // Rate differentials — extremes only
+  lines.push('<b>💰 CARRY EXTREMES</b>');
+  let carryCount = 0;
+  for (const pair of ['USDJPY', 'USDCHF', 'GBPJPY', 'AUDJPY', 'GBPCHF']) {
+    const diff = getRateDifferential(pair);
+    if (!diff || diff.strength === 'WEAK' || diff.direction === 'NEUTRAL') continue;
+    lines.push(`${diff.summary}`);
+    carryCount++;
+  }
+  if (carryCount === 0) lines.push('No extreme carry differentials');
+  lines.push('');
+
+  // Upcoming CB meetings
+  const meetings = getUpcomingMeetings(14);
+  if (meetings.length > 0) {
+    lines.push('<b>📅 CENTRAL BANK MEETINGS</b>');
+    for (const m of meetings.slice(0, 5)) {
+      const urgency = m.daysUntil <= 2 ? '🚨' : m.daysUntil <= 7 ? '⚠️' : '📅';
+      lines.push(`${urgency} ${m.bank} — ${m.date} (${m.daysUntil}d)`);
+    }
+    lines.push('');
+  }
+
+  // Active signals
+  const activeSignals = getCurrentCycleSignals(20).filter(s =>
+    s.outcome === 'OPEN' || s.outcome === 'ACTIVE'
+  );
+  if (activeSignals.length > 0) {
+    lines.push('<b>📋 ACTIVE POSITIONS</b>');
+    for (const s of activeSignals) {
+      const dir = s.direction === 'LONG' ? '🟢' : '🔴';
+      const mfe = s.mfe_pct ? ` MFE:+${s.mfe_pct}%` : '';
+      lines.push(`${dir} <b>${s.symbol}</b> ${s.direction} @ ${s.entry} | SL:${s.sl} | TP:${s.tp}${mfe}`);
+    }
+  } else {
+    lines.push('<b>📋 No active positions</b>');
+  }
+
+  return lines.join('\n');
+}
+
+// Telegram test
+app.get('/api/telegram-test', async (req, res) => {
+  const ok = await sendTest();
+  res.json({ ok, message: ok ? 'Message sent' : 'Failed — check TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID' });
+});
+
+// Morning brief preview (returns HTML text, doesn't send)
+app.get('/api/morning-brief', async (req, res) => {
+  const brief = await buildMorningBrief();
+  res.json({ brief });
+});
+
+// Send morning brief via Telegram
+app.post('/api/morning-brief-send', async (req, res) => {
+  const brief = await buildMorningBrief();
+  const ok = await sendMorningBrief(brief);
+  res.json({ ok, brief });
+});
+
 // COT data status — currency-level positioning + pair-level summaries
 app.get('/api/cot-status', (req, res) => {
   const { getAllCOTData } = require('./db');
@@ -1022,6 +1118,10 @@ cron.schedule('* * * * *', async () => {
     if (proceeds.length > 0) {
       console.log(`[Cron] PROCEED signals: ${proceeds.map(r => r.symbol + ' ' + r.direction + ' ' + r.score + '%').join(', ')}`);
       broadcast({ type: 'ALERT', signals: proceeds, ts: Date.now() });
+      // Telegram push for new PROCEED signals (only those that got an id = newly saved)
+      for (const r of proceeds) {
+        if (r.id) sendSignalAlert(r).catch(e => console.error('[Telegram] Signal alert error:', e.message));
+      }
     }
   } catch(e) {
     console.error('[Cron] Scoring error:', e.message);
@@ -1079,6 +1179,18 @@ cron.schedule('0 18 * * *', async () => {
 cron.schedule('0 17 * * *', async () => {
   console.log('[Cron] Running daily session summary...');
   await claudeLearner.dailySessionSummary(broadcast);
+});
+
+// Morning brief via Telegram — 05:00 UTC (09:00 Dubai)
+cron.schedule('0 5 * * *', async () => {
+  console.log('[Telegram] Sending morning brief...');
+  try {
+    const brief = await buildMorningBrief();
+    await sendMorningBrief(brief);
+    console.log('[Telegram] Morning brief sent');
+  } catch(e) {
+    console.error('[Telegram] Morning brief error:', e.message);
+  }
 });
 
 // Daily rate fetch — fires at 06:50 UTC (10 min before macro context)
@@ -1337,6 +1449,9 @@ async function runHealthCheck() {
     });
 
     console.log(`[Health] Alert email sent via Resend — ${problems.map(p => p.symbol).join(', ')}`);
+
+    // Also send via Telegram
+    sendHealthAlert(problems).catch(e => console.error('[Telegram] Health alert error:', e.message));
 
     // Mark alert sent for all affected symbols
     for (const p of problems) {
