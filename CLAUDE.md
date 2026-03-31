@@ -13,7 +13,7 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 `SCORER_VERSION = '20260331.3'`
 
 Changes in 20260331.3:
-- Webhook authentication middleware (WEBHOOK_SECRET env var, bearer token)
+- Webhook authentication via body secret (WEBHOOK_SECRET env var, req.body.secret check)
 - XSS sanitisation via `esc()` helper on all innerHTML signal content
 - Async persist() with write coalescing (no longer blocks event loop)
 - Gravity double-dip removed — scoreFXSSI no longer applies +0.10 for SL cluster in direction (post-score ×0.88 gate handles it)
@@ -45,7 +45,7 @@ Changes in 20260331.2:
 | 4 | structScore used 2/6 TFs | scorer.js | Removed orphaned line that overwrote 6-TF sum | aeb2e79 |
 | 5 | structureZero undefined | scorer.js | Hoisted before counter-trend gate | aeb2e79 |
 | 6 | Watch signal ID always null | db.js | Switched to `get()` consistent with insertSignal | aeb2e79 |
-| 7 | No webhook authentication | index.js | Bearer token middleware on all /webhook/* routes (opt-in via WEBHOOK_SECRET env) | f8733e9 |
+| 7 | No webhook authentication | index.js | Body secret check on /webhook/pine and /webhook/fxssi (opt-in via WEBHOOK_SECRET env) | f8733e9+ |
 | 8 | XSS via innerHTML | index.html | `esc()` sanitiser on symbol, label, reasoning, error msgs | f8733e9 |
 | 9 | Error stack leak on /api/score-now | index.js | Log internally, return generic error to client | f8733e9 |
 | 10 | Synchronous persist() blocks event loop | db.js | Async fs.writeFile with write coalescing | f8733e9 |
@@ -77,7 +77,7 @@ Changes in 20260331.2:
 - **Single-process.** All crons (scoring, FXSSI scraping, outcome checking, learning, health) run in one Node.js process via node-cron. Acceptable for current scale (~22 symbols, 1 user).
 - **FXSSI as primary weight** (0.45 default). Order book data drives entry/SL/TP placement and contrarian sentiment. Pine technical analysis is secondary (0.40). Session multiplier is 0.15.
 - **Claude learning** uses Haiku for cost efficiency. Weight adjustments are capped at ±0.03 per cycle, 6-hour minimum between cycles, 30+ trades required per symbol.
-- **Webhook auth** is opt-in via `WEBHOOK_SECRET` env var. When set, all `/webhook/*` routes require `Authorization: Bearer <token>` or `X-Webhook-Secret` header. TradingView alerts support custom headers.
+- **Webhook auth** is opt-in via `WEBHOOK_SECRET` env var. When set, `/webhook/pine` and `/webhook/fxssi` require `req.body.secret` to match. Include `"secret": "<value>"` in the JSON payload. `/webhook/fxssi-rich` has no auth (browser extension backup).
 - **persist()** is async with write coalescing — multiple rapid persist() calls collapse into a single disk write. The 15s interval flush remains as a safety net.
 
 ## Rules

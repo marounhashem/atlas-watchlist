@@ -22,18 +22,6 @@ const wss = new WebSocket.Server({ server });
 // DB ready flag — webhook queues until DB is initialised
 let dbReady = false;
 
-// ── Webhook authentication middleware ─────────────────────────────────────────
-// Set WEBHOOK_SECRET env var to require bearer token on all webhook endpoints
-function webhookAuth(req, res, next) {
-  const secret = process.env.WEBHOOK_SECRET;
-  if (!secret) return next(); // no secret configured = open (backwards-compatible)
-  const auth = req.headers['authorization'] || req.headers['x-webhook-secret'] || '';
-  const token = auth.startsWith('Bearer ') ? auth.slice(7) : auth;
-  if (token === secret) return next();
-  console.log(`[Auth] Rejected webhook from ${req.ip} — invalid token`);
-  return res.status(401).json({ error: 'Unauthorized' });
-}
-
 // Custom body parser that handles Pine Script's invalid NaN values
 app.use((req, res, next) => {
   if (req.method !== 'POST') return next();
@@ -89,8 +77,10 @@ wss.on('connection', ws => {
 //   "ema200": 3240, "vwap": 3281, "rsi": 62, "macdHist": 0.45,
 //   "bias": 2, "biasScore": 0.72, "structure": "bullish",
 //   "fvgPresent": true, "volume": 12400 }
-app.post('/webhook/pine', webhookAuth, (req, res) => {
+app.post('/webhook/pine', (req, res) => {
   if (!dbReady) return res.status(503).json({ error: 'DB initialising, retry in 5s' });
+  const ws = process.env.WEBHOOK_SECRET;
+  if (ws && req.body.secret !== ws) return res.status(401).json({ error: 'Unauthorized' });
   try {
   const data = req.body;
 
@@ -252,7 +242,9 @@ app.post('/webhook/pine', webhookAuth, (req, res) => {
 });
 
 // ── Webhook: FXSSI manual paste ──────────────────────────────────────────────
-app.post('/webhook/fxssi', webhookAuth, (req, res) => {
+app.post('/webhook/fxssi', (req, res) => {
+  const ws = process.env.WEBHOOK_SECRET;
+  if (ws && req.body.secret !== ws) return res.status(401).json({ error: 'Unauthorized' });
   const { symbol, longPct, shortPct, trapped } = req.body;
   if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
   const sym = symbol.toUpperCase();
@@ -656,7 +648,7 @@ app.get('/api/fxssi-test', async (req, res) => {
 });
 
 // FXSSI Rich webhook — accepts payload from browser extension as backup
-app.post('/webhook/fxssi-rich', webhookAuth, (req, res) => {
+app.post('/webhook/fxssi-rich', (req, res) => {
   const payload = req.body;
   if (!payload || !payload.fxssi) return res.status(400).json({ error: 'Missing fxssi data' });
   const result = processBridgePayload(payload);
