@@ -10,7 +10,14 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260331.7'`
+`SCORER_VERSION = '20260331.8'`
+
+Changes in 20260331.8:
+- Startup macro context fetch (12s delay) — seeds macro before first scoring cycle
+- POST /api/macro-force endpoint for manual macro refresh
+- New column: signals.macro_context_available (0/1) — distinguishes signals scored with vs without macro data
+- ACTIVE dedup fix: checks ALL cycles, not just cycle=0 — prevents duplicate positions after retirement
+- Root cause of SILVER duplicate: ACTIVE signal retired to cycle>0 became invisible to dedup gate
 
 Changes in 20260331.7:
 - Central bank meeting calendar — server/centralBankCalendar.js
