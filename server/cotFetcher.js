@@ -118,9 +118,10 @@ async function fetchCOTForCurrency(currency, contractName) {
 }
 
 async function runCOTFetch() {
-  console.log('[COT] Starting weekly COT data fetch...');
+  console.log('[COT] runCOTFetch() called — starting fetch for', Object.keys(COT_CURRENCIES).length, 'currencies');
   let fetched = 0;
 
+  try {
   for (const [currency, contractName] of Object.entries(COT_CURRENCIES)) {
     try {
       const result = await fetchCOTForCurrency(currency, contractName);
@@ -145,6 +146,9 @@ async function runCOTFetch() {
   }
 
   console.log(`[COT] Fetch complete — ${fetched}/${Object.keys(COT_CURRENCIES).length} currencies updated`);
+  } catch(e) {
+    console.error('[COT] FATAL fetch error:', e.message, e.stack);
+  }
 }
 
 // ── Get raw COT data for a single currency ──────────────────────────────────

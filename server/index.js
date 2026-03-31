@@ -857,6 +857,27 @@ app.get('/api/cot-force', async (req, res) => {
   }
 });
 
+// Raw CFTC API test — single fetch for EUR, returns full response for debugging
+app.get('/api/cot-test', async (req, res) => {
+  const testUrl = 'https://publicreporting.cftc.gov/api/explore/v2.1/catalog/datasets/fut_disagg_txt_hist_2006_2016/records?where=' +
+    encodeURIComponent('market_and_exchange_names = "EURO FX - CHICAGO MERCANTILE EXCHANGE"') +
+    '&order_by=report_date_as_yyyy_mm_dd DESC&limit=1';
+  try {
+    console.log('[COT-test] Fetching:', testUrl);
+    const r = await fetch(testUrl, { headers: { 'Accept': 'application/json' } });
+    const status = r.status;
+    const text = await r.text();
+    console.log('[COT-test] HTTP', status, 'body length:', text.length);
+    try {
+      res.json({ status, body: JSON.parse(text) });
+    } catch(e) {
+      res.json({ status, raw: text.slice(0, 2000) });
+    }
+  } catch(e) {
+    res.json({ error: e.message, stack: e.stack?.split('\n').slice(0,3) });
+  }
+});
+
 // Mark a WATCH signal paper outcome manually (if auto-detection missed it)
 app.post('/api/paper-outcome', (req, res) => {
   const { signalId, paperOutcome } = req.body;
@@ -1176,18 +1197,20 @@ server.listen(PORT, () => {
         .catch(e => console.error('[Startup] FXSSI scrape error:', e.message));
     }, 2000);
     // Seed COT data on first deploy if table is empty
-    setTimeout(async () => {
+    setTimeout(() => {
+      console.log('[Startup] COT seed check starting...');
       try {
-        const { getLatestCOT } = require('./cotFetcher');
-        const goldCOT = getLatestCOT('GOLD');
+        const cotMod = require('./cotFetcher');
+        const goldCOT = cotMod.getLatestCOT('GOLD');
+        console.log('[Startup] COT seed check — GOLD data:', goldCOT ? 'exists' : 'EMPTY');
         if (!goldCOT) {
           console.log('[Startup] COT table empty — running initial fetch...');
-          const { runCOTFetch } = require('./cotFetcher');
-          await runCOTFetch();
-          console.log('[Startup] Initial COT fetch complete');
+          cotMod.runCOTFetch()
+            .then(() => console.log('[Startup] Initial COT fetch complete'))
+            .catch(e => console.error('[Startup] COT runCOTFetch error:', e.message, e.stack));
         }
       } catch(e) {
-        console.error('[Startup] COT fetch error:', e.message);
+        console.error('[Startup] COT seed error:', e.message, e.stack);
       }
     }, 5000);
     // Expire OPEN signals from old scorer versions — keeps board clean after deploys
