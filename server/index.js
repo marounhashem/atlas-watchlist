@@ -856,25 +856,38 @@ app.get('/api/cot-force', async (req, res) => {
   }
 });
 
-// Raw CFTC API test — single fetch for EUR, returns full response for debugging
+// Raw CFTC API test — single fetch for GOLD (commodity) + EUR (forex), returns full responses
 app.get('/api/cot-test', async (req, res) => {
-  const testUrl = "https://publicreporting.cftc.gov/api/explore/dataset/fut_disagg_pos_hist_2006_to_present/records" +
-    "?limit=1&order_by=report_date_as_yyyy_mm_dd+desc&refine=market_and_exchange_names=" +
-    encodeURIComponent("EURO FX - CHICAGO MERCANTILE EXCHANGE");
-  try {
-    console.log('[COT-test] Fetching:', testUrl);
-    const r = await fetch(testUrl, { headers: { 'Accept': 'application/json' } });
-    const status = r.status;
-    const text = await r.text();
-    console.log('[COT-test] HTTP', status, 'body length:', text.length);
+  const tests = {
+    EUR:  "EURO FX - CHICAGO MERCANTILE EXCHANGE",
+    GOLD: "GOLD - COMMODITY EXCHANGE INC.",
+    OIL:  "WTI-PHYSICAL - NEW YORK MERCANTILE EXCHANGE"
+  };
+  const results = {};
+  for (const [label, name] of Object.entries(tests)) {
+    const testUrl = `https://publicreporting.cftc.gov/resource/jun7-fc8e.json?$where=market_and_exchange_names='${encodeURIComponent(name)}'&$order=report_date_as_yyyy_mm_dd DESC&$limit=1`;
     try {
-      res.json({ status, body: JSON.parse(text) });
+      const r = await fetch(testUrl, { headers: { 'Accept': 'application/json' } });
+      const text = await r.text();
+      try {
+        const parsed = JSON.parse(text);
+        const rec = Array.isArray(parsed) && parsed[0];
+        results[label] = {
+          status: r.status,
+          records: Array.isArray(parsed) ? parsed.length : 0,
+          date: rec?.report_date_as_yyyy_mm_dd?.slice(0,10),
+          noncomm_long: rec?.noncomm_positions_long_all,
+          noncomm_short: rec?.noncomm_positions_short_all,
+          name: rec?.market_and_exchange_names
+        };
+      } catch(e) {
+        results[label] = { status: r.status, raw: text.slice(0, 300) };
+      }
     } catch(e) {
-      res.json({ status, raw: text.slice(0, 2000) });
+      results[label] = { error: e.message };
     }
-  } catch(e) {
-    res.json({ error: e.message, stack: e.stack?.split('\n').slice(0,3) });
   }
+  res.json(results);
 });
 
 // Mark a WATCH signal paper outcome manually (if auto-detection missed it)

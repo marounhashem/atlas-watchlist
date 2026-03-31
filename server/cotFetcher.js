@@ -1,29 +1,28 @@
 // COT (Commitment of Traders) Data Fetcher — CFTC weekly reports
-// Fetches disaggregated futures positioning from CFTC public API
+// Fetches disaggregated futures positioning from CFTC Socrata SODA API
 // Stored at CURRENCY level (EUR, GBP, JPY) not pair level (EURUSD, GBPUSD)
 // Resolved to pair level on read via getLatestCOT(symbol)
 
-// CFTC public explore API — Disaggregated Futures Positions (2006-present)
-const COT_BASE = 'https://publicreporting.cftc.gov/api/explore/dataset/fut_disagg_pos_hist_2006_to_present/records';
+// CFTC Socrata SODA API — Disaggregated Futures and Options Combined
+// Dataset: jun7-fc8e (fut_disagg_pos_hist_2006_to_present)
+const COT_API = 'https://publicreporting.cftc.gov/resource/jun7-fc8e.json';
 
-// Map currency codes to CFTC contract names — stored at currency level
+// Map currency codes to CFTC market_and_exchange_names (exact match required)
+// Verified against live API responses 2026-03-31
 const COT_CURRENCIES = {
   EUR:    'EURO FX - CHICAGO MERCANTILE EXCHANGE',
-  GBP:    'BRITISH POUND - CHICAGO MERCANTILE EXCHANGE',
+  GBP:    'BRITISH POUND STERLING - CHICAGO MERCANTILE EXCHANGE',
   JPY:    'JAPANESE YEN - CHICAGO MERCANTILE EXCHANGE',
   CHF:    'SWISS FRANC - CHICAGO MERCANTILE EXCHANGE',
   CAD:    'CANADIAN DOLLAR - CHICAGO MERCANTILE EXCHANGE',
   AUD:    'AUSTRALIAN DOLLAR - CHICAGO MERCANTILE EXCHANGE',
   NZD:    'NEW ZEALAND DOLLAR - CHICAGO MERCANTILE EXCHANGE',
-  GOLD:   'GOLD - CHICAGO MERCANTILE EXCHANGE',
-  SILVER: 'SILVER - CHICAGO MERCANTILE EXCHANGE',
-  OIL:    'CRUDE OIL, LIGHT SWEET - ICE FUTURES EUROPE'
+  GOLD:   'GOLD - COMMODITY EXCHANGE INC.',
+  SILVER: 'SILVER - COMMODITY EXCHANGE INC.',
+  OIL:    'WTI-PHYSICAL - NEW YORK MERCANTILE EXCHANGE'
 };
 
 // Map ATLAS pair symbols to their currency components
-// base: currency that is "bought" when going LONG on the pair
-// quote: currency that is "sold" when going LONG on the pair
-// inverted: if true, specs long on the quote currency = bearish for the pair
 const PAIR_MAP = {
   // XXX/USD pairs — base has COT, USD does not
   EURUSD: { base: 'EUR', quote: null },
@@ -31,7 +30,6 @@ const PAIR_MAP = {
   AUDUSD: { base: 'AUD', quote: null },
   NZDUSD: { base: 'NZD', quote: null },
   // USD/XXX pairs — quote has COT, interpretation is inverted
-  // specs long JPY = bearish USDJPY
   USDJPY: { base: null, quote: 'JPY', inverted: true },
   USDCHF: { base: null, quote: 'CHF', inverted: true },
   USDCAD: { base: null, quote: 'CAD', inverted: true },
@@ -50,56 +48,58 @@ const PAIR_MAP = {
 };
 
 // In-memory cache of latest COT data per currency
-const cotCache = {}; // { currency: { netNonComm, netComm, ... , ts } }
+const cotCache = {};
 
 async function fetchCOTForCurrency(currency, contractName) {
-  // CFTC explore API: refine= for filtering, order_by= for sorting
-  const url = `${COT_BASE}?limit=2&order_by=report_date_as_yyyy_mm_dd+desc&refine=market_and_exchange_names=${encodeURIComponent(contractName)}`;
-  console.log(`[COT] ${currency} fetching: ${url.slice(0, 250)}`);
+  // SODA API: $where with single-quoted values, $order, $limit
+  const url = `${COT_API}?$where=market_and_exchange_names='${encodeURIComponent(contractName)}'&$order=report_date_as_yyyy_mm_dd DESC&$limit=2`;
+  console.log(`[COT] ${currency} fetching...`);
 
   const res = await fetch(url, {
     headers: { 'Accept': 'application/json' }
   });
 
-  console.log(`[COT] ${currency} HTTP ${res.status} ${res.statusText}`);
+  console.log(`[COT] ${currency} HTTP ${res.status}`);
 
   if (!res.ok) {
     const body = await res.text().catch(() => '(no body)');
-    console.error(`[COT] ${currency} error body: ${body.slice(0, 500)}`);
+    console.error(`[COT] ${currency} error body: ${body.slice(0, 300)}`);
     return null;
   }
 
   const data = await res.json();
-  // Explore API returns { total_count, records: [{ record: { fields: {...} } }] }
-  const records = data.records || data.results || [];
-  console.log(`[COT] ${currency} total_count: ${data.total_count} records: ${records.length}`);
 
-  if (records.length === 0) {
-    console.log(`[COT] ${currency} — no records found for "${contractName}"`);
+  // SODA returns flat array or error object
+  if (!Array.isArray(data)) {
+    console.error(`[COT] ${currency} unexpected response:`, JSON.stringify(data).slice(0, 300));
     return null;
   }
 
-  // Extract fields — explore API nests under record.fields
-  const f = records[0].record?.fields || records[0].fields || records[0];
-  console.log(`[COT] ${currency} date: ${f.report_date_as_yyyy_mm_dd} noncomm_long: ${f.noncomm_positions_long_all} noncomm_short: ${f.noncomm_positions_short_all}`);
+  console.log(`[COT] ${currency} — API returned ${data.length} records`);
 
-  const noncommLong  = parseInt(f.noncomm_positions_long_all || 0);
-  const noncommShort = parseInt(f.noncomm_positions_short_all || 0);
-  const commLong     = parseInt(f.comm_positions_long_all || 0);
-  const commShort    = parseInt(f.comm_positions_short_all || 0);
-  const openInterest = parseInt(f.open_interest_all || 0);
+  if (data.length === 0) {
+    console.log(`[COT] ${currency} — no records for "${contractName}"`);
+    return null;
+  }
+
+  const r = data[0];
+  console.log(`[COT] ${currency} date:${r.report_date_as_yyyy_mm_dd?.slice(0,10)} noncomm_long:${r.noncomm_positions_long_all} noncomm_short:${r.noncomm_positions_short_all}`);
+
+  const noncommLong  = parseInt(r.noncomm_positions_long_all || 0);
+  const noncommShort = parseInt(r.noncomm_positions_short_all || 0);
+  const commLong     = parseInt(r.comm_positions_long_all || 0);
+  const commShort    = parseInt(r.comm_positions_short_all || 0);
+  const openInterest = parseInt(r.open_interest_all || 0);
 
   const netNonComm = noncommLong - noncommShort;
   const netComm    = commLong - commShort;
 
-  // Weekly change: use the API's built-in change fields (this week vs last week)
-  // changeNetNonComm = change_in_noncomm_long - change_in_noncomm_short
-  const changeLong  = parseInt(f.change_in_noncomm_long_all || 0);
-  const changeShort = parseInt(f.change_in_noncomm_short_all || 0);
+  // Weekly change from API's built-in change fields
+  const changeLong  = parseInt(r.change_in_noncomm_long_all || 0);
+  const changeShort = parseInt(r.change_in_noncomm_short_all || 0);
   const changeNetNonComm = changeLong - changeShort;
 
-  // Extract report date — may be ISO timestamp or date string
-  let reportDate = f.report_date_as_yyyy_mm_dd || null;
+  let reportDate = r.report_date_as_yyyy_mm_dd || null;
   if (reportDate && reportDate.length > 10) reportDate = reportDate.slice(0, 10);
 
   return {
@@ -116,7 +116,7 @@ async function fetchCOTForCurrency(currency, contractName) {
 }
 
 async function runCOTFetch() {
-  console.log('[COT] runCOTFetch() called — starting fetch for', Object.keys(COT_CURRENCIES).length, 'currencies');
+  console.log('[COT] runCOTFetch() called — fetching', Object.keys(COT_CURRENCIES).length, 'currencies');
   let fetched = 0;
   const errors = [];
 
@@ -127,26 +127,24 @@ async function runCOTFetch() {
         if (result) {
           cotCache[currency] = { ...result, ts: Date.now() };
           fetched++;
-          console.log(`[COT] ${currency} — date:${result.reportDate} netNonComm:${result.netNonComm > 0 ? '+' : ''}${result.netNonComm} change:${result.changeNetNonComm > 0 ? '+' : ''}${result.changeNetNonComm} OI:${result.openInterest}`);
+          console.log(`[COT] ✓ ${currency} — date:${result.reportDate} net:${result.netNonComm > 0 ? '+' : ''}${result.netNonComm} Δ:${result.changeNetNonComm > 0 ? '+' : ''}${result.changeNetNonComm} OI:${result.openInterest}`);
 
-          // Persist to DB keyed by currency code
           try {
             const { upsertCOTData } = require('./db');
             upsertCOTData(currency, result);
           } catch(e) { console.error(`[COT] ${currency} DB write error:`, e.message); }
         } else {
           errors.push({ currency, error: 'no data returned' });
-          console.log(`[COT] ${currency} — no data returned`);
         }
 
         await new Promise(r => setTimeout(r, 500));
       } catch(e) {
         errors.push({ currency, error: e.message });
-        console.error(`[COT] ${currency} error:`, e.message);
+        console.error(`[COT] ✗ ${currency} error:`, e.message);
       }
     }
 
-    console.log(`[COT] Fetch complete — ${fetched}/${Object.keys(COT_CURRENCIES).length} currencies updated`);
+    console.log(`[COT] Fetch complete — ${fetched}/${Object.keys(COT_CURRENCIES).length} currencies updated${errors.length ? ', ' + errors.length + ' errors' : ''}`);
   } catch(e) {
     console.error('[COT] FATAL fetch error:', e.message, e.stack);
     errors.push({ currency: 'FATAL', error: e.message });
@@ -181,7 +179,6 @@ function getCurrencyCOT(currency) {
 }
 
 // ── Resolve ATLAS pair symbol to COT data ───────────────────────────────────
-// Returns { base, quote, baseCOT, quoteCOT, inverted } or null
 function getLatestCOT(symbol) {
   const mapping = PAIR_MAP[symbol];
   if (!mapping) return null;
