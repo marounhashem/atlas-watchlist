@@ -1,13 +1,14 @@
 // Central Bank Interest Rate Tracker
-// Scrapes Myfxbook interest rates page, falls back to hardcoded rates
+// Scrapes Trading Economics interest rate table (embedded JSON in HTML)
+// Falls back to hardcoded rates if scrape fails
 // Used by scorer for carry trade alignment and macro context enrichment
 
-const MYFXBOOK_URL = 'https://www.myfxbook.com/forex-economic-calendar/interest-rates';
+const TE_URL = 'https://tradingeconomics.com/country-list/interest-rate';
 
-// Country name → currency mapping (matches Myfxbook table rows)
+// Trading Economics country name → currency mapping
 const COUNTRY_MAP = {
   'United States':  'USD',
-  'Euro Zone':      'EUR',
+  'Euro Area':      'EUR',
   'United Kingdom': 'GBP',
   'Japan':          'JPY',
   'Switzerland':    'CHF',
@@ -16,7 +17,7 @@ const COUNTRY_MAP = {
   'New Zealand':    'NZD'
 };
 
-// Fallback rates — updated manually when central banks announce
+// Fallback rates — updated when scrape confirms new values
 const FALLBACK_RATES = {
   USD: 4.33, EUR: 2.65, GBP: 4.50, JPY: 0.50,
   CHF: 0.25, CAD: 2.75, AUD: 4.10, NZD: 3.75
@@ -43,10 +44,11 @@ const RATE_PAIRS = {
 // In-memory cache: { currency: { ratePct, source, ts } }
 const rateCache = {};
 
-// ── Scrape Myfxbook interest rates page ─────────────────────────────────────
-async function scrapeMyfxbook() {
-  console.log('[Rate] Scraping Myfxbook interest rates...');
-  const res = await fetch(MYFXBOOK_URL, {
+// ── Scrape Trading Economics ────────────────────────────────────────────────
+// The page embeds a `var data = [...]` JSON array with all countries
+async function scrapeTradingEconomics() {
+  console.log('[Rate] Scraping Trading Economics...');
+  const res = await fetch(TE_URL, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
       'Accept': 'text/html'
@@ -54,41 +56,53 @@ async function scrapeMyfxbook() {
   });
 
   if (!res.ok) {
-    console.error(`[Rate] Myfxbook HTTP ${res.status}`);
+    console.error(`[Rate] Trading Economics HTTP ${res.status}`);
     return null;
   }
 
   const html = await res.text();
-  console.log(`[Rate] Myfxbook HTML length: ${html.length}`);
+  console.log(`[Rate] HTML length: ${html.length}`);
+
+  // Extract `var data = [...]` JSON block
+  const marker = 'var data = [';
+  const start = html.indexOf(marker);
+  if (start === -1) {
+    console.error('[Rate] "var data = [" marker not found in HTML');
+    return null;
+  }
+
+  const arrStart = start + marker.length - 1; // include the [
+  let depth = 0;
+  let arrEnd = -1;
+  for (let i = arrStart; i < html.length; i++) {
+    if (html[i] === '[') depth++;
+    if (html[i] === ']') { depth--; if (depth === 0) { arrEnd = i + 1; break; } }
+  }
+
+  if (arrEnd === -1) {
+    console.error('[Rate] Could not find end of data array');
+    return null;
+  }
+
+  let arr;
+  try {
+    arr = JSON.parse(html.slice(arrStart, arrEnd));
+  } catch(e) {
+    console.error('[Rate] JSON parse error:', e.message);
+    return null;
+  }
+
+  console.log(`[Rate] Parsed ${arr.length} countries from Trading Economics`);
 
   const rates = {};
-
-  for (const [country, currency] of Object.entries(COUNTRY_MAP)) {
-    try {
-      // Find the country name in the HTML, then extract the rate value nearby
-      // Myfxbook table rows contain country name and rate percentage
-      // Pattern: country name appears, followed by a rate like "4.33%" in a nearby cell
-      const countryIdx = html.indexOf(country);
-      if (countryIdx === -1) {
-        console.log(`[Rate] ${currency} — "${country}" not found in HTML`);
-        continue;
+  for (const item of arr) {
+    const currency = COUNTRY_MAP[item.name];
+    if (currency && item.value != null) {
+      const ratePct = parseFloat(item.value);
+      if (!isNaN(ratePct) && ratePct >= 0 && ratePct < 30) {
+        rates[currency] = ratePct;
+        console.log(`[Rate] ✓ ${currency} (${item.name}): ${ratePct}%`);
       }
-
-      // Look for percentage pattern within 500 chars after country name
-      const searchWindow = html.slice(countryIdx, countryIdx + 500);
-      // Match patterns like: >4.33%< or >4.33 %< or "4.33%" or just digits with %
-      const rateMatch = searchWindow.match(/(\d+\.?\d*)\s*%/);
-      if (rateMatch) {
-        const ratePct = parseFloat(rateMatch[1]);
-        if (!isNaN(ratePct) && ratePct >= 0 && ratePct < 30) { // sanity check
-          rates[currency] = ratePct;
-          console.log(`[Rate] ✓ ${currency} (${country}): ${ratePct}%`);
-        }
-      } else {
-        console.log(`[Rate] ${currency} — no rate pattern found near "${country}"`);
-      }
-    } catch(e) {
-      console.error(`[Rate] ${currency} parse error:`, e.message);
     }
   }
 
@@ -98,26 +112,26 @@ async function scrapeMyfxbook() {
 async function runRateFetch() {
   console.log('[Rate] Starting rate fetch for', Object.keys(COUNTRY_MAP).length, 'currencies');
   let fetched = 0;
-  let source = 'scrape';
+  let source = 'fallback';
   const errors = [];
 
-  // Try scraping Myfxbook first
+  // Try scraping Trading Economics
   let scraped = null;
   try {
-    scraped = await scrapeMyfxbook();
+    scraped = await scrapeTradingEconomics();
+    if (scraped) source = 'tradingeconomics';
   } catch(e) {
     console.error('[Rate] Scrape failed:', e.message);
+    errors.push({ error: 'scrape_failed', message: e.message });
   }
 
   for (const currency of Object.keys(FALLBACK_RATES)) {
     let ratePct = scraped?.[currency];
-    let rateSource = 'myfxbook';
+    let rateSource = 'tradingeconomics';
 
-    // Fall back to hardcoded if scrape missed this currency
     if (ratePct == null) {
       ratePct = FALLBACK_RATES[currency];
       rateSource = 'fallback';
-      if (!scraped) errors.push({ currency, error: 'scrape failed, using fallback' });
     }
 
     rateCache[currency] = { ratePct, source: rateSource, ts: Date.now() };
@@ -127,35 +141,29 @@ async function runRateFetch() {
       const { upsertRateData } = require('./db');
       upsertRateData(currency, { ratePct, lastUpdated: new Date().toISOString().slice(0, 10) });
     } catch(e) { console.error(`[Rate] ${currency} DB write error:`, e.message); }
-
-    console.log(`[Rate] ${currency}: ${ratePct}% (${rateSource})`);
   }
 
-  console.log(`[Rate] Fetch complete — ${fetched}/${Object.keys(FALLBACK_RATES).length} currencies (source: ${scraped ? 'myfxbook' : 'fallback'})`);
-  return { fetched, total: Object.keys(FALLBACK_RATES).length, source: scraped ? 'myfxbook' : 'fallback', errors };
+  console.log(`[Rate] Fetch complete — ${fetched}/${Object.keys(FALLBACK_RATES).length} currencies (source: ${source})`);
+  return { fetched, total: Object.keys(FALLBACK_RATES).length, source, errors };
 }
 
 // ── Load from DB on startup (no scrape) ─────────────────────────────────────
 function loadRatesFromDB() {
   let loaded = 0;
-  const maxAge = 25 * 60 * 60 * 1000; // 25 hours
+  const maxAge = 25 * 60 * 60 * 1000;
   for (const currency of Object.keys(FALLBACK_RATES)) {
     if (rateCache[currency]) { loaded++; continue; }
     try {
       const { getRateData } = require('./db');
       const row = getRateData(currency);
       if (row && (Date.now() - row.ts) < maxAge) {
-        rateCache[currency] = {
-          ratePct:     row.rate_pct,
-          source:      'db',
-          ts:          row.ts
-        };
+        rateCache[currency] = { ratePct: row.rate_pct, source: 'db', ts: row.ts };
         loaded++;
       }
     } catch(e) {}
   }
 
-  // Fill gaps with hardcoded fallback
+  // Fill gaps with fallback
   for (const [currency, rate] of Object.entries(FALLBACK_RATES)) {
     if (!rateCache[currency]) {
       rateCache[currency] = { ratePct: rate, source: 'fallback', ts: 0 };
@@ -169,10 +177,7 @@ function loadRatesFromDB() {
 // ── Get rate for a currency ─────────────────────────────────────────────────
 function getCurrencyRate(currency) {
   if (rateCache[currency]) return rateCache[currency];
-  // Final fallback
-  if (FALLBACK_RATES[currency]) {
-    return { ratePct: FALLBACK_RATES[currency], source: 'fallback', ts: 0 };
-  }
+  if (FALLBACK_RATES[currency]) return { ratePct: FALLBACK_RATES[currency], source: 'fallback', ts: 0 };
   return null;
 }
 

@@ -909,17 +909,30 @@ app.get('/api/rate-status', (req, res) => {
   res.json({ rates, differentials });
 });
 
-// Raw Myfxbook HTML test — returns status + first 2000 chars for debugging
+// Raw Trading Economics test — scrapes and returns extracted rates for debugging
 app.get('/api/rate-test', async (req, res) => {
   try {
-    const r = await fetch('https://www.myfxbook.com/forex-economic-calendar/interest-rates', {
+    const r = await fetch('https://tradingeconomics.com/country-list/interest-rate', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
         'Accept': 'text/html'
       }
     });
-    const text = await r.text();
-    res.json({ status: r.status, length: text.length, body: text.slice(0, 2000) });
+    const html = await r.text();
+    const marker = 'var data = [';
+    const start = html.indexOf(marker);
+    if (start === -1) return res.json({ status: r.status, error: 'marker not found', htmlSnippet: html.slice(0, 1000) });
+    const arrStart = start + marker.length - 1;
+    let depth = 0, arrEnd = -1;
+    for (let i = arrStart; i < html.length; i++) {
+      if (html[i] === '[') depth++;
+      if (html[i] === ']') { depth--; if (depth === 0) { arrEnd = i + 1; break; } }
+    }
+    const arr = JSON.parse(html.slice(arrStart, arrEnd));
+    const targets = { 'United States':'USD','Euro Area':'EUR','United Kingdom':'GBP','Japan':'JPY','Switzerland':'CHF','Canada':'CAD','Australia':'AUD','New Zealand':'NZD' };
+    const rates = {};
+    for (const item of arr) { if (targets[item.name]) rates[targets[item.name]] = item.value; }
+    res.json({ status: r.status, totalCountries: arr.length, rates });
   } catch(e) {
     res.json({ error: e.message });
   }
