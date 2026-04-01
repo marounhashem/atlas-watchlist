@@ -202,6 +202,7 @@ async function runCalendarCheck(broadcast) {
     }
 
     const { upsertEconomicEvent, markEventFired } = require('./db');
+    console.log(`[Calendar] Processing ${highImpact.length} HIGH impact events for storage...`);
 
     for (const { event: e, sources } of highImpact) {
       const eventDate = e.date.slice(0, 10);
@@ -209,12 +210,16 @@ async function runCalendarCheck(broadcast) {
       const eventId = `${e.country}_${eventDate}_${e.title}`;
       const sourcesArr = Array.from(sources);
 
-      upsertEconomicEvent({
-        eventId, title: e.title, currency: e.country,
-        eventDate, eventTime, impact: e.impact,
-        forecast: e.forecast || null, previous: e.previous || null
-      });
-      stored++;
+      try {
+        upsertEconomicEvent({
+          eventId, title: e.title, currency: e.country,
+          eventDate, eventTime, impact: e.impact,
+          forecast: e.forecast || null, previous: e.previous || null
+        });
+        stored++;
+      } catch(ue) {
+        console.error(`[Calendar] upsert error for ${e.title}:`, ue.message);
+      }
 
       // Detect fired events
       const eventTs = new Date(e.date);

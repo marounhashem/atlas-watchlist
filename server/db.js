@@ -128,7 +128,7 @@ function initSchema() {
   // Economic calendar events — Forex Factory HIGH impact events
   db.run(`CREATE TABLE IF NOT EXISTS economic_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_id TEXT UNIQUE,
+    event_id TEXT,
     title TEXT NOT NULL,
     currency TEXT NOT NULL,
     event_date TEXT NOT NULL,
@@ -141,7 +141,7 @@ function initSchema() {
     ts INTEGER NOT NULL
   )`);
   // Migrations for existing DBs
-  try { db.run('ALTER TABLE economic_events ADD COLUMN event_id TEXT UNIQUE'); } catch(e) {}
+  try { db.run('ALTER TABLE economic_events ADD COLUMN event_id TEXT'); } catch(e) {}
   try { db.run('ALTER TABLE economic_events ADD COLUMN fired INTEGER DEFAULT 0'); } catch(e) {}
   try { db.run('ALTER TABLE economic_events ADD COLUMN sentiment INTEGER DEFAULT 0'); } catch(e) {}
   try { db.run('ALTER TABLE economic_events ADD COLUMN sentiment_magnitude TEXT'); } catch(e) {}
