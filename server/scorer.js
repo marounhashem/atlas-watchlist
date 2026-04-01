@@ -107,7 +107,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.4'; // weighted structure, position sizing+Kelly, macro 4 forex pairs, MOVE_SL 6h
+const SCORER_VERSION = '20260401.5'; // dynamic minScore floor by weighted structure, noOB +86 floor
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -1143,13 +1143,23 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
-  // ── CHANGE 5: Raise the bar — PROCEED requires real conviction ──────────────
-  // PROCEED: score >= adjustedMinScore (raised to 78 in config)
-  // WATCH:   score >= adjustedMinScore - 8 (tight band, not 15 below)
-  // SKIP:    everything else — not a trade, not a watch
-  // Ranging daily (dailyBias===0): floor raised to 82 for PROCEED
+  // ── Dynamic minScore floor by weighted structure ────────────────────────────
+  // Weak structure needs higher score to PROCEED — prevents lower-TF-only signals
+  if (absWeightedStruct < 2.0) {
+    adjustedMinScore = Math.max(adjustedMinScore, 85);
+  } else if (absWeightedStruct < 3.5) {
+    adjustedMinScore = Math.max(adjustedMinScore, 82);
+  } else if (absWeightedStruct < 5.0) {
+    adjustedMinScore = Math.max(adjustedMinScore, 80);
+  }
+  // noOrderBook symbols with weak structure need even higher bar
+  if (noOB && absWeightedStruct < 3.5) {
+    adjustedMinScore = Math.max(adjustedMinScore, 86);
+  }
+
+  // Ranging daily (dailyBias===0): floor raised further
   const dailyBiasForThresh = data._dailyBias !== undefined ? data._dailyBias : 0;
-  const rangingPenalty = dailyBiasForThresh === 0 ? 4 : 0; // daily ranging = need higher conviction
+  const rangingPenalty = dailyBiasForThresh === 0 ? 4 : 0;
   const effectiveMinScore = adjustedMinScore + rangingPenalty;
   // verdict here is intermediate — final verdict is macroVerdict below
   const rawVerdict = finalScore >= effectiveMinScore ? 'PROCEED'
