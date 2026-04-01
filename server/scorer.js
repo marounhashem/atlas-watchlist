@@ -49,17 +49,23 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
     // Commodities: risk / (slDistance × tickValue)
     unitsFixed = riskAmount / (slDistance * tickValue);
     sizeFixed = Math.round(unitsFixed * 100) / 100;
-    displayFixed = `${sizeFixed} units`;
+    // Symbol-specific units
+    const COMMODITY_UNITS = { GOLD: 'oz', SILVER: 'oz', OILWTI: 'bbls', COPPER: 'lbs', PLATINUM: 'oz' };
+    const unit = COMMODITY_UNITS[symbol] || 'units';
+    displayFixed = `${sizeFixed} ${unit}`;
   } else {
     // Crypto: risk / slDistance
     unitsFixed = riskAmount / slDistance;
     sizeFixed = Math.round(unitsFixed * 1000) / 1000;
     const minCrypto = parseFloat(getSetting('min_size_crypto') || '0.001');
     sizeFixed = Math.max(minCrypto, sizeFixed);
-    displayFixed = `${sizeFixed} units`;
+    const cryptoUnit = (symbol || '').replace('USD', '') || 'units';
+    displayFixed = `${sizeFixed} ${cryptoUnit}`;
   }
 
-  const marginRequired = Math.round((Math.abs(unitsFixed) * entry) / leverage);
+  // Margin = position value / leverage
+  const positionValue = Math.abs(unitsFixed) * entry;
+  const marginRequired = Math.round(positionValue / leverage);
 
   // Kelly criterion
   const kellyMode = getSetting('kelly_mode') || 'auto';
@@ -99,10 +105,12 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
     displayKelly = `${sizeKelly} contracts`;
   } else if (assetClass === 'commodity') {
     sizeKelly = Math.round((kellyRiskAmount / (slDistance * tickValue)) * 100) / 100;
-    displayKelly = `${sizeKelly} units`;
+    const COMMODITY_UNITS_K = { GOLD: 'oz', SILVER: 'oz', OILWTI: 'bbls', COPPER: 'lbs', PLATINUM: 'oz' };
+    displayKelly = `${sizeKelly} ${COMMODITY_UNITS_K[symbol] || 'units'}`;
   } else {
     sizeKelly = Math.round((kellyRiskAmount / slDistance) * 1000) / 1000;
-    displayKelly = `${sizeKelly} units`;
+    const cryptoUnitK = (symbol || '').replace('USD', '') || 'units';
+    displayKelly = `${sizeKelly} ${cryptoUnitK}`;
   }
 
   return {

@@ -201,7 +201,7 @@
   }
   .vP{background:var(--proceed-bg);color:var(--proceed);border:1px solid var(--proceed);padding:4px 16px;}
   .vA{background:var(--blue-dim);color:var(--blue);border:1px solid var(--blue);}
-  .vW{background:#ffb34018;color:var(--watch);border:none;font-size:10px;}
+  .vW{background:transparent;color:var(--watch);border:1px solid var(--watch);font-size:10px;padding:3px 10px;}
   .vS{background:transparent;color:var(--dim);border:1px solid var(--border);}
   .vC{background:transparent;color:var(--dim);border:1px solid var(--border);}
   .vER{background:var(--watch-bg);color:var(--watch);border:1px solid var(--watch);}
@@ -542,6 +542,7 @@
       <span>USD</span>
     </div>
     <span id="symbol-count">0 symbols</span>
+    <button onclick="switchMainTab('settings')" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--txt2,var(--muted));cursor:pointer;font-size:14px;" title="Settings">⚙</button>
   </div>
 </div>
 
@@ -552,7 +553,6 @@
     <div class="mtab" id="mtab-forex" onclick="switchMainTab('forex')">FOREX <span id="fx-count" style="font-size:9px;color:var(--dim);font-weight:400;"></span></div>
     <div class="mtab" id="mtab-global" onclick="switchMainTab('global')" style="color:var(--teal)">🌐 GLOBAL</div>
     <div class="mtab" id="mtab-idea" onclick="switchMainTab('idea')">💡 IDEA</div>
-    <div class="mtab" id="mtab-settings" onclick="switchMainTab('settings')">⚙</div>
   </div>
 
   <!-- Signals pane -->
@@ -1061,7 +1061,7 @@ function renderCard(sig, isPast=false) {
   // Progress bar helper
   function pbar(label, val) {
     const pct=Math.round((val||0)*100);
-    const fill=pct>70?'var(--green,var(--proceed))':pct>40?'var(--blue,var(--accent))':'var(--amber,var(--watch))';
+    const fill=pct>=85?'var(--green,var(--proceed))':pct<=35?'var(--amber,var(--watch))':'var(--blue,var(--accent))';
     return `<div style="display:grid;grid-template-columns:80px 1fr 36px;align-items:center;gap:10px;">
       <span style="font-size:11px;color:var(--txt2,var(--muted));text-align:right;letter-spacing:.04em;">${label}</span>
       <div style="height:6px;background:var(--surface3,#1a1a28);border-radius:3px;overflow:hidden;max-width:70%;"><div style="height:100%;width:${pct}%;background:${fill};border-radius:3px;transition:width .3s;"></div></div>
@@ -1094,7 +1094,7 @@ function renderCard(sig, isPast=false) {
         <span class="clabel">${esc(sig.label)}</span>
         ${isActive?'<span style="display:inline-block;padding:2px 8px;background:rgba(77,158,255,.15);border:1px solid var(--blue,#4d9eff);border-radius:4px;font-size:10px;color:var(--blue,#4d9eff);font-weight:600;letter-spacing:.08em;">● ACTIVE</span>':''}
         ${sig.is_swing||sig.isSwing?'<span style="display:inline-block;padding:2px 8px;background:rgba(0,212,212,.1);border:1px solid var(--teal,#00d4d4);border-radius:4px;font-size:10px;color:var(--teal,#00d4d4);font-weight:600;">↗ SWING</span>':''}
-        ${isPast?'<span style="font-size:10px;color:var(--txt3,var(--dim));border:1px solid var(--border);border-radius:4px;padding:1px 6px;">PAST</span>':''}
+        ${isPast?'<span style="font-size:10px;color:var(--txt2,var(--muted));background:var(--surface3,#1a1a28);border:1px solid var(--border2,#1e1e2a);border-radius:4px;padding:2px 8px;">PAST</span>':''}
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
         ${outcomeHtml}
@@ -1739,8 +1739,10 @@ function switchMainTab(tab) {
   activeMainTab = tab;
   document.querySelectorAll('.mtab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.main-pane').forEach(p => p.classList.remove('active'));
-  document.getElementById('mtab-' + tab).classList.add('active');
-  document.getElementById('pane-' + tab).classList.add('active');
+  const mtab = document.getElementById('mtab-' + tab);
+  if (mtab) mtab.classList.add('active');
+  const pane = document.getElementById('pane-' + tab);
+  if (pane) pane.classList.add('active');
   if (tab === 'forex') renderForexSignals();
   if (tab === 'global') renderGlobalSignals();
   if (tab === 'settings') loadSettings();
