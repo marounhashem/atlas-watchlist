@@ -806,9 +806,11 @@ app.get('/api/macro-context', (req, res) => {
   res.json(getMacroContext());
 });
 
-// Raw Claude API test for macro — returns full API response for debugging
+// Macro single-symbol test — fetches GOLD only, persists to DB, returns result (1 API call)
 app.get('/api/macro-test', async (req, res) => {
   try {
+    const symbol = 'GOLD';
+    const query = 'gold XAU price macro outlook DXY Fed rates today';
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -820,19 +822,37 @@ app.get('/api/macro-test', async (req, res) => {
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 400,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        system: 'You are a macro analyst. Search for current market conditions and return ONLY a JSON object.',
-        messages: [{ role: 'user', content: 'Search: "gold XAU price macro outlook today". Return ONLY this JSON: {"sentiment":"BULLISH|BEARISH|NEUTRAL","strength":5,"summary":"one sentence"}' }]
+        system: 'You are a macro analyst. Search for current market conditions and return ONLY a JSON object. No markdown, no explanation.',
+        messages: [{ role: 'user', content: `Search: "${query}". Return ONLY this JSON:
+{"sentiment":"BULLISH|BEARISH|NEUTRAL","strength":5,"summary":"one sentence","key_risks":["risk1"],"supports_long":true,"supports_short":false,"avoid_until":"none"}` }]
       })
     });
     const data = await response.json();
+    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+    const clean = text.replace(/```json|```/g, '').trim();
+    let parsed = null, parseError = null, persisted = false;
+    try {
+      parsed = JSON.parse(clean);
+      macroContext[symbol] = { ...parsed, ts: Date.now() };
+      db.upsertMacroContext(symbol, macroContext[symbol]);
+      persisted = true;
+    } catch(e) { parseError = e.message; }
+
+    // Verify DB write
+    const dbCheck = db.getStoredMacroContext();
+
     res.json({
-      status: response.status,
-      stop_reason: data.stop_reason,
-      content_blocks: data.content?.length,
-      block_types: data.content?.map(b => b.type),
-      text_blocks: data.content?.filter(b => b.type === 'text').map(b => b.text),
-      error: data.error,
-      raw_first_500: JSON.stringify(data).slice(0, 500)
+      apiStatus: response.status,
+      stopReason: data.stop_reason,
+      blockTypes: data.content?.map(b => b.type),
+      textLength: text.length,
+      cleanJson: clean.slice(0, 300),
+      parsed: parsed ? { sentiment: parsed.sentiment, strength: parsed.strength } : null,
+      parseError,
+      persisted,
+      dbCount: Object.keys(dbCheck).length,
+      dbSymbols: Object.keys(dbCheck),
+      inMemoryCount: Object.keys(getMacroContext()).length
     });
   } catch(e) {
     res.json({ error: e.message });
