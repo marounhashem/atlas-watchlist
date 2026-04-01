@@ -1174,6 +1174,59 @@ app.delete('/api/market-intel/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// DB recovery — restore from .bak file if signals were lost
+app.get('/api/db-recover', (req, res) => {
+  try {
+    const dbPath = process.env.DB_PATH || path.join(__dirname, '../data/atlas.db');
+    const bakPath = dbPath + '.bak';
+    if (fs.existsSync(bakPath) && fs.statSync(bakPath).size > 0) {
+      const initSqlJs = require('sql.js');
+      initSqlJs().then(SQL => {
+        const bakData = fs.readFileSync(bakPath);
+        const bakDb = new SQL.Database(bakData);
+        let bakSignals = 0;
+        try {
+          const row = bakDb.exec("SELECT COUNT(*) as c FROM signals")[0];
+          bakSignals = row?.values?.[0]?.[0] || 0;
+        } catch(e) {}
+        const currentSignals = db.getAllSignals(1000).length;
+        if (bakSignals > currentSignals) {
+          // Backup has more data — restore it
+          fs.copyFileSync(bakPath, dbPath);
+          res.json({ ok: true, recovered: true, bakSignals, currentSignals, message: `Restored from .bak (${bakSignals} signals). Restart server to load.` });
+        } else {
+          res.json({ ok: false, bakSignals, currentSignals, message: 'Backup has same or fewer signals than current DB. No recovery needed.' });
+        }
+        bakDb.close();
+      });
+    } else {
+      // Check for daily backups
+      const dataDir = path.dirname(dbPath);
+      const backups = fs.readdirSync(dataDir).filter(f => f.includes('_backup_')).sort().reverse();
+      res.json({ ok: false, message: 'No .bak file found', dailyBackups: backups });
+    }
+  } catch(e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// DB status — current file sizes and signal count
+app.get('/api/db-status', (req, res) => {
+  try {
+    const dbPath = process.env.DB_PATH || path.join(__dirname, '../data/atlas.db');
+    const bakPath = dbPath + '.bak';
+    const dataDir = path.dirname(dbPath);
+    const files = {};
+    if (fs.existsSync(dbPath)) files.db = { size: fs.statSync(dbPath).size, sizeKB: Math.round(fs.statSync(dbPath).size/1024) };
+    if (fs.existsSync(bakPath)) files.bak = { size: fs.statSync(bakPath).size, sizeKB: Math.round(fs.statSync(bakPath).size/1024) };
+    const backups = fs.readdirSync(dataDir).filter(f => f.includes('_backup_')).sort().reverse();
+    const signals = db.getAllSignals(1000).length;
+    res.json({ signals, files, dailyBackups: backups });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // DXY reference
 app.get('/api/dxy-status', (req, res) => {
   res.json(db.getLatestDXY() || { error: 'No DXY data yet' });

@@ -4,12 +4,17 @@ const fs   = require('fs');
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../data/atlas.db');
 let SQL, db, ready = false;
 
+// ── Race condition protection ────────────────────────────────────────────────
+let _startupComplete = false;     // Layer 1: suppress persist for 30s
+let _startupSignalCount = -1;     // Layer 3: track initial signal count
+
 async function init() {
   if (ready) return;
   try {
     const initSqlJs = require('sql.js');
     SQL = await initSqlJs();
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+
     if (fs.existsSync(DB_PATH)) {
       const stat = fs.statSync(DB_PATH);
       if (stat.size > 0) {
@@ -24,25 +29,27 @@ async function init() {
       db = new SQL.Database();
       console.log('[DB] Created new in-memory database');
     }
+
     initSchema();
 
-    // Safety: only persist if we didn't load an existing DB with data
-    // Prevents overwriting good DB with empty one on volume mount race
-    const signalCount = (() => {
-      try {
-        const row = db.exec("SELECT COUNT(*) as c FROM signals")[0];
-        return row?.values?.[0]?.[0] || 0;
-      } catch(e) { return 0; }
-    })();
-    if (signalCount > 0 || !fs.existsSync(DB_PATH)) {
-      persist();
-    } else {
-      console.log('[DB] Skipping initial persist — new empty DB, waiting for data before writing to disk');
-    }
+    // Layer 3: record signal count at startup
+    try {
+      const row = db.exec("SELECT COUNT(*) as c FROM signals")[0];
+      _startupSignalCount = row?.values?.[0]?.[0] || 0;
+    } catch(e) { _startupSignalCount = 0; }
+    console.log(`[DB] Startup signal count: ${_startupSignalCount}`);
+
+    // Layer 1: suppress persist for 30 seconds
+    // Allows Railway volume to fully mount before any disk writes
+    setTimeout(() => {
+      _startupComplete = true;
+      console.log('[DB] Startup persist protection lifted (30s elapsed)');
+      persist(); // flush whatever we have now
+    }, 30000);
 
     setInterval(persist, 15000);
     ready = true;
-    console.log(`[DB] Ready — ${signalCount} existing signals`);
+    console.log(`[DB] Ready — ${_startupSignalCount} existing signals (persist suppressed for 30s)`);
   } catch(e) {
     console.error('[DB] Init failed:', e.message);
     throw e;
@@ -54,6 +61,50 @@ let _persistWriting = false;
 
 function persist() {
   if (!db) return;
+
+  // Layer 1: suppress persist during startup window
+  if (!_startupComplete) {
+    return; // silently skip — will flush when startup completes
+  }
+
+  // Layer 3: never overwrite if we had signals at startup but now have 0
+  if (_startupSignalCount > 0) {
+    try {
+      const row = db.exec("SELECT COUNT(*) as c FROM signals")[0];
+      const currentCount = row?.values?.[0]?.[0] || 0;
+      if (currentCount === 0) {
+        console.error(`[DB] ABORT persist — had ${_startupSignalCount} signals at startup, now 0. DB was reset in memory.`);
+        return;
+      }
+    } catch(e) {}
+  }
+
+  // Layer 2: check disk file is not larger than memory export
+  try {
+    if (fs.existsSync(DB_PATH)) {
+      const diskSize = fs.statSync(DB_PATH).size;
+      const memData = db.export();
+      if (diskSize > 0 && memData.length > 0 && diskSize > memData.length * 1.5) {
+        console.error(`[DB] ABORT persist — disk (${Math.round(diskSize/1024)}KB) larger than memory (${Math.round(memData.length/1024)}KB). Reloading from disk.`);
+        const diskData = fs.readFileSync(DB_PATH);
+        db = new SQL.Database(diskData);
+        initSchema();
+        try {
+          const row = db.exec("SELECT COUNT(*) as c FROM signals")[0];
+          _startupSignalCount = row?.values?.[0]?.[0] || 0;
+        } catch(e) {}
+        return;
+      }
+    }
+  } catch(e) {}
+
+  // Layer 4: pre-persist backup
+  try {
+    if (fs.existsSync(DB_PATH) && fs.statSync(DB_PATH).size > 0) {
+      fs.copyFileSync(DB_PATH, DB_PATH + '.bak');
+    }
+  } catch(e) {}
+
   // Coalesce: if a write is already in flight, just flag that another is needed
   if (_persistWriting) { _persistPending = true; return; }
   _persistWriting = true;
@@ -63,7 +114,6 @@ function persist() {
     fs.writeFile(DB_PATH, Buffer.from(data), (err) => {
       _persistWriting = false;
       if (err) console.error('[DB] Persist error:', err.message);
-      // If another persist was requested while we were writing, flush again
       if (_persistPending) { _persistPending = false; persist(); }
     });
   } catch (e) {
