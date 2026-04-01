@@ -999,71 +999,103 @@ function renderRecommendations(sig) {
 
 function renderCard(sig, isPast=false) {
   const v=sig.verdict||'SKIP';
-  if(v==='CLOSED') return `<div class="card closed"><div class="ctop"><div><span class="csym">${esc(sig.symbol)}</span><span class="clabel">${esc(sig.label)}</span></div><span class="verdict vC">CLOSED</span></div><div style="font-size:9px;color:var(--muted)">${esc(sig.reasoning||'Market closed')}</div></div>`;
+  if(v==='CLOSED') return `<div class="card closed" style="border-left:3px solid var(--border);"><div class="ctop"><div><span class="csym">${esc(sig.symbol)}</span><span class="clabel">${esc(sig.label)}</span></div><span class="verdict vC">CLOSED</span></div><div style="font-size:9px;color:var(--muted)">${esc(sig.reasoning||'Market closed')}</div></div>`;
 
   const d=sig.direction||'—';
   const bd=sig.breakdown||{};
   const isOpen=sig.outcome==='OPEN'||sig.outcome==='ACTIVE';
-
-  // Outcome-based card class for dimming
   const outcomeClass = {ACTIVE:'active',WIN:'win',LOSS:'loss',IGNORED:'ignored',REPLACED:'replaced',EXPIRED:'ignored'}[sig.outcome]||'';
+  const isActive = sig.outcome==='ACTIVE';
+  const ert = sig.event_risk_tag || sig.eventRiskTag;
+  const showAgents = v==='PROCEED' || v==='WATCH';
+  const pastBadge = isPast ? '<span style="font-size:8px;color:var(--dim);border:1px solid var(--border);border-radius:3px;padding:1px 4px;">PAST</span>' : '';
+
+  // Border color
+  const borderColor = isActive ? '#5b9bd5' : ert==='SUPPRESSED' ? 'var(--border)' : v==='PROCEED' ? 'var(--proceed)' : v==='WATCH' ? 'var(--watch)' : 'var(--border)';
+
+  // Verdict label with inline event risk
+  const vcls = isActive ? 'vA' : ert==='SUPPRESSED'?'vSUP':ert?'vER':v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
+  const ertInline = ert==='SUPPRESSED' ? ' <span style="font-size:8px;opacity:.7;">🔕 Suppressed</span>'
+    : ert==='PRE_EVENT' ? ' <span style="font-size:8px;opacity:.7;">⚠ Pre-event</span>'
+    : ert==='CARRY_RISK' ? ' <span style="font-size:8px;opacity:.7;">⚠ Carry risk</span>' : '';
+
+  // Score display
+  const scoreSize = v==='PROCEED' ? 'font-size:14px;color:var(--text);font-weight:700;' : ert==='SUPPRESSED' ? 'font-size:10px;color:var(--dim);' : 'font-size:11px;color:var(--muted);';
 
   // Outcome badge
   const outcomeColor = sig.outcome==='WIN'?'var(--proceed)':sig.outcome==='LOSS'?'var(--short)':'var(--muted)';
-  const outcomeHtml = !isOpen
-    ? `<span style="font-size:9px;font-weight:700;color:${outcomeColor};letter-spacing:.5px;">${sig.outcome}${sig.pnl_pct!=null?' '+(sig.pnl_pct>0?'+':'')+sig.pnl_pct+'%':''}</span>`
-    : '';
+  const outcomeHtml = !isOpen ? `<span style="font-size:9px;font-weight:700;color:${outcomeColor};">${sig.outcome}${sig.pnl_pct!=null?' '+(sig.pnl_pct>0?'+':'')+sig.pnl_pct+'%':''}</span>` : '';
+  const timeAgo = !isOpen ? (()=>{const mins=Math.round((Date.now()-(sig.outcome_ts||sig.ts))/60000);return mins<60?mins+'m':Math.round(mins/60)+'h';})() : '';
+  const ts = new Date(sig.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
 
-  // Refined tag — only show on open signals
-  const refineHtml = (sig.refine_count>0 && isOpen)
-    ? `<span style="font-size:8px;color:var(--accent);border:1px solid var(--accent);border-radius:3px;padding:1px 5px;letter-spacing:.5px;">↑ REFINED ×${sig.refine_count} · ${new Date(sig.refine_ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>`
-    : '';
+  // Expiry
+  let expiryHtml = '';
+  if (sig.outcome==='OPEN' && sig.expires_at) {
+    const ms=sig.expires_at-Date.now();
+    if(ms<0) expiryHtml='<span style="color:var(--short);">⚠ Expired</span>';
+    else { const h=Math.floor(ms/3600000),m=Math.floor((ms%3600000)/60000); expiryHtml=`<span style="color:${ms<1800000?'var(--watch)':'var(--dim)'};">⌛ ${h}h ${m}m</span>`; }
+  }
 
-  // Time ago label for closed signals
-  const timeAgo = !isOpen ? (() => {
-    const mins = Math.round((Date.now()-(sig.outcome_ts||sig.ts))/60000);
-    return mins<60 ? mins+'m ago' : Math.round(mins/60)+'h ago';
-  })() : '';
-  const isActive = sig.outcome==='ACTIVE';
-  const displayV = isActive ? 'ACTIVE' : v;
-  const ert = sig.event_risk_tag || sig.eventRiskTag;
-  const vcls = isActive ? 'vA' : ert==='SUPPRESSED'?'vSUP':ert?'vER':v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
-  const scls=isActive?'sbW':v==='PROCEED'?'sbP':v==='WATCH'?'sbW':'sbS';
-  const showAgents = v==='PROCEED' || v==='WATCH';
-  const pastBadge = isPast ? '<span style="font-size:9px;color:var(--dim);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-right:3px;">PAST</span>' : '';
+  // Progress bars
+  function pbar(label, val) {
+    const pct = Math.round((val||0)*100);
+    const color = pct > 70 ? 'var(--proceed)' : pct > 40 ? 'var(--accent)' : 'var(--watch)';
+    return `<div style="display:flex;align-items:center;gap:4px;font-size:8px;">
+      <span style="color:var(--muted);width:52px;">${label}</span>
+      <div style="flex:1;height:3px;background:var(--surface3);border-radius:2px;"><div style="height:3px;width:${pct}%;background:${color};border-radius:2px;"></div></div>
+      <span style="color:var(--dim);width:24px;text-align:right;">${pct}%</span>
+    </div>`;
+  }
 
-  return `<div class="card ${v.toLowerCase()} ${outcomeClass}" id="card-${sig.id||sig.symbol}">
-    <div class="ctop">
-      <div style="display:flex;align-items:baseline;gap:8px;"><span class="csym">${esc(sig.symbol)}</span><span class="clabel">${esc(sig.label)}</span>${['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD','EURJPY','EURGBP','EURAUD','EURCHF','GBPJPY','GBPCHF','AUDJPY','ETHUSD'].includes(sig.symbol)?'<span class="asset-fx">FX</span>':''}<span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:var(--dim);">${new Date(sig.ts).toLocaleDateString('en-GB',{day:'2-digit',month:'short'}) + ' ' + new Date(sig.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}</span>${sig.outcome==='ACTIVE'?'<span style="font-size:9px;font-weight:700;color:#ffd740;letter-spacing:.5px;border:1px solid #ffd74055;border-radius:3px;padding:1px 5px;">ACTIVE</span>':sig.outcome==='OPEN'?'<span style="font-size:9px;font-weight:600;color:var(--accent);letter-spacing:.5px;border:1px solid var(--accent-border);border-radius:3px;padding:1px 5px;">OPEN</span>':''}</div>
-      <div style="display:flex;align-items:center;gap:6px;">${pastBadge}${refineHtml}${outcomeHtml}${timeAgo?`<span style="font-size:8px;color:var(--muted)">${timeAgo}</span>`:''}<span class="verdict ${vcls}">${v}</span></div>
+  // Sizing line
+  const ps = sig.positionSize;
+  const sizingHtml = ps ? `<div style="font-size:8px;color:var(--dim);background:var(--surface2);border-radius:3px;padding:3px 6px;margin:4px 0;">Fixed: ${esc(ps.fixed.display)} · Kelly: ${esc(ps.kelly.display)} · Margin: ~$${ps.fixed.marginRequired?.toLocaleString()} · SL: ${ps.fixed.slDistancePct}%</div>` : '';
+
+  // Reasoning — collapsible for WATCH/SUPPRESSED
+  const reasoning = sig.reasoning || '';
+  const reasonCollapse = (v !== 'PROCEED' && reasoning.length > 80);
+  const reasonHtml = reasoning ? (reasonCollapse
+    ? `<div class="reason" style="max-height:20px;overflow:hidden;cursor:pointer;" onclick="this.style.maxHeight=this.style.maxHeight==='20px'?'none':'20px'">${esc(reasoning)} <span style="color:var(--accent);font-size:8px;">▼ more</span></div>`
+    : `<div class="reason">${esc(reasoning)}</div>`) : '';
+
+  return `<div class="card ${v.toLowerCase()} ${outcomeClass}" id="card-${sig.id||sig.symbol}" style="border-left:3px solid ${borderColor};">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+      <div style="display:flex;align-items:baseline;gap:6px;">
+        <span class="csym">${esc(sig.symbol)}</span>
+        <span class="clabel">${esc(sig.label)}</span>
+        ${isActive?'<span style="font-size:8px;font-weight:700;color:#5b9bd5;border:1px solid #5b9bd555;border-radius:3px;padding:1px 4px;">ACTIVE</span>':''}
+        ${sig.is_swing||sig.isSwing?'<span style="font-size:8px;color:var(--teal);border:1px solid var(--teal-border);border-radius:3px;padding:1px 4px;">📈 SWING</span>':''}
+        ${pastBadge}
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        ${outcomeHtml}${timeAgo?`<span style="font-size:8px;color:var(--dim);">${timeAgo}</span>`:''}
+        <span class="verdict ${vcls}">${v}</span>${ertInline}
+        <span style="${scoreSize}">${sig.score||'—'}%</span>
+      </div>
     </div>
-    <div class="sbar"><div class="sbfill ${scls}" style="width:${sig.score||0}%"></div></div>
-    <div class="cmid">
-      <div class="cf"><span class="fl">Dir</span><span class="fv d${d}">${d}</span></div>
-      <div class="cf"><span class="fl">Score</span><span class="fv">${sig.score||'—'}%</span></div>
-      <div class="cf"><span class="fl">Entry</span><span class="fv">${sig.entry!=null?sig.entry:'—'}</span></div>
-      <div class="cf"><span class="fl">SL</span><span class="fv" style="color:var(--short)">${sig.sl!=null?sig.sl:'—'}</span></div>
-      <div class="cf"><span class="fl">TP</span><span class="fv" style="color:var(--proceed)">${sig.tp!=null?sig.tp:'—'}</span></div>
-      <div class="cf"><span class="fl">R:R</span><span class="fv" style="color:var(--proceed)">${sig.rr!=null?'1:'+sig.rr:'—'}</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:4px;">
+      <div>
+        <div style="font-size:9px;margin-bottom:3px;"><span style="color:var(--muted);">Dir</span> <span class="d${d}" style="font-weight:700;font-size:11px;">${d}</span> <span style="color:var(--dim);font-size:8px;">${ts}</span></div>
+        <div style="font-size:9px;display:grid;grid-template-columns:auto 1fr;gap:2px 6px;">
+          <span style="color:var(--muted);">Entry</span><span>${sig.entry!=null?sig.entry:'—'}</span>
+          <span style="color:var(--muted);">SL</span><span style="color:var(--short);">${sig.sl!=null?sig.sl:'—'}</span>
+          <span style="color:var(--muted);">TP</span><span style="color:var(--proceed);">${sig.tp!=null?sig.tp:'—'}</span>
+          <span style="color:var(--muted);">R:R</span><span>${sig.rr!=null?'1:'+sig.rr:'—'}</span>
+        </div>
+        ${expiryHtml?`<div style="font-size:8px;margin-top:3px;">${expiryHtml}</div>`:''}
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px;justify-content:center;">
+        ${bd.bias!=null?[pbar('Technical',bd.bias),pbar('Retail OB',bd.fxssi),pbar('OB',bd.ob),pbar('Session',bd.session)].join(''):''}
+      </div>
     </div>
-    ${bd.bias!=null?`<div class="bkd">
-      ${['bias','fxssi','ob','session'].map(k=>`<div class="bi"><span class="bl">${{bias:'Technical',fxssi:'Retail OB',ob:'OB',session:'Session'}[k]}</span><div class="bw"><div class="bf" style="width:${Math.round((bd[k]||0)*100)}%"></div></div></div>`).join('')}
-    </div>`:''}
-    ${(()=>{if(sig.outcome!=='OPEN'||!sig.expires_at)return'';const ms=sig.expires_at-Date.now();if(ms<0)return'<div style="font-size:8px;color:var(--short);margin-bottom:4px;">⚠ EXPIRED</div>';const h=Math.floor(ms/3600000),m=Math.floor((ms%3600000)/60000);const color=ms<1800000?'var(--watch)':'var(--dim)';return`<div style="font-size:8px;color:${color};margin-bottom:4px;">⌛ Expires in ${h}h ${m}m</div>`;})()}
-    ${ert?`<div style="font-size:8px;padding:2px 6px;border-radius:3px;display:inline-block;margin-bottom:4px;${ert==='SUPPRESSED'?'background:#331100;color:#ff6600;':'background:#332800;color:#ffa000;'}">${ert==='SUPPRESSED'?'🔕 Suppressed':ert==='PRE_EVENT'?'⚠ Pre-event risk':ert==='CARRY_RISK'?'⚠ Carry risk':ert}</div>`:''}
-    ${sig.is_swing||sig.isSwing?'<span style="font-size:8px;color:var(--teal);border:1px solid var(--teal-border);border-radius:3px;padding:1px 5px;margin-left:4px;">📈 SWING</span>':''}
-    ${sig.positionSize?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;background:var(--surface2);border-radius:4px;padding:5px 8px;margin:4px 0;">
-      <span style="color:var(--muted);">Fixed (${sig.positionSize.fixed.riskPct}% risk):</span><span style="color:var(--text);">${esc(sig.positionSize.fixed.display)}</span>
-      <span style="color:var(--muted);">Kelly (${sig.positionSize.kelly.fractionalKellyPct}%):</span><span style="color:var(--text);">${esc(sig.positionSize.kelly.display)}</span>
-      <span style="color:var(--muted);">Margin:</span><span style="color:var(--text);">~$${sig.positionSize.fixed.marginRequired?.toLocaleString()}</span>
-      <span style="color:var(--muted);">SL distance:</span><span style="color:var(--text);">${sig.positionSize.fixed.slDistancePct}%</span>
-    </div>`:''}
-    ${sig.reasoning?`<div class="reason">${esc(sig.reasoning)}</div>`:''}
-    <div class="card-actions">
-      ${sig.outcome==='ACTIVE'?`<span style="font-size:9px;color:#ffd740;letter-spacing:.5px;">● MONITORING TP/SL</span>`:''}
+    ${sizingHtml}
+    ${reasonHtml}
+    <div class="card-actions" style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+      ${sig.outcome==='ACTIVE'?'<span style="font-size:8px;color:#ffd740;">● MONITORING</span>':''}
       ${renderRecommendations(sig)}
-      ${showAgents?`<div class="abtn aE" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
-      ${showAgents?`<div class="abtn" style="border-color:var(--muted);color:var(--muted);font-size:9px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')" title="Copy full trade dossier">⊞</div>`:''}
+      ${showAgents?`<div class="abtn" style="border-color:var(--border);color:var(--muted);font-size:8px;padding:2px 8px;" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</div>`:''}
+      ${showAgents?`<div class="abtn" style="border-color:var(--border);color:var(--dim);font-size:8px;padding:2px 6px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')">⊞</div>`:''}
+      <span style="font-size:7px;color:var(--border);margin-left:auto;">${sig.scorer_version||''}</span>
     </div>
     ${showAgents?`<div class="agents-panel" id="agents-${sig.id||sig.symbol}">
       <div class="agent-tabs">
