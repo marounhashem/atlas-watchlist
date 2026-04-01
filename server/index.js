@@ -922,7 +922,12 @@ async function buildMorningBrief() {
     const m = macro[sym];
     if (!m) continue;
     const icon = m.sentiment === 'BULLISH' ? '↑' : m.sentiment === 'BEARISH' ? '↓' : '○';
-    const bias = m.supports_long ? 'LONG' : m.supports_short ? 'SHORT' : 'AVOID';
+    let bias;
+    if (m.sentiment === 'BULLISH') bias = 'LONG';
+    else if (m.sentiment === 'BEARISH') bias = 'SHORT';
+    else if (m.supports_long && !m.supports_short) bias = 'LONG (cautious)';
+    else if (m.supports_short && !m.supports_long) bias = 'SHORT (cautious)';
+    else bias = 'AVOID (no edge)';
     lines.push(`${icon} <b>${sym}</b> — ${m.sentiment} (${m.strength}/10) → ${bias}`);
   }
   lines.push('');
@@ -955,13 +960,15 @@ async function buildMorningBrief() {
   if (carryCount === 0) lines.push('No extreme carry differentials');
   lines.push('');
 
-  // Upcoming CB meetings
+  // Upcoming CB meetings + economic events
   const meetings = getUpcomingMeetings(14);
   if (meetings.length > 0) {
-    lines.push('<b>📅 CENTRAL BANK MEETINGS</b>');
-    for (const m of meetings.slice(0, 5)) {
-      const urgency = m.daysUntil <= 2 ? '🚨' : m.daysUntil <= 7 ? '⚠️' : '📅';
-      lines.push(`${urgency} ${m.bank} — ${m.date} (${m.daysUntil}d)`);
+    lines.push('<b>📅 EVENTS &amp; MEETINGS</b>');
+    for (const m of meetings.slice(0, 8)) {
+      const isEcon = m.isEconomicEvent;
+      const urgency = m.daysUntil <= 1 ? '🚨' : m.daysUntil <= 2 ? '⚠️' : isEcon ? '📊' : '📅';
+      const note = m.daysUntil <= 1 ? ' ← extreme caution' : m.daysUntil <= 2 ? ' ← event risk' : '';
+      lines.push(`${urgency} ${m.bank} — ${m.date} (${m.daysUntil}d)${note}`);
     }
     lines.push('');
   }

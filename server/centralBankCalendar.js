@@ -63,6 +63,29 @@ const MEETING_CALENDAR = [
   { currency: 'CHF', bank: 'SNB', date: '2026-06-18' },
   { currency: 'CHF', bank: 'SNB', date: '2026-09-24' },
   { currency: 'CHF', bank: 'SNB', date: '2026-12-17' },
+
+  // ── Major US economic events ──────────────────────────────────────────────
+  // NFP — first Friday of every month
+  { currency: 'USD', bank: 'NFP', date: '2026-04-03', isEconomicEvent: true },
+  { currency: 'USD', bank: 'NFP', date: '2026-05-01', isEconomicEvent: true },
+  { currency: 'USD', bank: 'NFP', date: '2026-06-05', isEconomicEvent: true },
+  { currency: 'USD', bank: 'NFP', date: '2026-07-02', isEconomicEvent: true },
+  { currency: 'USD', bank: 'NFP', date: '2026-08-07', isEconomicEvent: true },
+  { currency: 'USD', bank: 'NFP', date: '2026-09-04', isEconomicEvent: true },
+  { currency: 'USD', bank: 'NFP', date: '2026-10-02', isEconomicEvent: true },
+  { currency: 'USD', bank: 'NFP', date: '2026-11-06', isEconomicEvent: true },
+  { currency: 'USD', bank: 'NFP', date: '2026-12-04', isEconomicEvent: true },
+
+  // CPI — typically mid-month
+  { currency: 'USD', bank: 'CPI', date: '2026-04-10', isEconomicEvent: true },
+  { currency: 'USD', bank: 'CPI', date: '2026-05-12', isEconomicEvent: true },
+  { currency: 'USD', bank: 'CPI', date: '2026-06-10', isEconomicEvent: true },
+  { currency: 'USD', bank: 'CPI', date: '2026-07-14', isEconomicEvent: true },
+  { currency: 'USD', bank: 'CPI', date: '2026-08-12', isEconomicEvent: true },
+  { currency: 'USD', bank: 'CPI', date: '2026-09-11', isEconomicEvent: true },
+  { currency: 'USD', bank: 'CPI', date: '2026-10-13', isEconomicEvent: true },
+  { currency: 'USD', bank: 'CPI', date: '2026-11-10', isEconomicEvent: true },
+  { currency: 'USD', bank: 'CPI', date: '2026-12-10', isEconomicEvent: true },
 ];
 
 // Map ATLAS pair symbols → affected currencies

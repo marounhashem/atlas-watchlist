@@ -14,7 +14,7 @@ function getCbCalendar()   { return _cbCalendar   || (_cbCalendar   = require('.
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.1'; // macro multi-turn, startup ordering, cron safety, FXSSI isolation, require hoisting
+const SCORER_VERSION = '20260401.2'; // morning brief direction labels, NFP/CPI economic events, event risk icons
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
