@@ -11,29 +11,55 @@ function getClaudeLearner(){ return _claudeLearner|| (_claudeLearner= require('.
 function getCbCalendar()   { return _cbCalendar   || (_cbCalendar   = require('./centralBankCalendar')); }
 
 // ── Position sizing + Kelly criterion ────────────────────────────────────────
-function calculatePositionSize(entry, sl, assetClass) {
+function calculatePositionSize(entry, sl, assetClass, symbol) {
   const balance = parseFloat(getSetting('account_balance') || '10000');
   const riskPct = parseFloat(getSetting('risk_pct') || '1.0') / 100;
   const leverage = parseFloat(getSetting(`leverage_${assetClass}`) || '100');
-  const contractSize = parseFloat(getSetting(`contract_size_${assetClass}`) || '1');
+  const contractSize = parseFloat(getSetting(`contract_size_${assetClass}`) || '100000');
 
   const riskAmount = balance * riskPct;
   const slDistance = Math.abs(entry - sl);
   if (slDistance === 0) return null;
 
   const slDistancePct = Math.round((slDistance / entry) * 10000) / 100;
-  const unitsFixed = riskAmount / slDistance;
 
-  let sizeFixed, displayFixed;
+  // Per-symbol contract specs
+  const symLower = (symbol || '').toLowerCase();
+  const pointValue = parseFloat(getSetting(`point_value_${symLower}`) || getSetting('point_value_indices') || '1');
+  const tickValue = parseFloat(getSetting(`tick_value_${symLower}`) || '1');
+
+  let unitsFixed, sizeFixed, displayFixed;
   if (assetClass === 'forex') {
-    sizeFixed = Math.round((unitsFixed / contractSize) * 100) / 100;
-    displayFixed = `${sizeFixed} lots`;
-  } else {
+    // Forex: risk / (slDistance × pipValue per lot)
+    const pipValue = parseFloat(getSetting('pip_value_forex') || '10');
+    const slPips = slDistance * 10000; // convert to pips (for 4-decimal pairs)
+    unitsFixed = riskAmount / (slPips * pipValue);
     sizeFixed = Math.round(unitsFixed * 100) / 100;
+    const minLot = parseFloat(getSetting('min_lot_forex') || '0.01');
+    sizeFixed = Math.max(minLot, sizeFixed);
+    displayFixed = `${sizeFixed} lots`;
+    unitsFixed = sizeFixed * contractSize;
+  } else if (assetClass === 'index') {
+    // Indices: risk / (slDistance × pointValue)
+    unitsFixed = riskAmount / (slDistance * pointValue);
+    sizeFixed = Math.round(unitsFixed * 100) / 100;
+    sizeFixed = Math.max(parseFloat(getSetting('min_size_indices') || '1'), sizeFixed);
     displayFixed = `${sizeFixed} contracts`;
+  } else if (assetClass === 'commodity') {
+    // Commodities: risk / (slDistance × tickValue)
+    unitsFixed = riskAmount / (slDistance * tickValue);
+    sizeFixed = Math.round(unitsFixed * 100) / 100;
+    displayFixed = `${sizeFixed} units`;
+  } else {
+    // Crypto: risk / slDistance
+    unitsFixed = riskAmount / slDistance;
+    sizeFixed = Math.round(unitsFixed * 1000) / 1000;
+    const minCrypto = parseFloat(getSetting('min_size_crypto') || '0.001');
+    sizeFixed = Math.max(minCrypto, sizeFixed);
+    displayFixed = `${sizeFixed} units`;
   }
 
-  const marginRequired = Math.round((unitsFixed * entry) / leverage);
+  const marginRequired = Math.round((Math.abs(unitsFixed) * entry) / leverage);
 
   // Kelly criterion
   const kellyMode = getSetting('kelly_mode') || 'auto';
@@ -64,11 +90,19 @@ function calculatePositionSize(entry, sl, assetClass) {
 
   let sizeKelly, displayKelly;
   if (assetClass === 'forex') {
-    sizeKelly = Math.round((unitsKelly / contractSize) * 100) / 100;
+    const pipValue = parseFloat(getSetting('pip_value_forex') || '10');
+    const slPips = slDistance * 10000;
+    sizeKelly = Math.round((kellyRiskAmount / (slPips * pipValue)) * 100) / 100;
     displayKelly = `${sizeKelly} lots`;
-  } else {
-    sizeKelly = Math.round(unitsKelly * 100) / 100;
+  } else if (assetClass === 'index') {
+    sizeKelly = Math.round((kellyRiskAmount / (slDistance * pointValue)) * 100) / 100;
     displayKelly = `${sizeKelly} contracts`;
+  } else if (assetClass === 'commodity') {
+    sizeKelly = Math.round((kellyRiskAmount / (slDistance * tickValue)) * 100) / 100;
+    displayKelly = `${sizeKelly} units`;
+  } else {
+    sizeKelly = Math.round((kellyRiskAmount / slDistance) * 1000) / 1000;
+    displayKelly = `${sizeKelly} units`;
   }
 
   return {
@@ -1823,7 +1857,7 @@ function scoreSymbol(symbol) {
     eventRiskTag,
     weightedStructScore: Math.round(absWeightedStruct * 10) / 10,
     isSwing: isSwingSignal({ verdict: macroVerdict, session: getSessionNow(), rr, score: macroAdjustedScore, eventRiskTag }, absWeightedStruct),
-    positionSize: (entry && sl && cfg.assetClass) ? calculatePositionSize(entry, sl, cfg.assetClass) : null,
+    positionSize: (entry && sl && cfg.assetClass) ? calculatePositionSize(entry, sl, cfg.assetClass, symbol) : null,
     ts: Date.now()
   };
 }

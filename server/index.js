@@ -1403,6 +1403,12 @@ app.get('/api/settings', (req, res) => {
     account_balance: '10000', risk_pct: '1.0',
     leverage_forex: '100', leverage_index: '20', leverage_commodity: '50', leverage_crypto: '10',
     contract_size_forex: '100000', contract_size_index: '1', contract_size_commodity: '1', contract_size_crypto: '1',
+    pip_value_forex: '10', min_lot_forex: '0.01',
+    point_value_us30: '1', point_value_us100: '1', point_value_us500: '1',
+    point_value_de40: '1', point_value_uk100: '1', point_value_j225: '100',
+    tick_value_gold: '1', tick_value_silver: '1', tick_value_oilwti: '1',
+    tick_value_copper: '1', tick_value_platinum: '1',
+    min_size_crypto: '0.001',
     kelly_mode: 'auto', kelly_win_rate_manual: '50', kelly_avg_rr_manual: '1.5', kelly_fraction: '0.25'
   };
   const result = {};

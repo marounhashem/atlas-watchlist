@@ -637,19 +637,55 @@
 
   <!-- Settings pane -->
   <div class="main-pane" id="pane-settings">
-    <div style="padding:12px 0;">
+    <div style="padding:12px 0;font-size:10px;">
       <div class="sec" style="margin:0 0 8px;">⚙ TRADING SETTINGS</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:10px;">
-        <div><label style="color:var(--muted);">Account Balance (USD)</label><br><input id="set-balance" type="number" value="10000" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+
+      <div style="font-weight:700;color:var(--text);margin:10px 0 4px;letter-spacing:1px;font-size:9px;">ACCOUNT</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        <div><label style="color:var(--muted);">Balance (USD)</label><br><input id="set-balance" type="number" value="10000" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
         <div><label style="color:var(--muted);">Risk per trade (%)</label><br><input id="set-risk" type="number" value="1.0" step="0.1" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
-        <div><label style="color:var(--muted);">Forex leverage</label><br><input id="set-lev-forex" type="number" value="100" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
-        <div><label style="color:var(--muted);">Index leverage</label><br><input id="set-lev-index" type="number" value="20" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
-        <div><label style="color:var(--muted);">Commodity leverage</label><br><input id="set-lev-commodity" type="number" value="50" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
-        <div><label style="color:var(--muted);">Crypto leverage</label><br><input id="set-lev-crypto" type="number" value="10" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+      </div>
+
+      <div style="font-weight:700;color:var(--text);margin:10px 0 4px;letter-spacing:1px;font-size:9px;">CFD LEVERAGE</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;">
+        <div><label style="color:var(--muted);">Forex</label><br><input id="set-lev-forex" type="number" value="100" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+        <div><label style="color:var(--muted);">Index</label><br><input id="set-lev-index" type="number" value="20" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+        <div><label style="color:var(--muted);">Commodity</label><br><input id="set-lev-commodity" type="number" value="50" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+        <div><label style="color:var(--muted);">Crypto</label><br><input id="set-lev-crypto" type="number" value="10" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+      </div>
+
+      <div style="font-weight:700;color:var(--text);margin:10px 0 4px;letter-spacing:1px;font-size:9px;">CFD CONTRACT SPECS</div>
+      <div style="font-size:8px;color:var(--dim);margin-bottom:6px;">Enter exact specs from your broker for accurate position sizing.</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+        <div><label style="color:var(--muted);">Forex lot size</label><br><input id="set-cs-forex" type="number" value="100000" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+        <div><label style="color:var(--muted);">Forex pip value</label><br><input id="set-pip-forex" type="number" value="10" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+        <div><label style="color:var(--muted);">Min lot forex</label><br><input id="set-minlot-forex" type="number" value="0.01" step="0.01" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+      </div>
+      <div style="font-size:8px;color:var(--dim);margin:6px 0 3px;">Index point values (USD per contract per point)</div>
+      <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;">
+        <div><label style="color:var(--dim);font-size:8px;">US30</label><br><input id="set-pv-us30" type="number" value="1" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">US100</label><br><input id="set-pv-us100" type="number" value="1" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">US500</label><br><input id="set-pv-us500" type="number" value="1" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">DE40</label><br><input id="set-pv-de40" type="number" value="1" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">UK100</label><br><input id="set-pv-uk100" type="number" value="1" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">J225</label><br><input id="set-pv-j225" type="number" value="100" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+      </div>
+      <div style="font-size:8px;color:var(--dim);margin:6px 0 3px;">Commodity tick values (USD per unit per tick)</div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;">
+        <div><label style="color:var(--dim);font-size:8px;">GOLD</label><br><input id="set-tv-gold" type="number" value="1" step="0.01" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">SILVER</label><br><input id="set-tv-silver" type="number" value="1" step="0.01" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">OIL</label><br><input id="set-tv-oil" type="number" value="1" step="0.01" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">COPPER</label><br><input id="set-tv-copper" type="number" value="1" step="0.01" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">PLATINUM</label><br><input id="set-tv-platinum" type="number" value="1" step="0.01" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+      </div>
+
+      <div style="font-weight:700;color:var(--text);margin:10px 0 4px;letter-spacing:1px;font-size:9px;">KELLY CRITERION</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
         <div><label style="color:var(--muted);">Kelly fraction (%)</label><br><input id="set-kelly-frac" type="number" value="25" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
         <div><label style="color:var(--muted);">Kelly mode</label><br><select id="set-kelly-mode" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"><option value="auto">Auto</option><option value="manual">Manual</option></select></div>
       </div>
-      <button onclick="saveSettings()" style="margin-top:10px;background:var(--proceed);color:var(--bg);border:none;border-radius:4px;padding:6px 20px;font-size:10px;font-weight:700;cursor:pointer;">SAVE SETTINGS</button>
+
+      <button onclick="saveSettings()" style="margin-top:10px;background:var(--proceed);color:var(--bg);border:none;border-radius:4px;padding:6px 20px;font-size:10px;font-weight:700;cursor:pointer;">SAVE ALL SETTINGS</button>
       <div id="settings-status" style="font-size:9px;color:var(--proceed);margin-top:4px;"></div>
     </div>
   </div>
@@ -1854,29 +1890,51 @@ async function loadSettings() {
   try {
     const res = await fetch('/api/settings');
     const s = await res.json();
-    document.getElementById('set-balance').value = s.account_balance || '10000';
-    document.getElementById('set-risk').value = s.risk_pct || '1.0';
-    document.getElementById('set-lev-forex').value = s.leverage_forex || '100';
-    document.getElementById('set-lev-index').value = s.leverage_index || '20';
-    document.getElementById('set-lev-commodity').value = s.leverage_commodity || '50';
-    document.getElementById('set-lev-crypto').value = s.leverage_crypto || '10';
-    document.getElementById('set-kelly-frac').value = parseFloat(s.kelly_fraction || '0.25') * 100;
-    document.getElementById('set-kelly-mode').value = s.kelly_mode || 'auto';
+    const setVal = (id, key, def) => { const el = document.getElementById(id); if (el) el.value = s[key] || def; };
+    setVal('set-balance','account_balance','10000');
+    setVal('set-risk','risk_pct','1.0');
+    setVal('set-lev-forex','leverage_forex','100');
+    setVal('set-lev-index','leverage_index','20');
+    setVal('set-lev-commodity','leverage_commodity','50');
+    setVal('set-lev-crypto','leverage_crypto','10');
+    setVal('set-cs-forex','contract_size_forex','100000');
+    setVal('set-pip-forex','pip_value_forex','10');
+    setVal('set-minlot-forex','min_lot_forex','0.01');
+    setVal('set-pv-us30','point_value_us30','1');
+    setVal('set-pv-us100','point_value_us100','1');
+    setVal('set-pv-us500','point_value_us500','1');
+    setVal('set-pv-de40','point_value_de40','1');
+    setVal('set-pv-uk100','point_value_uk100','1');
+    setVal('set-pv-j225','point_value_j225','100');
+    setVal('set-tv-gold','tick_value_gold','1');
+    setVal('set-tv-silver','tick_value_silver','1');
+    setVal('set-tv-oil','tick_value_oilwti','1');
+    setVal('set-tv-copper','tick_value_copper','1');
+    setVal('set-tv-platinum','tick_value_platinum','1');
+    const kf = document.getElementById('set-kelly-frac');
+    if (kf) kf.value = parseFloat(s.kelly_fraction || '0.25') * 100;
+    setVal('set-kelly-mode','kelly_mode','auto');
   } catch(e) {}
 }
 async function saveSettings() {
+  const getVal = (id) => document.getElementById(id)?.value || '';
   const bulk = {
-    account_balance: document.getElementById('set-balance').value,
-    risk_pct: document.getElementById('set-risk').value,
-    leverage_forex: document.getElementById('set-lev-forex').value,
-    leverage_index: document.getElementById('set-lev-index').value,
-    leverage_commodity: document.getElementById('set-lev-commodity').value,
-    leverage_crypto: document.getElementById('set-lev-crypto').value,
-    kelly_fraction: String(parseFloat(document.getElementById('set-kelly-frac').value) / 100),
-    kelly_mode: document.getElementById('set-kelly-mode').value
+    account_balance: getVal('set-balance'), risk_pct: getVal('set-risk'),
+    leverage_forex: getVal('set-lev-forex'), leverage_index: getVal('set-lev-index'),
+    leverage_commodity: getVal('set-lev-commodity'), leverage_crypto: getVal('set-lev-crypto'),
+    contract_size_forex: getVal('set-cs-forex'), pip_value_forex: getVal('set-pip-forex'),
+    min_lot_forex: getVal('set-minlot-forex'),
+    point_value_us30: getVal('set-pv-us30'), point_value_us100: getVal('set-pv-us100'),
+    point_value_us500: getVal('set-pv-us500'), point_value_de40: getVal('set-pv-de40'),
+    point_value_uk100: getVal('set-pv-uk100'), point_value_j225: getVal('set-pv-j225'),
+    tick_value_gold: getVal('set-tv-gold'), tick_value_silver: getVal('set-tv-silver'),
+    tick_value_oilwti: getVal('set-tv-oil'), tick_value_copper: getVal('set-tv-copper'),
+    tick_value_platinum: getVal('set-tv-platinum'),
+    kelly_fraction: String(parseFloat(getVal('set-kelly-frac')) / 100),
+    kelly_mode: getVal('set-kelly-mode')
   };
   await fetch('/api/settings/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bulk) });
-  document.getElementById('settings-status').textContent = '✓ Settings saved';
+  document.getElementById('settings-status').textContent = '✓ All settings saved';
   setTimeout(() => document.getElementById('settings-status').textContent = '', 2000);
 }
 
