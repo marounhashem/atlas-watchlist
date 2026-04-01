@@ -15,57 +15,49 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
   const balance = parseFloat(getSetting('account_balance') || '10000');
   const riskPct = parseFloat(getSetting('risk_pct') || '1.0') / 100;
   const leverage = parseFloat(getSetting(`leverage_${assetClass}`) || '100');
-  const contractSize = parseFloat(getSetting(`contract_size_${assetClass}`) || '100000');
 
   const riskAmount = balance * riskPct;
   const slDistance = Math.abs(entry - sl);
   if (slDistance === 0) return null;
 
   const slDistancePct = Math.round((slDistance / entry) * 10000) / 100;
-
-  // Per-symbol contract specs
   const symLower = (symbol || '').toLowerCase();
-  const pointValue = parseFloat(getSetting(`point_value_${symLower}`) || getSetting('point_value_indices') || '1');
-  const tickValue = parseFloat(getSetting(`tick_value_${symLower}`) || '1');
 
-  let unitsFixed, sizeFixed, displayFixed;
+  // Asset-class-specific sizing
+  let displayUnit, unitsRaw, sizeFixed;
+  const COMMODITY_UNITS = { GOLD: 'oz', SILVER: 'oz', OILWTI: 'bbls', COPPER: 'lbs', PLATINUM: 'oz' };
+
   if (assetClass === 'forex') {
-    // Forex: risk / (slDistance × pipValue per lot)
+    displayUnit = 'lots';
     const pipValue = parseFloat(getSetting('pip_value_forex') || '10');
-    const slPips = slDistance * 10000; // convert to pips (for 4-decimal pairs)
-    unitsFixed = riskAmount / (slPips * pipValue);
-    sizeFixed = Math.round(unitsFixed * 100) / 100;
-    const minLot = parseFloat(getSetting('min_lot_forex') || '0.01');
-    sizeFixed = Math.max(minLot, sizeFixed);
-    displayFixed = `${sizeFixed} lots`;
-    unitsFixed = sizeFixed * contractSize;
+    const slPips = slDistance * 10000;
+    unitsRaw = riskAmount / (slPips * pipValue); // lots
+    sizeFixed = Math.max(parseFloat(getSetting('min_lot_forex') || '0.01'), Math.round(unitsRaw * 100) / 100);
+    // For margin: lots × contractSize × entry / leverage
+    const contractSize = parseFloat(getSetting('contract_size_forex') || '100000');
+    var positionValue = sizeFixed * contractSize * entry;
   } else if (assetClass === 'index') {
-    // Indices: risk / (slDistance × pointValue)
-    unitsFixed = riskAmount / (slDistance * pointValue);
-    sizeFixed = Math.round(unitsFixed * 100) / 100;
-    sizeFixed = Math.max(parseFloat(getSetting('min_size_indices') || '1'), sizeFixed);
-    displayFixed = `${sizeFixed} contracts`;
+    displayUnit = 'contracts';
+    const pointValue = parseFloat(getSetting(`point_value_${symLower}`) || '1');
+    unitsRaw = riskAmount / (slDistance * pointValue);
+    sizeFixed = Math.max(1, Math.round(unitsRaw * 100) / 100);
+    var positionValue = sizeFixed * entry;
   } else if (assetClass === 'commodity') {
-    // Commodities: risk / (slDistance × tickValue)
-    unitsFixed = riskAmount / (slDistance * tickValue);
-    sizeFixed = Math.round(unitsFixed * 100) / 100;
-    // Symbol-specific units
-    const COMMODITY_UNITS = { GOLD: 'oz', SILVER: 'oz', OILWTI: 'bbls', COPPER: 'lbs', PLATINUM: 'oz' };
-    const unit = COMMODITY_UNITS[symbol] || 'units';
-    displayFixed = `${sizeFixed} ${unit}`;
+    displayUnit = COMMODITY_UNITS[symbol] || 'units';
+    const tickValue = parseFloat(getSetting(`tick_value_${symLower}`) || '1');
+    unitsRaw = riskAmount / (slDistance * tickValue);
+    sizeFixed = Math.round(unitsRaw * 100) / 100;
+    var positionValue = sizeFixed * entry;
   } else {
-    // Crypto: risk / slDistance
-    unitsFixed = riskAmount / slDistance;
-    sizeFixed = Math.round(unitsFixed * 1000) / 1000;
-    const minCrypto = parseFloat(getSetting('min_size_crypto') || '0.001');
-    sizeFixed = Math.max(minCrypto, sizeFixed);
-    const cryptoUnit = (symbol || '').replace('USD', '') || 'units';
-    displayFixed = `${sizeFixed} ${cryptoUnit}`;
+    // Crypto
+    displayUnit = (symbol || '').replace('USD', '') || 'units';
+    unitsRaw = riskAmount / slDistance;
+    sizeFixed = Math.max(parseFloat(getSetting('min_size_crypto') || '0.001'), Math.round(unitsRaw * 1000) / 1000);
+    var positionValue = sizeFixed * entry;
   }
 
-  // Margin = position value / leverage
-  const positionValue = Math.abs(unitsFixed) * entry;
   const marginRequired = Math.round(positionValue / leverage);
+  const displayFixed = `${sizeFixed} ${displayUnit}`;
 
   // Kelly criterion
   const kellyMode = getSetting('kelly_mode') || 'auto';
@@ -94,24 +86,19 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
   const kellyRiskAmount = balance * fractionalKelly;
   const unitsKelly = kellyRiskAmount / slDistance;
 
-  let sizeKelly, displayKelly;
+  // Kelly uses same logic as fixed but with kellyRiskAmount
+  const kellyUnits = kellyRiskAmount / slDistance;
+  let sizeKelly;
   if (assetClass === 'forex') {
     const pipValue = parseFloat(getSetting('pip_value_forex') || '10');
     const slPips = slDistance * 10000;
     sizeKelly = Math.round((kellyRiskAmount / (slPips * pipValue)) * 100) / 100;
-    displayKelly = `${sizeKelly} lots`;
-  } else if (assetClass === 'index') {
-    sizeKelly = Math.round((kellyRiskAmount / (slDistance * pointValue)) * 100) / 100;
-    displayKelly = `${sizeKelly} contracts`;
-  } else if (assetClass === 'commodity') {
-    sizeKelly = Math.round((kellyRiskAmount / (slDistance * tickValue)) * 100) / 100;
-    const COMMODITY_UNITS_K = { GOLD: 'oz', SILVER: 'oz', OILWTI: 'bbls', COPPER: 'lbs', PLATINUM: 'oz' };
-    displayKelly = `${sizeKelly} ${COMMODITY_UNITS_K[symbol] || 'units'}`;
+  } else if (assetClass === 'crypto') {
+    sizeKelly = Math.round(kellyUnits * 1000) / 1000;
   } else {
-    sizeKelly = Math.round((kellyRiskAmount / slDistance) * 1000) / 1000;
-    const cryptoUnitK = (symbol || '').replace('USD', '') || 'units';
-    displayKelly = `${sizeKelly} ${cryptoUnitK}`;
+    sizeKelly = Math.round(kellyUnits * 100) / 100;
   }
+  const displayKelly = `${sizeKelly} ${displayUnit}`;
 
   return {
     fixed: { riskAmount: Math.round(riskAmount), riskPct: riskPct * 100, slDistancePct, size: sizeFixed, display: displayFixed, marginRequired },

@@ -25,6 +25,13 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+// WebSocket keepalive — prevents Railway from dropping idle connections
+setInterval(() => {
+  wss.clients.forEach(client => {
+    if (client.readyState === WebSocket.OPEN) client.ping();
+  });
+}, 30000);
+
 // DB ready flag — webhook queues until DB is initialised
 let dbReady = false;
 

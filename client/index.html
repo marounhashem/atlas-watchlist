@@ -1617,11 +1617,17 @@ function renderRegime(r) {
 }
 
 async function fetchMarketStatus() {
-  const status=await fetch('/api/market-status').then(r=>r.json()).catch(()=>({}));
-  const c=document.getElementById('mh-container');
-  const entries=Object.entries(status);
-  if(!entries.length) return;
-  c.innerHTML=entries.map(([sym,s])=>`<div class="mhrow ${s.open?'mhO':'mhC'}"><span class="mhsym">${sym}</span><span class="${s.open?'mhopen':'mhclosed'}">${s.open?'OPEN':s.minutesUntilOpen?s.minutesUntilOpen+'m':'CLOSED'}</span></div>`).join('');
+  try {
+    const status = await fetch('/api/market-status').then(r=>r.json());
+    const c = document.getElementById('mh-container');
+    if (!c || !status || typeof status !== 'object') return;
+    const entries = Object.entries(status).filter(([sym, s]) => s && typeof s === 'object' && typeof s.open === 'boolean');
+    if (!entries.length) { c.innerHTML = '<div class="empty" style="padding:6px;grid-column:span 2">No market data</div>'; return; }
+    c.innerHTML = entries.map(([sym, s]) => {
+      const label = s.open ? 'OPEN' : s.minutesUntilOpen ? s.minutesUntilOpen + 'm' : 'CLOSED';
+      return `<div class="mhrow ${s.open?'mhO':'mhC'}"><span class="mhsym">${sym}</span><span class="${s.open?'mhopen':'mhclosed'}">${label}</span></div>`;
+    }).join('');
+  } catch(e) {}
 }
 
 function toggleWatchPanel() {
