@@ -1184,6 +1184,34 @@ app.post('/api/trade-feedback', (req, res) => {
   const { idea } = req.body;
   if (!idea) return res.status(400).json({ error: 'Need idea text' });
 
+  // ── Parse price levels, confidence, direction ──────────────────────────────
+  function parseIdeaLevels(text) {
+    const clean = text.replace(/[^\x00-\x7F\s]/g, ' ');
+    const result = {};
+    // Entry
+    const entryM = clean.match(/(?:buy|sell|entry|enter|limit|stop order)\s+(?:at\s+)?([\d.]+)/i) || clean.match(/\bat\s+([\d.]+)/i);
+    if (entryM) result.entry = parseFloat(entryM[1]);
+    // SL
+    const slM = clean.match(/(?:stop|sl|stop.?loss)[:\s]+([\d.]+)/i);
+    if (slM) result.sl = parseFloat(slM[1]);
+    // TP1
+    const tp1M = clean.match(/(?:target\s*1|tp\s*1|first.?target)[:\s]+([\d.]+)/i) || clean.match(/(?:target|tp|take.?profit)[:\s]+([\d.]+)/i);
+    if (tp1M) result.tp = parseFloat(tp1M[1]);
+    // TP2
+    const tp2M = clean.match(/(?:target\s*2|tp\s*2)[:\s]+([\d.]+)/i);
+    if (tp2M) result.tp2 = parseFloat(tp2M[1]);
+    // Confidence stars
+    const starM = text.match(/⭐/g);
+    if (starM) result.external_confidence = Math.min(5, starM.length);
+    // R:R
+    if (result.entry && result.sl && result.tp) {
+      const risk = Math.abs(result.entry - result.sl);
+      const reward = Math.abs(result.tp - result.entry);
+      result.rr = risk > 0 ? Math.round((reward / risk) * 10) / 10 : null;
+    }
+    return result;
+  }
+
   // Auto-detect symbol
   const aliases = {
     gold:'GOLD',silver:'SILVER',oil:'OILWTI',bitcoin:'BTCUSD',btc:'BTCUSD',eth:'ETHUSD',
@@ -1194,50 +1222,32 @@ app.post('/api/trade-feedback', (req, res) => {
   };
   const lower = idea.toLowerCase();
   let symbol = null;
-  // Check exact symbols first
-  for (const sym of Object.keys(SYMBOLS)) {
-    if (lower.includes(sym.toLowerCase())) { symbol = sym; break; }
-  }
-  // Then aliases
-  if (!symbol) {
-    for (const [alias, sym] of Object.entries(aliases)) {
-      if (lower.includes(alias)) { symbol = sym; break; }
-    }
-  }
+  for (const sym of Object.keys(SYMBOLS)) { if (lower.includes(sym.toLowerCase())) { symbol = sym; break; } }
+  if (!symbol) { for (const [alias, sym] of Object.entries(aliases)) { if (lower.includes(alias)) { symbol = sym; break; } } }
 
-  // Detect direction
+  // Direction — includes Buy Limit / Sell Limit
   let direction = null;
-  if (/\b(short|sell|bear|down|bearish)\b/i.test(idea)) direction = 'SHORT';
-  if (/\b(long|buy|bull|up|bullish)\b/i.test(idea)) direction = 'LONG';
+  if (/\b(short|sell|bear|down|bearish)\b/i.test(idea) || /sell\s*limit|sell\s*stop/i.test(idea)) direction = 'SHORT';
+  if (/\b(long|buy|bull|up|bullish)\b/i.test(idea) || /buy\s*limit|buy\s*stop/i.test(idea)) direction = 'LONG';
 
-  // Extract price levels
-  const levels = {};
-  const atMatch = idea.match(/\bat\s+([\d.]+)/i);
-  const targetMatch = idea.match(/\btarget\s+([\d.]+)/i) || idea.match(/\btp\s+([\d.]+)/i);
-  const stopMatch = idea.match(/\bstop\s+([\d.]+)/i) || idea.match(/\bsl\s+([\d.]+)/i);
-  if (atMatch) levels.entry = parseFloat(atMatch[1]);
-  if (targetMatch) levels.tp = parseFloat(targetMatch[1]);
-  if (stopMatch) levels.sl = parseFloat(stopMatch[1]);
-  if (levels.entry && levels.sl && levels.tp) {
-    const risk = Math.abs(levels.entry - levels.sl);
-    const reward = Math.abs(levels.tp - levels.entry);
-    levels.rr = risk > 0 ? Math.round((reward / risk) * 10) / 10 : null;
-  }
-
+  const levels = parseIdeaLevels(idea);
   if (!symbol) return res.json({ error: 'Could not detect symbol from idea text' });
 
   // Load system data
   const data = db.getLatestMarketData(symbol);
   const macro = getMacroContext()[symbol] || null;
-  let cot = null, rateDiff = null;
+  let cot = null, rateDiff = null, dxy = null;
   try { cot = getLatestCOT(symbol); } catch(e) {}
   try { rateDiff = getRateDifferential(symbol); } catch(e) {}
+  try { dxy = global.atlasGetDXY?.(); } catch(e) {}
   const intel = global.atlasGetActiveIntel?.() || [];
   const latestSignal = db.getAllSignals(10).find(s => s.symbol === symbol && s.outcome !== 'EXPIRED');
   const upcomingEvents = getUpcomingHighImpactEvents(2);
 
-  // Build analysis
-  const analysis = { symbol, direction, idea_entry: levels.entry, idea_sl: levels.sl, idea_tp: levels.tp, idea_rr: levels.rr,
+  // ── Build analysis ─────────────────────────────────────────────────────────
+  const analysis = { symbol, direction,
+    idea_entry: levels.entry, idea_sl: levels.sl, idea_tp: levels.tp, idea_tp2: levels.tp2, idea_rr: levels.rr,
+    external_confidence: levels.external_confidence || null,
     strengths: [], risks: [], warnings: [], checks: [], alignment: 'UNKNOWN', conviction: 0, verdict: 'WAIT' };
   let score = 0, maxScore = 0;
 
@@ -1261,21 +1271,26 @@ app.post('/api/trade-feedback', (req, res) => {
 
   // Check 2: RSI
   if (data?.rsi && direction) {
-    const rsi = data.rsi;
-    maxScore += 2;
+    const rsi = data.rsi; maxScore += 2;
     if (direction === 'LONG' && rsi > 55 && rsi < 70) { score += 2; analysis.strengths.push(`RSI ${Math.round(rsi)} — confirms LONG`); }
     else if (direction === 'SHORT' && rsi < 45 && rsi > 30) { score += 2; analysis.strengths.push(`RSI ${Math.round(rsi)} — confirms SHORT`); }
     else if (direction === 'LONG' && rsi < 40) analysis.risks.push(`RSI ${Math.round(rsi)} — momentum against LONG`);
     else if (direction === 'SHORT' && rsi > 65) analysis.risks.push(`RSI ${Math.round(rsi)} — momentum against SHORT`);
   }
 
-  // Check 3: Retail OB
-  if (data?.fxssi_long_pct && direction) {
-    maxScore += 2;
-    const lp = data.fxssi_long_pct, sp = data.fxssi_short_pct || (100 - lp);
-    if (direction === 'LONG' && sp > 55) { score += 2; analysis.strengths.push(`Retail crowd ${sp}% short — contrarian LONG`); }
-    else if (direction === 'SHORT' && lp > 55) { score += 2; analysis.strengths.push(`Retail crowd ${lp}% long — contrarian SHORT`); }
-    else if (direction === 'LONG' && lp > 65) analysis.risks.push(`Retail crowd ${lp}% long — crowded`);
+  // Check 3: Retail OB (fix: parse fxssi_analysis if direct fields empty)
+  let longPct = data?.fxssi_long_pct, shortPct = data?.fxssi_short_pct;
+  if (!longPct && data?.fxssi_analysis) {
+    try {
+      const fxP = typeof data.fxssi_analysis === 'string' ? JSON.parse(data.fxssi_analysis) : data.fxssi_analysis;
+      longPct = fxP.longPct; shortPct = fxP.shortPct || (100 - longPct);
+    } catch(e) {}
+  }
+  if (longPct && direction) {
+    maxScore += 2; shortPct = shortPct || (100 - longPct);
+    if (direction === 'LONG' && shortPct > 55) { score += 2; analysis.strengths.push(`Retail crowd ${shortPct}% short — contrarian LONG`); }
+    else if (direction === 'SHORT' && longPct > 55) { score += 2; analysis.strengths.push(`Retail crowd ${longPct}% long — contrarian SHORT`); }
+    else if (direction === 'LONG' && longPct > 65) analysis.risks.push(`Retail crowd ${longPct}% long — crowded`);
   }
 
   // Check 4: Macro
@@ -1286,42 +1301,37 @@ app.post('/api/trade-feedback', (req, res) => {
     if (confirms) { score += 3; analysis.strengths.push(`Macro ${macro.sentiment} (${macro.strength}/10) confirms — ${macro.summary}`); }
     else if (conflicts) { score -= 1; analysis.risks.push(`Macro ${macro.sentiment} (${macro.strength}/10) conflicts — ${macro.summary}`); }
     if (macro.avoid_until) analysis.checks.push(`Avoid until: ${macro.avoid_until}`);
+  } else {
+    analysis.checks.push('No macro context for this symbol — consider web search for current macro bias.');
   }
 
-  // Check 5: COT
-  if (cot && direction) {
-    maxScore += 2;
-    const net = cot.netNonComm || 0;
-    const cotFavours = (direction === 'LONG' && net < -100000) || (direction === 'SHORT' && net > 100000);
-    const cotAgainst = (direction === 'LONG' && net > 100000) || (direction === 'SHORT' && net < -100000);
-    if (cotFavours) { score += 2; analysis.strengths.push(`COT extreme — contrarian edge for ${direction}`); }
-    else if (cotAgainst) { score -= 1; analysis.risks.push(`COT extreme crowding against ${direction}`); }
+  // Check 5-9 (COT, rates, events, signal alignment, intel) — unchanged logic
+  if (cot && direction) { maxScore += 2; const net = cot.netNonComm || 0;
+    if ((direction === 'LONG' && net < -100000) || (direction === 'SHORT' && net > 100000)) { score += 2; analysis.strengths.push(`COT extreme — contrarian edge for ${direction}`); }
+    else if ((direction === 'LONG' && net > 100000) || (direction === 'SHORT' && net < -100000)) { score -= 1; analysis.risks.push(`COT extreme crowding against ${direction}`); }
   }
-
-  // Check 6: Rate differential
-  if (rateDiff && direction) {
-    maxScore += 1;
+  if (rateDiff && direction) { maxScore += 1;
     if (rateDiff.differential > 200 && direction === 'LONG') { score += 1; analysis.strengths.push(`Rate +${rateDiff.differential}bps — carry favours LONG`); }
     else if (rateDiff.differential < -200 && direction === 'LONG') analysis.risks.push(`Rate ${rateDiff.differential}bps — carry against LONG`);
   }
-
-  // Check 7: Events
   const relevantEvents = upcomingEvents.filter(e => e.daysUntil <= 2);
   if (relevantEvents.length > 0) analysis.warnings.push(`⚠ ${relevantEvents[0].title} in ${relevantEvents[0].daysUntil}d — event risk`);
-
-  // Check 8: System signal alignment
   if (latestSignal && direction) {
     if (latestSignal.direction === direction && latestSignal.verdict === 'PROCEED') { score += 2; analysis.strengths.push(`System also flagged ${symbol} ${direction} (${latestSignal.score}%) — aligned`); }
     else if (latestSignal.direction !== direction && latestSignal.verdict === 'PROCEED') analysis.risks.push(`System has active ${latestSignal.direction} signal — counter-direction`);
   }
-
-  // Check 9: Intel
   if (intel.length > 0) analysis.checks.push(`📡 Intel: ${intel.slice(0, 2).join(' | ')}`);
-
-  // Check 10: R:R
   if (levels.rr && levels.rr < 1.5) { analysis.verdict = 'AVOID'; analysis.warnings.push(`R:R ${levels.rr} below minimum 1.5`); }
 
-  // Calculate verdict
+  // External confidence cross-check
+  if (levels.external_confidence >= 4 && analysis.verdict === 'AVOID') {
+    analysis.warnings.push(`Source rates this ${'⭐'.repeat(levels.external_confidence)} (${levels.external_confidence}/5) — high external conviction but system disagrees. Review carefully.`);
+  }
+  if (levels.external_confidence && levels.external_confidence <= 2) {
+    analysis.checks.push(`Source rates this ${'⭐'.repeat(levels.external_confidence)} (${levels.external_confidence}/5) — low external conviction. Size down.`);
+  }
+
+  // Verdict
   const pct = maxScore > 0 ? score / maxScore : 0;
   analysis.alignment = pct >= 0.7 ? 'ALIGNED' : pct >= 0.4 ? 'PARTIAL' : score < 0 ? 'AGAINST' : 'NEUTRAL';
   analysis.conviction = Math.min(10, Math.max(1, Math.round(pct * 10)));
@@ -1329,24 +1339,62 @@ app.post('/api/trade-feedback', (req, res) => {
     analysis.verdict = pct >= 0.65 && analysis.warnings.length === 0 ? 'TAKE IT' : pct >= 0.40 ? 'WAIT' : 'AVOID';
   }
 
-  // Build claude export
-  const exportLines = [
-    '=== ATLAS // TRADE IDEA ANALYSIS ===',
-    `Symbol: ${symbol} | Direction: ${direction || 'unknown'}`,
-    `Idea: ${idea}`, '',
-    `VERDICT: ${analysis.verdict} | Alignment: ${analysis.alignment} | Conviction: ${analysis.conviction}/10`, '',
-    '--- STRENGTHS ---', ...analysis.strengths.map(s => `+ ${s}`), '',
-    '--- RISKS ---', ...analysis.risks.map(r => `- ${r}`), '',
-    '--- WARNINGS ---', ...analysis.warnings.map(w => `! ${w}`), '',
-    '--- CHECKS ---', ...analysis.checks.map(c => `? ${c}`), '',
-    '--- SYSTEM DATA ---',
-    `RSI: ${data?.rsi || 'N/A'} | Bias: ${data?.bias_score || 'N/A'}`,
-    macro ? `Macro: ${macro.sentiment} (${macro.strength}/10) — ${macro.summary}` : 'Macro: N/A',
-    levels.entry ? `Entry: ${levels.entry} | SL: ${levels.sl} | TP: ${levels.tp} | R:R: ${levels.rr}` : 'Price levels: not specified',
-    `Generated: ${new Date().toISOString()}`, '=== END ==='
-  ];
+  // ── Full Claude export ─────────────────────────────────────────────────────
+  let techData = {}; try { if (data?.raw_payload) techData = JSON.parse(data.raw_payload); } catch(e) {}
+  const st = techData.structure || {};
+  const tfs = ['1m','5m','15m','1h','4h','1d'];
+  const structLines = tfs.map(tf => {
+    const s = st[tf] || 0;
+    return `  ${tf.padEnd(4)}: ${s === 1 ? '↑ Bullish' : s === -1 ? '↓ Bearish' : '→ Ranging'}`;
+  }).join('\n');
 
-  res.json({ ...analysis, claudeExport: exportLines.join('\n') });
+  let fxssi = null;
+  try { const raw = data?.fxssi_analysis; if (raw) fxssi = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch(e) {}
+
+  const confStr = levels.external_confidence ? `${'⭐'.repeat(levels.external_confidence)} (${levels.external_confidence}/5)` : 'not provided';
+
+  const exportLines = [
+    '=== ATLAS // TRADE IDEA — FULL SYSTEM EXPORT ===',
+    `Symbol: ${symbol} | Direction: ${direction || 'unknown'}`,
+    `Analysed: ${new Date().toISOString()}`, '',
+    '--- ORIGINAL IDEA ---', idea, '',
+    '--- PARSED LEVELS ---',
+    `Entry: ${levels.entry || 'not specified'} | Stop: ${levels.sl || 'not specified'} | Target: ${levels.tp || 'not specified'}`,
+    levels.tp2 ? `Target 2: ${levels.tp2}` : null,
+    `R:R: ${levels.rr || 'not calculated'} | Source confidence: ${confStr}`, '',
+    '--- SYSTEM VERDICT ---',
+    `Verdict: ${analysis.verdict} | Alignment: ${analysis.alignment} | Conviction: ${analysis.conviction}/10`, '',
+    analysis.strengths.length ? '+ STRENGTHS:\n' + analysis.strengths.map(s => `  + ${s}`).join('\n') : null,
+    analysis.risks.length ? '- RISKS:\n' + analysis.risks.map(r => `  - ${r}`).join('\n') : null,
+    analysis.warnings.length ? '! WARNINGS:\n' + analysis.warnings.map(w => `  ! ${w}`).join('\n') : null,
+    analysis.checks.length ? '? CHECKS:\n' + analysis.checks.map(c => `  ? ${c}`).join('\n') : null, '',
+    '--- TECHNICAL STRUCTURE ---',
+    `RSI: ${data?.rsi ? Math.round(data.rsi * 10)/10 : 'N/A'} | Bias: ${techData.biasScore || data?.bias_score || 'N/A'}`,
+    'Timeframes:', structLines, '',
+    '--- RETAIL ORDER BOOK ---',
+    fxssi ? `Long: ${fxssi.longPct}% | Short: ${fxssi.shortPct}% | Signals: ${fxssi.signals?.bias || 'N/A'}` : 'No OB data', '',
+    '--- MACRO CONTEXT ---',
+    macro ? `${macro.sentiment} (${macro.strength}/10) — ${macro.summary}\nRisks: ${(macro.key_risks||[]).join('; ')}` : 'No macro data', '',
+    '--- COT ---',
+    cot ? `Net: ${cot.netNonComm?.toLocaleString()} | Change: ${cot.changeNetNonComm?.toLocaleString()} WoW` : 'No COT data', '',
+    '--- RATE DIFFERENTIAL ---',
+    rateDiff ? rateDiff.summary : 'N/A', '',
+    '--- DXY ---',
+    dxy ? `${dxy.close} | Trend: ${dxy.trend}` : 'No DXY data', '',
+    '--- EVENTS (48h) ---',
+    relevantEvents.length ? relevantEvents.map(e => `${e.title} (${e.currency}) — ${e.date}`).join('\n') : 'None', '',
+    '--- INTEL ---',
+    intel.length ? intel.map(i => `📡 ${i}`).join('\n') : 'None', '',
+    '--- SYSTEM SIGNAL ---',
+    latestSignal ? `${latestSignal.direction} @ ${latestSignal.entry} | Score: ${latestSignal.score}% | ${latestSignal.outcome}` : 'None', '',
+    '=== END ===', '',
+    '--- INSTRUCTIONS FOR CLAUDE ---',
+    `Analyse this ${symbol} ${direction || ''} trade idea using all data above.`,
+    `Search the web for current ${symbol} conditions and breaking news.`,
+    'Provide: (1) Your verdict (2) Entry/SL/TP assessment (3) What to change (4) Key risks'
+  ].filter(l => l !== null).join('\n');
+
+  res.json({ ...analysis, claudeExport: exportLines });
 });
 
 // ── Settings API ──────────────────────────────────────────────────────────────

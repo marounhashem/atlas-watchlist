@@ -1049,6 +1049,7 @@ function renderCard(sig, isPast=false) {
     ${bd.bias!=null?`<div class="bkd">
       ${['bias','fxssi','ob','session'].map(k=>`<div class="bi"><span class="bl">${{bias:'Technical',fxssi:'Retail OB',ob:'OB',session:'Session'}[k]}</span><div class="bw"><div class="bf" style="width:${Math.round((bd[k]||0)*100)}%"></div></div></div>`).join('')}
     </div>`:''}
+    ${(()=>{if(sig.outcome!=='OPEN'||!sig.expires_at)return'';const ms=sig.expires_at-Date.now();if(ms<0)return'<div style="font-size:8px;color:var(--short);margin-bottom:4px;">⚠ EXPIRED</div>';const h=Math.floor(ms/3600000),m=Math.floor((ms%3600000)/60000);const color=ms<1800000?'var(--watch)':'var(--dim)';return`<div style="font-size:8px;color:${color};margin-bottom:4px;">⌛ Expires in ${h}h ${m}m</div>`;})()}
     ${ert?`<div style="font-size:8px;padding:2px 6px;border-radius:3px;display:inline-block;margin-bottom:4px;${ert==='SUPPRESSED'?'background:#331100;color:#ff6600;':'background:#332800;color:#ffa000;'}">${ert==='SUPPRESSED'?'🔕 Suppressed':ert==='PRE_EVENT'?'⚠ Pre-event risk':ert==='CARRY_RISK'?'⚠ Carry risk':ert}</div>`:''}
     ${sig.is_swing||sig.isSwing?'<span style="font-size:8px;color:var(--teal);border:1px solid var(--teal-border);border-radius:3px;padding:1px 5px;margin-left:4px;">📈 SWING</span>':''}
     ${sig.positionSize?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;background:var(--surface2);border-radius:4px;padding:5px 8px;margin:4px 0;">
@@ -1878,8 +1879,8 @@ async function submitIdea() {
 function copyIdeaExport() {
   navigator.clipboard.writeText(lastIdeaExport);
   const btn = document.getElementById('idea-copy-btn');
-  btn.textContent = '✓ Copied!';
-  setTimeout(() => btn.textContent = '📋 COPY FOR CLAUDE', 2000);
+  btn.textContent = '✓ Copied! Paste into Claude.ai';
+  setTimeout(() => btn.textContent = '📋 COPY FOR CLAUDE', 3000);
 }
 
 </script>

@@ -289,6 +289,7 @@ function initSchema() {
   try { db.run('ALTER TABLE signals ADD COLUMN event_risk_tag TEXT DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN weighted_struct_score REAL DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN is_swing INTEGER DEFAULT 0'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN expires_at INTEGER DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE watch_signals ADD COLUMN event_risk_tag TEXT DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN macro_context_available INTEGER DEFAULT 0'); } catch(e) {}
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
@@ -351,13 +352,13 @@ function getLatestMarketData(symbol) {
 }
 
 function insertSignal(signal) {
-  run(`INSERT INTO signals (symbol,ts,direction,score,verdict,entry,sl,tp,rr,session,reasoning,scorer_version,macro_context_available,event_risk_tag,weighted_struct_score,is_swing)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  run(`INSERT INTO signals (symbol,ts,direction,score,verdict,entry,sl,tp,rr,session,reasoning,scorer_version,macro_context_available,event_risk_tag,weighted_struct_score,is_swing,expires_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [signal.symbol, Date.now(), signal.direction, signal.score, signal.verdict,
      signal.entry, signal.sl, signal.tp, signal.rr, signal.session, signal.reasoning,
      signal.scorerVersion || null, signal.macroContextAvailable ? 1 : 0,
      signal.eventRiskTag || null, signal.weightedStructScore || null,
-     signal.isSwing ? 1 : 0]);
+     signal.isSwing ? 1 : 0, signal.expiresAt || null]);
   const row = get("SELECT last_insert_rowid() as id");
   persist();
   return row ? row.id : null;

@@ -2168,6 +2168,13 @@ function saveSignal(scored) {
     return null;
   }
 
+  // Calculate expiry based on asset class
+  const EXPIRY_MS = { forex: 4, index: 8, commodity: 12, crypto: 24 };
+  const cfg2 = SYMBOLS[scored.symbol];
+  let expiryHours = EXPIRY_MS[cfg2?.assetClass] || 8;
+  if (scored.session === 'offHours') expiryHours = Math.round(expiryHours * 1.5);
+  scored.expiresAt = Date.now() + expiryHours * 3600000;
+
   const signalId = insertSignal({ ...scored, scorerVersion: SCORER_VERSION });
 
   // Swing channel alert — silent fail if token not set

@@ -156,12 +156,12 @@ function checkOutcomes(broadcast) {
       }
     }
 
-    // ── Expire OPEN signals older than 48h ────────────────────────────────────
+    // ── Expire OPEN signals past their expiry time ─────────────────────────────
     if (currentState === 'OPEN') {
-      const ageHours = (Date.now() - sig.ts) / 3600000;
-      if (ageHours > 48) {
+      const expired = sig.expires_at ? Date.now() > sig.expires_at : (Date.now() - sig.ts) / 3600000 > 48;
+      if (expired) {
         updateOutcome(id, 'EXPIRED', 0);
-        console.log(`[Outcome] ${sig.symbol} ${direction} → EXPIRED (48h)`);
+        console.log(`[Outcome] ${sig.symbol} ${direction} → EXPIRED (${sig.expires_at ? 'asset-class expiry' : '48h fallback'})`);
         if (broadcast) broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction, outcome: 'EXPIRED', ts: Date.now() });
       }
     }
