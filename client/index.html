@@ -936,32 +936,41 @@ function renderSignals() {
   }
   const deduped = Object.values(seen);
 
-  let filtered = deduped.filter(s=>{
-    // Never show REPLACED signals
+  // Separate actionable signals from SKIPs
+  const actionable = deduped.filter(s=>{
     if(s.outcome==='REPLACED') return false;
-    // Hide WIN/LOSS/IGNORED/EXPIRED from dashboard — DB only
     if(['WIN','LOSS','IGNORED','EXPIRED'].includes(s.outcome)) return false;
-    // CLOSED = market closed cards, only in ALL
-    if(s.verdict==='CLOSED') return activeFilter==='ALL';
-    // Active filters
+    if(s.verdict==='SKIP' || s.verdict==='CLOSED') return false;
     if(activeFilter==='PROCEED') return s.verdict==='PROCEED';
     if(activeFilter==='WATCH')   return s.verdict==='WATCH';
     if(activeFilter==='LONG')    return s.direction==='LONG';
     if(activeFilter==='SHORT')   return s.direction==='SHORT';
     return true;
   }).sort((a,b)=>{
-    // ACTIVE signals first, then PROCEED, WATCH, SKIP, CLOSED
     const stateO = {ACTIVE:0,OPEN:1};
     const sa = stateO[a.outcome]??1;
     const sb = stateO[b.outcome]??1;
     if(sa!==sb) return sa-sb;
-    const vo={PROCEED:0,WATCH:1,SKIP:2,CLOSED:3};
+    const vo={PROCEED:0,WATCH:1};
     return (vo[a.verdict]??2)-(vo[b.verdict]??2)||(b.score||0)-(a.score||0);
   });
 
+  const skipped = deduped.filter(s => s.verdict==='SKIP' && !['WIN','LOSS','IGNORED','EXPIRED','REPLACED'].includes(s.outcome));
+
   const c=document.getElementById('signals-container');
-  if(!filtered.length){c.innerHTML='<div class="empty">No signals match filter.<br>Scoring runs every 5 minutes.</div>';return;}
-  c.innerHTML=filtered.slice(0,30).map(renderCard).join('');
+  if(!actionable.length && !skipped.length){c.innerHTML='<div class="empty">No signals match filter.<br>Scoring runs every 5 minutes.</div>';return;}
+  let html = actionable.slice(0,30).map(renderCard).join('');
+  if(skipped.length > 0) {
+    html += `<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:8px;">
+      <div style="font-size:11px;color:var(--dim);cursor:pointer;display:flex;align-items:center;gap:6px;" onclick="const el=document.getElementById('skipped-list');el.style.display=el.style.display==='none'?'block':'none';this.querySelector('span').textContent=el.style.display==='none'?'▶':'▼'">
+        <span>▶</span> SKIPPED (${skipped.length})
+      </div>
+      <div id="skipped-list" style="display:none;margin-top:8px;opacity:.5;">
+        ${skipped.slice(0,15).map(renderCard).join('')}
+      </div>
+    </div>`;
+  }
+  c.innerHTML=html;
   // Keep forex pane in sync if visible
   if (activeMainTab === 'forex') renderForexSignals();
 }
@@ -1856,8 +1865,8 @@ function renderForexSignals() {
   else if (fxFilter === 'LONG')    fxSigs = fxSigs.filter(s => s.direction === 'LONG');
   else if (fxFilter === 'SHORT')   fxSigs = fxSigs.filter(s => s.direction === 'SHORT');
 
-  // Only show live (OPEN/ACTIVE) + recent past
-  const live = fxSigs.filter(s => s.outcome === 'OPEN' || s.outcome === 'ACTIVE');
+  // Only show live (OPEN/ACTIVE) — exclude SKIP
+  const live = fxSigs.filter(s => (s.outcome === 'OPEN' || s.outcome === 'ACTIVE') && s.verdict !== 'SKIP');
   const past = fxSigs.filter(s => s.outcome !== 'OPEN' && s.outcome !== 'ACTIVE').slice(0, 20);
 
   if (live.length === 0 && past.length === 0) {
@@ -1887,7 +1896,7 @@ function setGlobalFilter(f) { globalFilter = f; renderGlobalSignals(); }
 function renderGlobalSignals() {
   const c = document.getElementById('global-container');
   if (!c) return;
-  let filtered = allSignals.filter(s => GLOBAL_SYMBOLS.includes(s.symbol));
+  let filtered = allSignals.filter(s => GLOBAL_SYMBOLS.includes(s.symbol) && s.verdict !== 'SKIP' && s.verdict !== 'CLOSED');
   if (globalFilter === 'PROCEED') filtered = filtered.filter(s => s.verdict === 'PROCEED');
   if (globalFilter === 'WATCH') filtered = filtered.filter(s => s.verdict === 'WATCH');
   if (!filtered.length) { c.innerHTML = '<div class="empty">No global signals yet.</div>'; return; }
