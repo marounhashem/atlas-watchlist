@@ -570,7 +570,7 @@
         <div class="fbtn" id="past-tab-btn" onclick="setFilter('PAST')">PAST <span id="past-count" style="opacity:.6;font-size:9px;"></span></div>
       </div>
     </div>
-    <div id="signals-container"><div class="empty">Waiting for signals...<br>Pine Script alerts will appear here.</div></div>
+    <div id="signals-container"><div class="empty">Waiting for signals...<br>Technical alerts will appear here.</div></div>
   </div>
 
   <!-- Forex pane — shows FX-tagged signals from the main board -->
@@ -979,7 +979,7 @@ function renderCard(sig, isPast=false) {
       <div class="cf"><span class="fl">R:R</span><span class="fv" style="color:var(--proceed)">${sig.rr!=null?'1:'+sig.rr:'—'}</span></div>
     </div>
     ${bd.bias!=null?`<div class="bkd">
-      ${['bias','fxssi','ob','session'].map(k=>`<div class="bi"><span class="bl">${{bias:'Pine',fxssi:'FXSSI',ob:'OB',session:'Session'}[k]}</span><div class="bw"><div class="bf" style="width:${Math.round((bd[k]||0)*100)}%"></div></div></div>`).join('')}
+      ${['bias','fxssi','ob','session'].map(k=>`<div class="bi"><span class="bl">${{bias:'Technical',fxssi:'Retail OB',ob:'OB',session:'Session'}[k]}</span><div class="bw"><div class="bf" style="width:${Math.round((bd[k]||0)*100)}%"></div></div></div>`).join('')}
     </div>`:''}
     ${sig.reasoning?`<div class="reason">${esc(sig.reasoning)}</div>`:''}
     <div class="card-actions">
@@ -1071,7 +1071,7 @@ Return ONLY this JSON (no markdown, no explanation):
     predict: `You are a professional trading prediction analyst. Analyse this trade setup:
 Symbol: ${sig.symbol} | Direction: ${sig.direction} | Entry: ${sig.entry} | SL: ${sig.sl} | TP: ${sig.tp} | R:R: 1:${sig.rr} | Score: ${sig.score}%
 Reasoning: ${sig.reasoning}
-Breakdown: Pine=${Math.round((sig.breakdown?.bias||0)*100)}% FXSSI=${Math.round((sig.breakdown?.fxssi||0)*100)}% OB=${Math.round((sig.breakdown?.ob||0)*100)}% Session=${Math.round((sig.breakdown?.session||0)*100)}%
+Breakdown: Technical=${Math.round((sig.breakdown?.bias||0)*100)}% Retail OB=${Math.round((sig.breakdown?.fxssi||0)*100)}% OB=${Math.round((sig.breakdown?.ob||0)*100)}% Session=${Math.round((sig.breakdown?.session||0)*100)}%
 
 Check hard gates:
 - R:R must be >= 1.5 (current: ${sig.rr})
@@ -1588,7 +1588,7 @@ function renderForex() {
   const countEl = document.getElementById('fx-count');
   if (countEl) countEl.textContent = total > 0 ? '(' + total + ')' : '';
   if (total === 0) {
-    container.innerHTML = '<div class="fx-empty">Waiting for Pine webhook data...<br>Add forex pairs to your TradingView alerts.</div>';
+    container.innerHTML = '<div class="fx-empty">Waiting for technical data...<br>Add forex pairs to your TradingView alerts.</div>';
     return;
   }
 

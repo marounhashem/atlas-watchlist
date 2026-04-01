@@ -1615,7 +1615,7 @@ function scoreSymbol(symbol) {
   }
 
   let finalReasoning = fxssiStale
-    ? `⚠ FXSSI stale (${Math.round(fxssiAge/60000)}m) — OB scoring neutral · ` + reasoning
+    ? `⚠ Retail Order Book stale (${Math.round(fxssiAge/60000)}m) — OB scoring neutral · ` + reasoning
     : reasoning;
   if (eventRiskNote) finalReasoning = eventRiskNote + ' · ' + finalReasoning;
 
@@ -1652,7 +1652,7 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
       }
     }
   } catch(e) {}
-  if (biasSc > 0.7) parts.push(`Strong ${direction} structure on Pine (${Math.round(biasSc * 100)}%)${structTag}`);
+  if (biasSc > 0.7) parts.push(`Strong ${direction} technical structure (${Math.round(biasSc * 100)}%)${structTag}`);
   else if (biasSc > 0.4) parts.push(`Moderate ${direction} bias${structTag}`);
   else parts.push(`Weak bias — treat with caution${structTag}`);
 
@@ -1763,8 +1763,8 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
         : (parsed2.longPct != null ? parsed2 : null);
       if (fx2?.signals?.bias) {
         const pineDir = direction === 'LONG' ? 'BUY' : 'SELL';
-        if (fx2.signals.bias === pineDir) parts.push(`✓ Pine + FXSSI aligned — high conviction`);
-        else if (fx2.signals.bias !== 'NEUTRAL') parts.push(`⚠ Pine/FXSSI conflict — score penalised`);
+        if (fx2.signals.bias === pineDir) parts.push(`✓ Technical + Retail OB aligned — high conviction`);
+        else if (fx2.signals.bias !== 'NEUTRAL') parts.push(`⚠ Technical/Retail OB conflict — score penalised`);
       }
     }
   } catch(e) {}

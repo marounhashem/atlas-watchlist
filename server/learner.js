@@ -133,8 +133,8 @@ A score-63 trade that won by luck is WORSE signal quality than a score-85 trade 
 
 WEIGHT LEARNING RULES:
 - Only trades with score >= 78 (PROCEED threshold) carry signal quality information
-- FXSSI weight: stay 0.40-0.50 — order book data is the structural edge
-- Pine weight: 0.35-0.45 — structure context, slower to react
+- Retail Order Book weight: stay 0.40-0.50 — order book data is the structural edge
+- Technical weight: 0.35-0.45 — structure context, slower to react
 - Session weight: fixed 0.15 — do not change
 - minScoreProceed: floor 78, ceiling 88. Only lower below 80 if 80+ score band WR > 65%
 - Never change any single weight by more than 0.03 per cycle

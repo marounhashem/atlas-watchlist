@@ -270,7 +270,7 @@ function generateRecommendations(sig, data, price) {
     if (direction === 'LONG'  && longPct  >= 65) {
       recs.push({
         type: 'CLOSE',
-        reason: `FXSSI crowd flipped — ${longPct}% now LONG (was short) — squeeze thesis gone`,
+        reason: `Retail Order Book crowd flipped — ${longPct}% now LONG (was short) — squeeze thesis gone`,
         urgency: 'HIGH',
         price,
         mfe_pct: mfePct,
@@ -280,7 +280,7 @@ function generateRecommendations(sig, data, price) {
     if (direction === 'SHORT' && shortPct >= 65) {
       recs.push({
         type: 'CLOSE',
-        reason: `FXSSI crowd flipped — ${shortPct}% now SHORT (was long) — squeeze thesis gone`,
+        reason: `Retail Order Book crowd flipped — ${shortPct}% now SHORT (was long) — squeeze thesis gone`,
         urgency: 'HIGH',
         price,
         mfe_pct: mfePct,
@@ -388,7 +388,7 @@ function generateRecommendations(sig, data, price) {
             : Math.round((gravity * 1.001) * 10000) / 10000;
           recs.push({
             type: 'MOVE_SL',
-            reason: `FXSSI gravity cluster at ${gravity} between SL and price — tighten SL`,
+            reason: `Retail Order Book gravity cluster at ${gravity} between SL and price — tighten SL`,
             urgency: 'LOW',
             new_sl: newSL,
             price,

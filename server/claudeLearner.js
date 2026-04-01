@@ -106,8 +106,8 @@ Did ignoring them contribute to the outcome? Factor this into score_adjustment.
 ${signal.mfe != null ? `MFE CONTEXT: Price moved ${signal.mfe_pct}% in the right direction before ${outcome === 'LOSS' ? 'reversing to hit SL' : 'hitting TP'}. ${outcome === 'LOSS' && signal.mfe_pct > 0.3 ? 'This suggests the direction was correct but SL was too tight.' : outcome === 'LOSS' && (signal.mfe_pct || 0) < 0.1 ? 'Price barely moved favorably — likely a wrong call entirely.' : ''}` : ''}
 
 MARKET CONDITIONS AT ENTRY:
-Pine bias score: ${marketData?.bias || 'N/A'} | RSI: ${marketData?.rsi || 'N/A'} | Structure: ${marketData?.structure || 'N/A'}
-FXSSI: longPct=${fxssi?.longPct || 'N/A'}% shortPct=${fxssi?.shortPct || 'N/A'}% trapped=${fxssi?.trapped || 'none'}
+Technical bias score: ${marketData?.bias || 'N/A'} | RSI: ${marketData?.rsi || 'N/A'} | Structure: ${marketData?.structure || 'N/A'}
+Retail Order Book: longPct=${fxssi?.longPct || 'N/A'}% shortPct=${fxssi?.shortPct || 'N/A'}% trapped=${fxssi?.trapped || 'none'}
 inProfitPct: ${fxssi?.inProfitPct || 'N/A'}% | signalBias: ${fxssi?.signals?.bias || 'N/A'}
 gravity: ${fxssi?.gravity?.price || 'N/A'} | nearestSLAbove: ${fxssi?.nearestSLAbove?.price || 'N/A'} | nearestSLBelow: ${fxssi?.nearestSLBelow?.price || 'N/A'}
 losingClusters: ${fxssi?.losingClusters?.length || 0} | winningClusters: ${fxssi?.winningClusters?.length || 0}
