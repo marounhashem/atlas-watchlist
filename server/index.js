@@ -1526,6 +1526,8 @@ app.get('/api/settings', (req, res) => {
     point_value_de40: '1', point_value_uk100: '1', point_value_j225: '100',
     tick_value_gold: '1', tick_value_silver: '1', tick_value_oilwti: '1',
     tick_value_copper: '1', tick_value_platinum: '1',
+    cfd_lot_gold: '100', cfd_lot_silver: '5000', cfd_lot_oilwti: '1000',
+    cfd_lot_copper: '25000', cfd_lot_platinum: '50',
     min_size_crypto: '0.001',
     kelly_mode: 'auto', kelly_win_rate_manual: '50', kelly_avg_rr_manual: '1.5', kelly_fraction: '0.25'
   };

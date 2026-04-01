@@ -43,11 +43,14 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
     sizeFixed = Math.max(1, Math.round(unitsRaw * 100) / 100);
     var positionValue = sizeFixed * entry;
   } else if (assetClass === 'commodity') {
-    displayUnit = COMMODITY_UNITS[symbol] || 'units';
+    displayUnit = 'lots';
     const tickValue = parseFloat(getSetting(`tick_value_${symLower}`) || '1');
-    unitsRaw = riskAmount / (slDistance * tickValue);
-    sizeFixed = Math.round(unitsRaw * 100) / 100;
-    var positionValue = sizeFixed * entry;
+    unitsRaw = riskAmount / (slDistance * tickValue); // raw units (oz, bbls, lbs)
+    const cfdLotSize = parseFloat(getSetting(`cfd_lot_${symLower}`) || '1');
+    sizeFixed = Math.round((unitsRaw / cfdLotSize) * 100) / 100; // convert to lots
+    var positionValue = unitsRaw * entry;
+    // If lot size is 1 (not configured), show raw units instead
+    if (cfdLotSize <= 1) { displayUnit = COMMODITY_UNITS[symbol] || 'units'; sizeFixed = Math.round(unitsRaw * 100) / 100; }
   } else {
     // Crypto
     displayUnit = (symbol || '').replace('USD', '') || 'units';
@@ -93,6 +96,9 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
     const pipValue = parseFloat(getSetting('pip_value_forex') || '10');
     const slPips = slDistance * 10000;
     sizeKelly = Math.round((kellyRiskAmount / (slPips * pipValue)) * 100) / 100;
+  } else if (assetClass === 'commodity') {
+    const cfdLotSizeK = parseFloat(getSetting(`cfd_lot_${symLower}`) || '1');
+    sizeKelly = cfdLotSizeK > 1 ? Math.round((kellyUnits / cfdLotSizeK) * 100) / 100 : Math.round(kellyUnits * 100) / 100;
   } else if (assetClass === 'crypto') {
     sizeKelly = Math.round(kellyUnits * 1000) / 1000;
   } else {

@@ -669,6 +669,15 @@
         <div><label style="color:var(--dim);font-size:8px;">PLATINUM</label><br><input id="set-tv-platinum" type="number" value="1" step="0.01" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
       </div>
 
+      <div style="font-size:8px;color:var(--dim);margin:6px 0 3px;">Commodity CFD lot sizes (units per 1 lot — check your broker)</div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;">
+        <div><label style="color:var(--dim);font-size:8px;">GOLD</label><br><input id="set-cl-gold" type="number" value="100" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">SILVER</label><br><input id="set-cl-silver" type="number" value="5000" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">OIL</label><br><input id="set-cl-oil" type="number" value="1000" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">COPPER</label><br><input id="set-cl-copper" type="number" value="25000" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+        <div><label style="color:var(--dim);font-size:8px;">PLATINUM</label><br><input id="set-cl-platinum" type="number" value="50" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:3px;color:var(--text);font-size:9px;"></div>
+      </div>
+
       <div style="font-weight:700;color:var(--text);margin:10px 0 4px;letter-spacing:1px;font-size:9px;">KELLY CRITERION</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
         <div><label style="color:var(--muted);">Kelly fraction (%)</label><br><input id="set-kelly-frac" type="number" value="25" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
@@ -1968,6 +1977,11 @@ async function loadSettings() {
     setVal('set-tv-oil','tick_value_oilwti','1');
     setVal('set-tv-copper','tick_value_copper','1');
     setVal('set-tv-platinum','tick_value_platinum','1');
+    setVal('set-cl-gold','cfd_lot_gold','100');
+    setVal('set-cl-silver','cfd_lot_silver','5000');
+    setVal('set-cl-oil','cfd_lot_oilwti','1000');
+    setVal('set-cl-copper','cfd_lot_copper','25000');
+    setVal('set-cl-platinum','cfd_lot_platinum','50');
     const kf = document.getElementById('set-kelly-frac');
     if (kf) kf.value = parseFloat(s.kelly_fraction || '0.25') * 100;
     setVal('set-kelly-mode','kelly_mode','auto');
@@ -1987,6 +2001,9 @@ async function saveSettings() {
     tick_value_gold: getVal('set-tv-gold'), tick_value_silver: getVal('set-tv-silver'),
     tick_value_oilwti: getVal('set-tv-oil'), tick_value_copper: getVal('set-tv-copper'),
     tick_value_platinum: getVal('set-tv-platinum'),
+    cfd_lot_gold: getVal('set-cl-gold'), cfd_lot_silver: getVal('set-cl-silver'),
+    cfd_lot_oilwti: getVal('set-cl-oil'), cfd_lot_copper: getVal('set-cl-copper'),
+    cfd_lot_platinum: getVal('set-cl-platinum'),
     kelly_fraction: String(parseFloat(getVal('set-kelly-frac')) / 100),
     kelly_mode: getVal('set-kelly-mode')
   };
