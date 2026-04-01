@@ -293,8 +293,24 @@ app.post('/webhook/fxssi', (req, res) => {
 });
 
 // ── REST API ─────────────────────────────────────────────────────────────────
-app.get('/api/signals', (req, res) => {
-  res.json(db.getAllSignals(100));
+// Returns saved signals + latest scoring results for immediate dashboard render
+app.get('/api/signals', async (req, res) => {
+  try {
+    const saved = db.getAllSignals(100);
+    // Also run a fresh score to populate the board on hard refresh
+    if (saved.length === 0) {
+      try {
+        const { scoreAllPriority } = require('./scorer');
+        const results = await scoreAllPriority();
+        // Return scoring results (not saved — just for display)
+        res.json(results || []);
+        return;
+      } catch(e) {}
+    }
+    res.json(saved);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // EMERGENCY: reset all signal cycles back to 0 so they reappear on main board

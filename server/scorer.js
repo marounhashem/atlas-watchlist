@@ -136,7 +136,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.5'; // dynamic minScore floor by weighted structure, noOB +86 floor
+const SCORER_VERSION = '20260401.6'; // fix: api/signals returns scores on empty DB, noOB minScore +3 additive
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -1181,9 +1181,9 @@ function scoreSymbol(symbol) {
   } else if (absWeightedStruct < 5.0) {
     adjustedMinScore = Math.max(adjustedMinScore, 80);
   }
-  // noOrderBook symbols with weak structure need even higher bar
-  if (noOB && absWeightedStruct < 3.5) {
-    adjustedMinScore = Math.max(adjustedMinScore, 86);
+  // noOrderBook: additional +3 on top (additive, not separate floor)
+  if (noOB && absWeightedStruct < 5.0) {
+    adjustedMinScore += 3;
   }
 
   // Ranging daily (dailyBias===0): floor raised further
