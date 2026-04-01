@@ -12,7 +12,8 @@
       "Bash(curl -s 'https://nfs.faireconomy.media/ff_calendar_thisweek.json')",
       "Bash(curl -s 'https://nfs.faireconomy.media/ee_calendar_thisweek.json')",
       "Bash(curl -s 'https://nfs.faireconomy.media/mm_calendar_thisweek.json')",
-      "Bash(curl -s 'https://nfs.faireconomy.media/cc_calendar_thisweek.json')"
+      "Bash(curl -s 'https://nfs.faireconomy.media/cc_calendar_thisweek.json')",
+      "Bash(curl -s 'https://atlas-watchlist-production.up.railway.app/api/debug')"
     ]
   }
 }

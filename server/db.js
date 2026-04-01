@@ -669,11 +669,14 @@ function addRecommendation(signalId, rec) {
   // to the most recent unresolved MOVE_SL rec. Prevents the id:2795 pattern where
   // 100 identical recs fire because price freezes at a level for hours.
   if (rec.type === 'MOVE_SL' && rec.new_sl != null) {
-    const lastMoveSL = existing
-      .filter(r => r.type === 'MOVE_SL' && !r.resolved && !r.dismissed)
+    const threeHoursAgo = Date.now() - 3 * 60 * 60 * 1000;
+    const recentMoveSL = existing
+      .filter(r => r.type === 'MOVE_SL' && !r.resolved && !r.dismissed && r.ts > threeHoursAgo)
       .sort((a, b) => b.ts - a.ts)[0];
-    if (lastMoveSL && lastMoveSL.new_sl === rec.new_sl) {
-      return false; // same target already pending — don't add again
+    if (recentMoveSL && recentMoveSL.new_sl != null) {
+      // Dedup if new_sl within 0.1% of previous — prevents near-identical recs
+      const diff = Math.abs(recentMoveSL.new_sl - rec.new_sl) / rec.new_sl;
+      if (diff <= 0.001) return false;
     }
   }
 
@@ -760,10 +763,10 @@ function resolveStaleRecommendations(signalId, currentRsi, direction) {
       // MOVE_SL recs: extend to 2h — SL moves are actionable for much longer than 20min
       // The MOVE_SL dedup in addRecommendation prevents re-firing same target anyway
       if (r.type === 'MOVE_SL') {
-        const moveSLCapMs = 120 * 60 * 1000;
+        const moveSLCapMs = 6 * 60 * 60 * 1000; // 6h expiry for MOVE_SL
         if ((now - r.ts) > moveSLCapMs) {
           changed = true;
-          return { ...r, resolved: true, resolved_ts: now, resolved_reason: 'auto-expired (2h cap)' };
+          return { ...r, resolved: true, resolved_ts: now, resolved_reason: 'auto-expired (6h cap)' };
         }
         return r;
       }

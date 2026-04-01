@@ -1147,6 +1147,37 @@ app.get('/api/rate-status', (req, res) => {
   res.json({ rates, differentials });
 });
 
+// ── Settings API ──────────────────────────────────────────────────────────────
+app.get('/api/settings', (req, res) => {
+  const defaults = {
+    account_balance: '10000', risk_pct: '1.0',
+    leverage_forex: '100', leverage_index: '20', leverage_commodity: '50', leverage_crypto: '10',
+    contract_size_forex: '100000', contract_size_index: '1', contract_size_commodity: '1', contract_size_crypto: '1',
+    kelly_mode: 'auto', kelly_win_rate_manual: '50', kelly_avg_rr_manual: '1.5', kelly_fraction: '0.25'
+  };
+  const result = {};
+  for (const [key, def] of Object.entries(defaults)) {
+    result[key] = db.getSetting(key) || def;
+  }
+  res.json(result);
+});
+
+app.post('/api/settings', (req, res) => {
+  const { key, value } = req.body;
+  if (!key || value == null) return res.status(400).json({ error: 'Need key and value' });
+  db.setSetting(key, String(value));
+  res.json({ ok: true, key, value: String(value) });
+});
+
+app.post('/api/settings/bulk', (req, res) => {
+  const updates = req.body;
+  if (!updates || typeof updates !== 'object') return res.status(400).json({ error: 'Need object' });
+  for (const [key, value] of Object.entries(updates)) {
+    db.setSetting(key, String(value));
+  }
+  res.json({ ok: true, updated: Object.keys(updates).length });
+});
+
 // Raw Trading Economics test — scrapes and returns extracted rates for debugging
 app.get('/api/rate-test', async (req, res) => {
   try {
@@ -1454,7 +1485,11 @@ async function runMacroContextFetch(broadcast) {
     OILWTI:'crude oil WTI price OPEC supply demand outlook today',
     BTCUSD:'bitcoin BTC macro outlook institutional flows today',
     US30:  'Dow Jones US30 macro outlook earnings Fed today',
-    US100: 'Nasdaq US100 tech macro outlook Fed rates today'
+    US100: 'Nasdaq US100 tech macro outlook Fed rates today',
+    EURUSD:'EURUSD euro dollar macro outlook Fed ECB rates today',
+    GBPUSD:'GBPUSD pound dollar macro outlook BOE Fed rates today',
+    USDJPY:'USDJPY dollar yen macro BOJ rate hike 2026 today',
+    AUDUSD:'AUDUSD aussie dollar macro RBA China commodity today'
   };
 
   for (const [symbol, query] of Object.entries(symbolQueries)) {

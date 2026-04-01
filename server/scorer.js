@@ -1,6 +1,6 @@
 const { SYMBOLS, getSessionNow, sessionMultiplier } = require('./config');
 const { getLatestMarketData, getWeights, insertSignal, getOpenSignals, getLatestOpenSignal,
-        refineSignal, insertWatchSignal, getAllSignals } = require('./db');
+        refineSignal, insertWatchSignal, getAllSignals, getSetting } = require('./db');
 const { isMarketOpen } = require('./marketHours');
 
 // Lazy-loaded modules (avoid circular deps at startup)
@@ -9,6 +9,74 @@ function getCotFetcher()   { return _cotFetcher   || (_cotFetcher   = require('.
 function getRateFetcher()  { return _rateFetcher  || (_rateFetcher  = require('./rateFetcher')); }
 function getClaudeLearner(){ return _claudeLearner|| (_claudeLearner= require('./claudeLearner')); }
 function getCbCalendar()   { return _cbCalendar   || (_cbCalendar   = require('./centralBankCalendar')); }
+
+// ── Position sizing + Kelly criterion ────────────────────────────────────────
+function calculatePositionSize(entry, sl, assetClass) {
+  const balance = parseFloat(getSetting('account_balance') || '10000');
+  const riskPct = parseFloat(getSetting('risk_pct') || '1.0') / 100;
+  const leverage = parseFloat(getSetting(`leverage_${assetClass}`) || '100');
+  const contractSize = parseFloat(getSetting(`contract_size_${assetClass}`) || '1');
+
+  const riskAmount = balance * riskPct;
+  const slDistance = Math.abs(entry - sl);
+  if (slDistance === 0) return null;
+
+  const slDistancePct = Math.round((slDistance / entry) * 10000) / 100;
+  const unitsFixed = riskAmount / slDistance;
+
+  let sizeFixed, displayFixed;
+  if (assetClass === 'forex') {
+    sizeFixed = Math.round((unitsFixed / contractSize) * 100) / 100;
+    displayFixed = `${sizeFixed} lots`;
+  } else {
+    sizeFixed = Math.round(unitsFixed * 100) / 100;
+    displayFixed = `${sizeFixed} contracts`;
+  }
+
+  const marginRequired = Math.round((unitsFixed * entry) / leverage);
+
+  // Kelly criterion
+  const kellyMode = getSetting('kelly_mode') || 'auto';
+  const kellyFraction = parseFloat(getSetting('kelly_fraction') || '0.25');
+  let winRate, avgRR, dataPoints = 0;
+
+  if (kellyMode === 'auto') {
+    const closed = getAllSignals(200).filter(
+      s => (s.outcome === 'WIN' || s.outcome === 'LOSS') && s.pnl_pct != null
+    );
+    dataPoints = closed.length;
+    if (dataPoints >= 10) {
+      const wins = closed.filter(s => s.outcome === 'WIN');
+      winRate = wins.length / closed.length;
+      avgRR = wins.reduce((sum, t) => sum + (t.rr || 1.5), 0) / (wins.length || 1);
+    }
+  }
+
+  if (!winRate) {
+    winRate = parseFloat(getSetting('kelly_win_rate_manual') || '50') / 100;
+    avgRR = parseFloat(getSetting('kelly_avg_rr_manual') || '1.5');
+  }
+
+  const fullKelly = ((winRate * avgRR) - (1 - winRate)) / avgRR;
+  const fractionalKelly = Math.max(0, fullKelly * kellyFraction);
+  const kellyRiskAmount = balance * fractionalKelly;
+  const unitsKelly = kellyRiskAmount / slDistance;
+
+  let sizeKelly, displayKelly;
+  if (assetClass === 'forex') {
+    sizeKelly = Math.round((unitsKelly / contractSize) * 100) / 100;
+    displayKelly = `${sizeKelly} lots`;
+  } else {
+    sizeKelly = Math.round(unitsKelly * 100) / 100;
+    displayKelly = `${sizeKelly} contracts`;
+  }
+
+  return {
+    fixed: { riskAmount: Math.round(riskAmount), riskPct: riskPct * 100, slDistancePct, size: sizeFixed, display: displayFixed, marginRequired },
+    kelly: { winRate: Math.round(winRate * 100), avgRR: Math.round(avgRR * 10) / 10, fullKellyPct: Math.round(fullKelly * 1000) / 10, fractionalKellyPct: Math.round(fractionalKelly * 1000) / 10, riskAmount: Math.round(kellyRiskAmount), size: sizeKelly, display: displayKelly, mode: kellyMode, dataPoints },
+    balance, leverage, assetClass
+  };
+}
 
 const SYMBOL_CURRENCIES = {
   EURUSD: ['EUR','USD'], GBPUSD: ['GBP','USD'], USDJPY: ['USD','JPY'],
@@ -25,7 +93,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.3'; // event sentiment scoring — actual vs forecast drives conflictMultiplier
+const SCORER_VERSION = '20260401.4'; // weighted structure, position sizing+Kelly, macro 4 forex pairs, MOVE_SL 6h
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -741,35 +809,44 @@ function scoreSymbol(symbol) {
     if (conflictMultiplier < 1.0) conflictMultiplier = Math.min(1.0, conflictMultiplier + 0.08);
   }
 
-  // ── Multi-TF structure alignment ──────────────────────────────────────────
-  // structScore -5 to +5: all 5 TFs agreeing = much stronger than single 4h
-  let structScore = 0;
+  // ── Weighted multi-TF structure alignment ───────────────────────────────────
+  // Higher TFs carry more weight: 1d=3, 4h=2, 1h=1.5, 15m=1, 5m=0.5, 1m=0.5
+  // Max possible = ±8.5 (all 6 TFs aligned in same direction)
+  const STRUCT_WEIGHTS = { '1d': 3.0, '4h': 2.0, '1h': 1.5, '15m': 1.0, '5m': 0.5, '1m': 0.5 };
+  let weightedStructScore = 0;
+  let structAligned = [];
   try {
     if (data.raw_payload) {
       const rawS = JSON.parse(data.raw_payload);
       const st = rawS.structure;
-      if (st && typeof st.score === 'number') {
-        structScore = st.score;
-      } else {
-        structScore = (st?.['1m']||0) + (st?.['5m']||0) + (st?.['15m']||0) + (st?.['1h']||0) + (st?.['4h']||0) + (st?.['1d']||0);
+      if (st) {
+        for (const [tf, w] of Object.entries(STRUCT_WEIGHTS)) {
+          const v = st[tf] || 0;
+          weightedStructScore += v * w; // +w if aligned, -w if opposed
+          if ((direction === 'LONG' && v === 1) || (direction === 'SHORT' && v === -1)) {
+            structAligned.push(tf);
+          }
+        }
       }
     }
   } catch(e) {}
-  if (structScore === 0) {
+  if (weightedStructScore === 0) {
     const structure = data.structure || 'ranging';
-    structScore = structure === 'bullish' ? 2 : structure === 'bearish' ? -2 : 0;
+    weightedStructScore = structure === 'bullish' ? 2.0 : structure === 'bearish' ? -2.0 : 0;
   }
+  const absWeightedStruct = Math.abs(weightedStructScore);
 
+  // Structure alignment multiplier
   if (direction === 'LONG') {
-    if      (structScore >= 4)  conflictMultiplier *= 1.08;
-    else if (structScore >= 2)  conflictMultiplier *= 1.03;
-    else if (structScore <= -3) conflictMultiplier *= 0.72;
-    else if (structScore <= -1) conflictMultiplier *= 0.88;
+    if      (weightedStructScore >= 5.0)  conflictMultiplier *= 1.08;
+    else if (weightedStructScore >= 2.0)  conflictMultiplier *= 1.03;
+    else if (weightedStructScore <= -5.0) conflictMultiplier *= 0.72;
+    else if (weightedStructScore <= -2.0) conflictMultiplier *= 0.88;
   } else {
-    if      (structScore <= -4) conflictMultiplier *= 1.08;
-    else if (structScore <= -2) conflictMultiplier *= 1.03;
-    else if (structScore >= 3)  conflictMultiplier *= 0.72;
-    else if (structScore >= 1)  conflictMultiplier *= 0.88;
+    if      (weightedStructScore <= -5.0) conflictMultiplier *= 1.08;
+    else if (weightedStructScore <= -2.0) conflictMultiplier *= 1.03;
+    else if (weightedStructScore >= 5.0)  conflictMultiplier *= 0.72;
+    else if (weightedStructScore >= 2.0)  conflictMultiplier *= 0.88;
   }
 
   // RSI momentum filter — Claude learned: RSI > 60 on SHORT or < 40 on LONG = momentum against trade
@@ -924,29 +1001,20 @@ function scoreSymbol(symbol) {
     console.log(`[Scorer] ${symbol} ${direction} structure 0/5 — capped to WATCH`);
   }
 
+  // Structure cap tiers based on weighted score (max 8.5)
   let structureCap = 95;
-  let structTier = 5; // default: 5 TFs aligned
-  try {
-    if (data.raw_payload) {
-      const rawSc = JSON.parse(data.raw_payload);
-      const stSc  = rawSc.structure;
-      const sc    = typeof stSc?.score === 'number' ? Math.abs(stSc.score)
-        : (stSc ? Math.abs((stSc['1m']||0)+(stSc['5m']||0)+(stSc['15m']||0)+(stSc['1h']||0)+(stSc['4h']||0)+(stSc['1d']||0)) : 0);
-      structTier = sc;
-      if      (sc <= 1) structureCap = 78;
-      else if (sc <= 2) structureCap = 84;
-      else if (sc <= 3) structureCap = 89;
-      else if (sc <= 4) structureCap = 93;
-      else if (sc <= 5) structureCap = 94;
-      // sc = 6 (all TFs including daily) → max 95
-    }
-  } catch(e) {}
+  if      (absWeightedStruct < 1.0) structureCap = 68;
+  else if (absWeightedStruct < 2.0) structureCap = 78;
+  else if (absWeightedStruct < 3.5) structureCap = 84;
+  else if (absWeightedStruct < 5.0) structureCap = 89;
+  else if (absWeightedStruct < 7.0) structureCap = 93;
+  // >= 7.0 → 95 (default)
 
   // ── FXSSI signal count tiebreaker within structure tier ───────────────────
   // When structure is 0-1/5, FXSSI signal count (0-7) differentiates quality
   // More FXSSI conditions aligned = higher confidence within the same structure tier
   // Prevents weak and strong signals both capping at exactly 78%
-  if (structTier <= 1) {
+  if (absWeightedStruct < 1.0) {
     try {
       let fxssiSigCount = 0;
       if (data.fxssi_analysis) {
@@ -1714,6 +1782,8 @@ function scoreSymbol(symbol) {
     regimeAdj: regimeMultiplier !== 1.0 ? { multiplier: regimeMultiplier, note: regimeNote } : null,
     macroContextAvailable,
     eventRiskTag,
+    weightedStructScore: Math.round(absWeightedStruct * 10) / 10,
+    positionSize: (entry && sl && cfg.assetClass) ? calculatePositionSize(entry, sl, cfg.assetClass) : null,
     ts: Date.now()
   };
 }
@@ -1727,12 +1797,20 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
       const rawR = JSON.parse(data.raw_payload);
       const st = rawR.structure;
       if (st) {
+        const SW = { '1d': 3.0, '4h': 2.0, '1h': 1.5, '15m': 1.0, '5m': 0.5, '1m': 0.5 };
+        let wScore = 0;
         const tfs = ['1m','5m','15m','1h','4h','1d'];
-        const aligned = tfs.filter(tf => (direction==='LONG' ? st[tf]===1 : st[tf]===-1));
-        const opposed = tfs.filter(tf => (direction==='LONG' ? st[tf]===-1 : st[tf]===1));
-        const sc = typeof st.score === 'number' ? st.score : 0;
-        const maxTFs = st['1d'] !== undefined ? 6 : 5; // 6 TFs if daily is in payload
-        structTag = ` · Structure ${aligned.length}/${maxTFs} aligned [${aligned.join(',') || '—'}]${opposed.length ? ' ⚠ opposed:'+opposed.join(',') : ''}`;
+        const aligned = [];
+        for (const tf of tfs) {
+          const v = st[tf] || 0;
+          wScore += v * SW[tf];
+          if ((direction === 'LONG' && v === 1) || (direction === 'SHORT' && v === -1)) aligned.push(tf);
+        }
+        const absW = Math.round(Math.abs(wScore) * 10) / 10;
+        const htf = aligned.some(t => ['4h','1d'].includes(t));
+        const label = htf ? (aligned.includes('1d') ? 'daily confirmed' : 'swing confirmed')
+          : aligned.some(t => t === '1h') ? '1h confirmed' : 'lower TF only';
+        structTag = ` · Structure ${absW}/8.5 [${aligned.join(',') || '—'}] — ${label}`;
       }
     }
   } catch(e) {}
