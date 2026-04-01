@@ -1125,7 +1125,12 @@ function renderCard(sig, isPast=false) {
 
       <!-- B3: Score bars -->
       <div style="display:flex;flex-direction:column;justify-content:center;gap:10px;">
-        ${bd.bias!=null?[pbar('Technical',bd.bias),pbar('Retail OB',bd.fxssi),pbar('OB Score',bd.ob),pbar('Session',bd.session)].join(''):''}
+        ${bd.bias!=null?(()=>{
+          const noOB=(sig.reasoning||'').includes('No Retail OB');
+          return noOB
+            ? [pbar('Technical',bd.bias),pbar('Session',bd.session),'<div style="font-size:11px;color:var(--txt3,var(--dim));font-style:italic;text-align:right;margin-top:4px;">No Retail Order Book data</div>'].join('')
+            : [pbar('Technical',bd.bias),pbar('Sentiment',bd.fxssi),pbar('OB Levels',bd.ob),pbar('Session',bd.session)].join('');
+        })():''}
       </div>
 
     </div>
@@ -1231,7 +1236,7 @@ Return ONLY this JSON (no markdown, no explanation):
     predict: `You are a professional trading prediction analyst. Analyse this trade setup:
 Symbol: ${sig.symbol} | Direction: ${sig.direction} | Entry: ${sig.entry} | SL: ${sig.sl} | TP: ${sig.tp} | R:R: 1:${sig.rr} | Score: ${sig.score}%
 Reasoning: ${sig.reasoning}
-Breakdown: Technical=${Math.round((sig.breakdown?.bias||0)*100)}% Retail OB=${Math.round((sig.breakdown?.fxssi||0)*100)}% OB=${Math.round((sig.breakdown?.ob||0)*100)}% Session=${Math.round((sig.breakdown?.session||0)*100)}%
+Breakdown: Technical=${Math.round((sig.breakdown?.bias||0)*100)}% Sentiment=${Math.round((sig.breakdown?.fxssi||0)*100)}% OB Levels=${Math.round((sig.breakdown?.ob||0)*100)}% Session=${Math.round((sig.breakdown?.session||0)*100)}%
 
 Check hard gates:
 - R:R must be >= 1.5 (current: ${sig.rr})
