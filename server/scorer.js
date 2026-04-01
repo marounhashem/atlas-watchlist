@@ -10,11 +10,22 @@ function getRateFetcher()  { return _rateFetcher  || (_rateFetcher  = require('.
 function getClaudeLearner(){ return _claudeLearner|| (_claudeLearner= require('./claudeLearner')); }
 function getCbCalendar()   { return _cbCalendar   || (_cbCalendar   = require('./centralBankCalendar')); }
 
+const SYMBOL_CURRENCIES = {
+  EURUSD: ['EUR','USD'], GBPUSD: ['GBP','USD'], USDJPY: ['USD','JPY'],
+  USDCHF: ['USD','CHF'], USDCAD: ['USD','CAD'], AUDUSD: ['AUD','USD'],
+  NZDUSD: ['NZD','USD'], EURJPY: ['EUR','JPY'], EURGBP: ['EUR','GBP'],
+  EURAUD: ['EUR','AUD'], EURCHF: ['EUR','CHF'], GBPJPY: ['GBP','JPY'],
+  GBPCHF: ['GBP','CHF'], AUDJPY: ['AUD','JPY'],
+  GOLD: ['XAU','USD'], SILVER: ['XAG','USD'], OILWTI: ['OIL','USD'],
+  BTCUSD: ['BTC','USD'], US30: ['US30','USD'], US100: ['US100','USD'],
+  ETHUSD: ['ETH','USD']
+};
+
 // ── Scorer version ────────────────────────────────────────────────────────────
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.2'; // FF pre/post event risk, 5min polling, signal suppression on event fire
+const SCORER_VERSION = '20260401.3'; // event sentiment scoring — actual vs forecast drives conflictMultiplier
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -450,14 +461,7 @@ function scoreSymbol(symbol) {
   const direction = inferDirection(data);
   if (!direction) return null;
 
-  // ── Post-event suppression — block all signals during volatility window ────
-  try {
-    const { isPostEventSuppressed } = require('./forexCalendar');
-    if (isPostEventSuppressed(symbol)) {
-      console.log(`[Scorer] ${symbol} suppressed — post-event volatility window`);
-      return null;
-    }
-  } catch(e) {}
+  // Post-event suppression checked later — tag applied to return object
 
   // ── Hard RSI block ────────────────────────────────────────────────────────
   // Analysis of 26 losses showed RSI opposing direction = 0% win rate
@@ -787,6 +791,7 @@ function scoreSymbol(symbol) {
   // If macro confirms, apply small bonus.
   let macroNote = '';
   let macroContextAvailable = false;
+  let eventRiskTag = null; // PRE_EVENT | SUPPRESSED | CARRY_RISK | null
   try {
     // getMacroContext is in-process via index.js — access via global if available
     const macroCtx = global.atlasGetMacroContext ? global.atlasGetMacroContext() : null;
@@ -858,12 +863,43 @@ function scoreSymbol(symbol) {
       if (againstCarry && absBps > 500) {
         conflictMultiplier *= 0.80;
         macroNote += ` | ⚠ Extreme carry fight (${rateDiff.differential}bps)`;
+        if (!eventRiskTag) eventRiskTag = 'CARRY_RISK';
       } else if (againstCarry && absBps > 300) {
         conflictMultiplier *= 0.88;
         macroNote += ` | ⚠ Strong carry fight (${rateDiff.differential}bps)`;
       } else if (withCarry && absBps > 300) {
         conflictMultiplier *= 1.05;
       }
+    }
+  } catch(e) {}
+
+  // ── Economic event sentiment gate ───────────────────────────────────────────
+  // When HIGH impact event fired recently, adjust scoring based on actual vs forecast
+  try {
+    const { getEventSentiment } = require('./forexCalendar');
+    const currencies = SYMBOL_CURRENCIES[symbol] || [];
+    for (const currency of currencies) {
+      const sentiment = getEventSentiment(currency);
+      if (!sentiment || sentiment.beat === 0) continue;
+
+      const isBase = currencies[0] === currency;
+      // Base currency bullish → pair bullish (LONG), quote bullish → pair bearish (SHORT)
+      const pairBias = isBase ? sentiment.beat : -sentiment.beat;
+
+      const mult = sentiment.magnitude === 'LARGE' ? 0.15
+        : sentiment.magnitude === 'MEDIUM' ? 0.10 : 0.05;
+
+      const confirms = (pairBias === 1 && direction === 'LONG') || (pairBias === -1 && direction === 'SHORT');
+      const contradicts = (pairBias === 1 && direction === 'SHORT') || (pairBias === -1 && direction === 'LONG');
+
+      if (confirms) {
+        conflictMultiplier *= (1 + mult);
+        macroNote += macroNote ? ` · ✓ ${sentiment.summary}` : `✓ ${sentiment.summary}`;
+      } else if (contradicts) {
+        conflictMultiplier *= (1 - mult);
+        macroNote += macroNote ? ` · ⚠ ${sentiment.summary}` : `⚠ ${sentiment.summary}`;
+      }
+      break; // only apply the most relevant currency's sentiment
     }
   } catch(e) {}
 
@@ -1571,39 +1607,53 @@ function scoreSymbol(symbol) {
     : macroAdjustedScore >= macroEffectiveMin - 8 ? 'WATCH' : 'SKIP';
   let macroVerdict = structureZero && macroRawVerdict === 'PROCEED' ? 'WATCH' : macroRawVerdict;
 
-  // ── Event risk gate ──────────────────────────────────────────────────────────
-  // CB meetings: cap to WATCH within 48h. Economic events (NFP/CPI/GDP): 24h.
+  // ── Event risk tags ──────────────────────────────────────────────────────────
+  // Tags surface risk in dashboard/Telegram instead of silently blocking
   let eventRiskNote = '';
+
+  // Post-event suppression — downgrade to WATCH/SUPPRESSED
   try {
-    const { isPairEventRisk } = getCbCalendar();
-    // Check CB meetings (48h window)
-    let eventRisk = isPairEventRisk(symbol, 48);
-    // If no CB meeting, check economic events (24h window)
-    if (!eventRisk) {
-      eventRisk = isPairEventRisk(symbol, 24);
-      // Only keep if it's actually an economic event within 24h
-      if (eventRisk && !eventRisk.isEconomicEvent) eventRisk = null;
-    }
-    if (eventRisk && macroVerdict === 'PROCEED') {
+    const { isPostEventSuppressed } = require('./forexCalendar');
+    if (isPostEventSuppressed(symbol)) {
+      macroAdjustedScore = Math.min(macroAdjustedScore, 65);
       macroVerdict = 'WATCH';
-      const label = eventRisk.isEconomicEvent ? eventRisk.bank : `${eventRisk.bank} meeting`;
-      eventRiskNote = `⚠ ${label} in ${eventRisk.daysUntil < 1 ? '<24h' : eventRisk.daysUntil + 'd'} — event risk, capped to WATCH`;
-      console.log(`[Scorer] ${symbol} ${direction} — ${eventRiskNote}`);
+      eventRiskTag = 'SUPPRESSED';
+      eventRiskNote = '⚠ Post-event suppression active';
+      console.log(`[Scorer] ${symbol} ${direction} — SUPPRESSED (post-event)`);
     }
   } catch(e) {}
 
-  // ── Forex Factory pre-event risk gate ─────────────────────────────────────
-  // HIGH impact events within 2 hours — penalise and cap to WATCH
-  if (!eventRiskNote) {
+  // FF pre-event risk — cap to WATCH/PRE_EVENT
+  if (!eventRiskTag) {
     try {
       const { isPreEventRisk } = require('./forexCalendar');
       const preEvent = isPreEventRisk(symbol, 2);
       if (preEvent) {
         macroAdjustedScore = Math.round(macroAdjustedScore * 0.75);
         if (macroVerdict === 'PROCEED') macroVerdict = 'WATCH';
+        eventRiskTag = 'PRE_EVENT';
         const timeLabel = preEvent.minutesUntil <= 0 ? 'NOW' : preEvent.minutesUntil < 60 ? `${preEvent.minutesUntil}min` : `${preEvent.hoursUntil}h`;
         eventRiskNote = `⚠ ${preEvent.title} in ${timeLabel} — pre-event risk`;
-        console.log(`[Scorer] ${symbol} ${direction} — ${eventRiskNote}`);
+        console.log(`[Scorer] ${symbol} ${direction} — PRE_EVENT: ${eventRiskNote}`);
+      }
+    } catch(e) {}
+  }
+
+  // CB meeting event risk — cap to WATCH/PRE_EVENT
+  if (!eventRiskTag) {
+    try {
+      const { isPairEventRisk } = getCbCalendar();
+      let eventRisk = isPairEventRisk(symbol, 48);
+      if (!eventRisk) {
+        eventRisk = isPairEventRisk(symbol, 24);
+        if (eventRisk && !eventRisk.isEconomicEvent) eventRisk = null;
+      }
+      if (eventRisk && macroVerdict === 'PROCEED') {
+        macroVerdict = 'WATCH';
+        eventRiskTag = 'PRE_EVENT';
+        const label = eventRisk.isEconomicEvent ? eventRisk.bank : `${eventRisk.bank} meeting`;
+        eventRiskNote = `⚠ ${label} in ${eventRisk.daysUntil < 1 ? '<24h' : eventRisk.daysUntil + 'd'} — event risk`;
+        console.log(`[Scorer] ${symbol} ${direction} — PRE_EVENT: ${eventRiskNote}`);
       }
     } catch(e) {}
   }
@@ -1663,6 +1713,7 @@ function scoreSymbol(symbol) {
     fxssiStale: fxssiStale || false,
     regimeAdj: regimeMultiplier !== 1.0 ? { multiplier: regimeMultiplier, note: regimeNote } : null,
     macroContextAvailable,
+    eventRiskTag,
     ts: Date.now()
   };
 }

@@ -26,6 +26,90 @@ const EVENT_IMPACT_SYMBOLS = {
 const postEventSuppression = {};
 const SUPPRESSION_MS = 30 * 60 * 1000; // 30 minutes
 
+// ── Event sentiment calculation ──────────────────────────────────────────────
+const BULLISH_HIGHER = ['Non-Farm', 'GDP', 'Retail Sales', 'Manufacturing PMI',
+  'Services PMI', 'Employment Change', 'Consumer Confidence', 'Trade Balance',
+  'ISM Manufacturing', 'ISM Services', 'ADP Non-Farm'];
+const BEARISH_HIGHER = ['Unemployment Rate', 'Unemployment Claims',
+  'Initial Jobless Claims'];
+const HAWKISH_HIGHER = ['CPI', 'Core CPI', 'PCE', 'Core PCE', 'PPI',
+  'Average Hourly Earnings'];
+
+function calculateEventSentiment(event) {
+  const actual = parseFloat(event.actual || event.forecast); // FF may not have actual separately
+  const forecast = parseFloat(event.forecast);
+  const previous = parseFloat(event.previous);
+
+  if (isNaN(actual) && isNaN(forecast)) return null;
+
+  // If we have forecast, compare actual vs forecast
+  if (!isNaN(actual) && !isNaN(forecast) && forecast !== 0) {
+    const delta = actual - forecast;
+    const pctDelta = Math.round(Math.abs(delta / forecast) * 1000) / 10;
+
+    const isBullishHigher = BULLISH_HIGHER.some(e => event.title.includes(e))
+      || HAWKISH_HIGHER.some(e => event.title.includes(e));
+    const isBearishHigher = BEARISH_HIGHER.some(e => event.title.includes(e));
+
+    let beat = 0;
+    if (delta > 0) beat = isBullishHigher ? 1 : isBearishHigher ? -1 : 1;
+    if (delta < 0) beat = isBullishHigher ? -1 : isBearishHigher ? 1 : -1;
+
+    const magnitude = pctDelta < 0.5 ? 'SMALL' : pctDelta < 2.0 ? 'MEDIUM' : 'LARGE';
+    const beatLabel = beat > 0 ? 'beat' : 'missed';
+
+    return {
+      beat, magnitude, pctDelta,
+      actual: event.actual || String(actual),
+      forecast: event.forecast,
+      previous: event.previous,
+      summary: `${event.title} ${beatLabel} (${event.actual || actual} vs ${event.forecast}) — ${event.currency} ${beat > 0 ? 'bullish' : 'bearish'}`
+    };
+  }
+
+  // No forecast — compare to previous
+  if (!isNaN(actual) && !isNaN(previous) && previous !== 0) {
+    const beat = actual > previous ? 1 : -1;
+    return {
+      beat, magnitude: 'SMALL', pctDelta: 0,
+      actual: event.actual || String(actual),
+      previous: event.previous,
+      summary: `${event.title}: ${event.actual || actual} vs prev ${event.previous}`
+    };
+  }
+
+  return null;
+}
+
+// ── Get combined sentiment from all events fired in last N hours for a currency
+function getEventSentiment(currency) {
+  try {
+    const { getRecentFiredEvents } = require('./db');
+    const recent = getRecentFiredEvents(4);
+    const forCurrency = recent.filter(e => e.currency === currency && e.sentiment !== 0);
+    if (forCurrency.length === 0) return null;
+
+    // Combine: weight by magnitude
+    let totalBeat = 0;
+    let count = 0;
+    let lastSummary = '';
+    for (const e of forCurrency) {
+      const weight = e.sentiment_magnitude === 'LARGE' ? 3 : e.sentiment_magnitude === 'MEDIUM' ? 2 : 1;
+      totalBeat += e.sentiment * weight;
+      count += weight;
+      if (!lastSummary) lastSummary = e.sentiment_summary || '';
+    }
+
+    const avgBeat = count > 0 ? totalBeat / count : 0;
+    return {
+      beat: avgBeat > 0.3 ? 1 : avgBeat < -0.3 ? -1 : 0,
+      magnitude: Math.abs(avgBeat) > 0.7 ? 'LARGE' : Math.abs(avgBeat) > 0.3 ? 'MEDIUM' : 'SMALL',
+      summary: lastSummary,
+      eventCount: forCurrency.length
+    };
+  } catch(e) { return null; }
+}
+
 // ── Fetch helpers ───────────────────────────────────────────────────────────
 async function fetchCalendarURL(url) {
   const res = await fetch(url, {
@@ -98,7 +182,14 @@ async function runCalendarCheck(broadcast) {
       // Event fired = event time passed (0-120 min ago) and not yet marked
       if (minutesSince >= 0 && minutesSince <= 120) {
         try {
-          const wasFired = markEventFired(eventId);
+          // Calculate sentiment from actual vs forecast
+          const sentiment = calculateEventSentiment({
+            title: e.title, currency: e.country,
+            actual: e.actual || e.forecast, // FF may not separate actual
+            forecast: e.forecast, previous: e.previous
+          });
+
+          const wasFired = markEventFired(eventId, sentiment);
           if (wasFired) {
             fired++;
             const affectedSymbols = EVENT_IMPACT_SYMBOLS[e.country] || [];
@@ -109,18 +200,19 @@ async function runCalendarCheck(broadcast) {
               postEventSuppression[sym] = Math.max(postEventSuppression[sym] || 0, suppressUntil);
             }
 
-            console.log(`[Calendar] EVENT FIRED: ${e.title} (${e.country}) — suppressing ${affectedSymbols.length} symbols for 30min`);
+            const sentimentLabel = sentiment ? ` | ${sentiment.summary}` : '';
+            console.log(`[Calendar] EVENT FIRED: ${e.title} (${e.country})${sentimentLabel} — suppressing ${affectedSymbols.length} symbols for 30min`);
 
-            // Telegram alert
+            // Telegram alert with sentiment
             try {
               const { sendEventFiredAlert } = require('./telegram');
               sendEventFiredAlert({
                 title: e.title,
                 currency: e.country,
-                actual: 'Released',
+                actual: e.actual || 'Released',
                 forecast: e.forecast,
                 previous: e.previous
-              }, affectedSymbols).catch(err => console.error('[Calendar] Telegram error:', err.message));
+              }, sentiment, affectedSymbols).catch(err => console.error('[Calendar] Telegram error:', err.message));
             } catch(te) {}
 
             // WebSocket broadcast
@@ -218,6 +310,6 @@ function getUpcomingHighImpactEvents(days = 7) {
 module.exports = {
   runCalendarCheck, runCalendarFetch,
   isPreEventRisk, isPostEventSuppressed,
-  getUpcomingHighImpactEvents,
-  EVENT_IMPACT_SYMBOLS
+  getUpcomingHighImpactEvents, getEventSentiment,
+  calculateEventSentiment, EVENT_IMPACT_SYMBOLS
 };

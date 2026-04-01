@@ -993,6 +993,20 @@ async function buildMorningBrief() {
     lines.push('');
   }
 
+  // Recent fired events with outcomes
+  try {
+    const { getRecentFiredEvents } = require('./db');
+    const recentFired = getRecentFiredEvents(12).filter(e => e.sentiment !== 0);
+    if (recentFired.length > 0) {
+      lines.push('<b>📊 RECENT EVENT OUTCOMES</b>');
+      for (const e of recentFired.slice(0, 5)) {
+        const icon = e.sentiment > 0 ? '📈' : e.sentiment < 0 ? '📉' : '➡️';
+        lines.push(`${icon} ${e.sentiment_summary || e.title}`);
+      }
+      lines.push('');
+    }
+  } catch(e) {}
+
   // Active signals
   const activeSignals = getCurrentCycleSignals(20).filter(s =>
     s.outcome === 'OPEN' || s.outcome === 'ACTIVE'

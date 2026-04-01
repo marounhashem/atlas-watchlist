@@ -210,6 +210,8 @@
   .vW{background:var(--watch-bg);color:var(--watch);border:1px solid var(--watch-border);}
   .vS{background:var(--surface2);color:var(--dim);border:1px solid var(--border);}
   .vC{background:var(--closed);color:var(--dim);border:1px solid var(--border);}
+  .vER{background:#332800;color:#ffa000;border:1px solid #66500055;}
+  .vSUP{background:#331100;color:#ff6600;border:1px solid #66330055;}
 
   /* Score bar */
   .sbar{height:3px;background:var(--surface3);border-radius:2px;margin-bottom:10px;}
@@ -959,7 +961,8 @@ function renderCard(sig, isPast=false) {
   })() : '';
   const isActive = sig.outcome==='ACTIVE';
   const displayV = isActive ? 'ACTIVE' : v;
-  const vcls = isActive ? 'vA' : v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
+  const ert = sig.event_risk_tag || sig.eventRiskTag;
+  const vcls = isActive ? 'vA' : ert==='SUPPRESSED'?'vSUP':ert?'vER':v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
   const scls=isActive?'sbW':v==='PROCEED'?'sbP':v==='WATCH'?'sbW':'sbS';
   const showAgents = v==='PROCEED' || v==='WATCH';
   const pastBadge = isPast ? '<span style="font-size:9px;color:var(--dim);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-right:3px;">PAST</span>' : '';

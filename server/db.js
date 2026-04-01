@@ -143,6 +143,9 @@ function initSchema() {
   // Migrations for existing DBs
   try { db.run('ALTER TABLE economic_events ADD COLUMN event_id TEXT UNIQUE'); } catch(e) {}
   try { db.run('ALTER TABLE economic_events ADD COLUMN fired INTEGER DEFAULT 0'); } catch(e) {}
+  try { db.run('ALTER TABLE economic_events ADD COLUMN sentiment INTEGER DEFAULT 0'); } catch(e) {}
+  try { db.run('ALTER TABLE economic_events ADD COLUMN sentiment_magnitude TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE economic_events ADD COLUMN sentiment_summary TEXT'); } catch(e) {}
 
   // Macro context — persisted so it survives restarts
   db.run(`CREATE TABLE IF NOT EXISTS macro_context (
@@ -248,6 +251,8 @@ function initSchema() {
   try { db.run('ALTER TABLE signals ADD COLUMN recommendations TEXT DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN rec_followed INTEGER DEFAULT 0'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN refine_ts INTEGER DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN event_risk_tag TEXT DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE watch_signals ADD COLUMN event_risk_tag TEXT DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN macro_context_available INTEGER DEFAULT 0'); } catch(e) {}
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
   try { db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL'); } catch(e) { console.error('[DB] Backfill error:', e.message); }
@@ -309,11 +314,12 @@ function getLatestMarketData(symbol) {
 }
 
 function insertSignal(signal) {
-  run(`INSERT INTO signals (symbol,ts,direction,score,verdict,entry,sl,tp,rr,session,reasoning,scorer_version,macro_context_available)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  run(`INSERT INTO signals (symbol,ts,direction,score,verdict,entry,sl,tp,rr,session,reasoning,scorer_version,macro_context_available,event_risk_tag)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [signal.symbol, Date.now(), signal.direction, signal.score, signal.verdict,
      signal.entry, signal.sl, signal.tp, signal.rr, signal.session, signal.reasoning,
-     signal.scorerVersion || null, signal.macroContextAvailable ? 1 : 0]);
+     signal.scorerVersion || null, signal.macroContextAvailable ? 1 : 0,
+     signal.eventRiskTag || null]);
   const row = get("SELECT last_insert_rowid() as id");
   persist();
   return row ? row.id : null;
@@ -827,14 +833,20 @@ function upsertEconomicEvent(event) {
   persist();
 }
 
-// Mark event as fired — returns true if this is the first time (newly fired)
-function markEventFired(eventId) {
+// Mark event as fired with sentiment — returns true if this is the first time
+function markEventFired(eventId, sentiment) {
   const row = get('SELECT id, fired FROM economic_events WHERE event_id=?', [eventId]);
   if (!row) return false;
-  if (row.fired === 1) return false; // already fired
-  run('UPDATE economic_events SET fired=1 WHERE id=?', [row.id]);
+  if (row.fired === 1) return false;
+  run('UPDATE economic_events SET fired=1, sentiment=?, sentiment_magnitude=?, sentiment_summary=? WHERE id=?',
+    [sentiment?.beat || 0, sentiment?.magnitude || null, sentiment?.summary || null, row.id]);
   persist();
   return true;
+}
+
+function getRecentFiredEvents(hours = 4) {
+  const cutoff = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString().slice(0, 10);
+  return all('SELECT * FROM economic_events WHERE fired=1 AND event_date >= ? ORDER BY event_date DESC, event_time DESC', [cutoff]);
 }
 
 function getUpcomingEvents(days = 7) {
@@ -962,7 +974,7 @@ module.exports = {
   retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals,
   getSetting, setSetting,
   insertWatchSignal, getRecentWatchSignals, updateWatchOutcome,
-  upsertEconomicEvent, markEventFired, getUpcomingEvents, getAllEconomicEvents,
+  upsertEconomicEvent, markEventFired, getRecentFiredEvents, getUpcomingEvents, getAllEconomicEvents,
   upsertMacroContext, getStoredMacroContext, getMacroContextAge,
   upsertCOTData, getCOTData, getAllCOTData,
   upsertRateData, getRateData, getAllRateData,

@@ -29,7 +29,11 @@ async function sendMessage(text, parseMode = 'HTML') {
 // Signal alert — fires when a new PROCEED signal is saved
 async function sendSignalAlert(signal) {
   const dir = signal.direction === 'LONG' ? '🟢 LONG' : '🔴 SHORT';
-  const verdict = signal.verdict === 'PROCEED' ? '✅ PROCEED' : '👀 WATCH';
+  const tag = signal.eventRiskTag;
+  const verdict = tag === 'SUPPRESSED' ? '🔕 WATCH/SUPPRESSED'
+    : tag === 'PRE_EVENT' ? `⚠️ ${signal.verdict}/EVENT-RISK`
+    : tag === 'CARRY_RISK' ? `⚠️ ${signal.verdict}/CARRY-RISK`
+    : signal.verdict === 'PROCEED' ? '✅ PROCEED' : '👀 WATCH';
   const text = [
     `<b>ATLAS // ${signal.symbol} ${dir}</b>`,
     `${verdict} — Score: ${signal.score}%`,
@@ -77,18 +81,20 @@ async function sendHealthAlert(problems) {
   return sendMessage(text);
 }
 
-// Economic event fired alert
-async function sendEventFiredAlert(event, affectedSymbols) {
-  const vs = event.forecast ? ` vs Forecast: ${event.forecast}` : '';
-  const prev = event.previous ? `Previous: ${event.previous}` : '';
+// Economic event fired alert with sentiment analysis
+async function sendEventFiredAlert(event, sentiment, affectedSymbols) {
+  const beatIcon = sentiment?.beat > 0 ? '📈' : sentiment?.beat < 0 ? '📉' : '➡️';
+  const vs = event.forecast ? ` | Forecast: ${event.forecast}` : '';
+  const prev = event.previous ? ` | Prev: ${event.previous}` : '';
   const text = [
-    `📊 <b>${event.title} RELEASED</b>`,
-    `Currency: ${event.currency} | Impact: HIGH`,
-    `Actual: <b>${event.actual || 'Released'}</b>${vs}`,
-    prev,
+    `📊 <b>${event.title} — ${event.currency}</b>`,
     ``,
-    `⚠️ Signal suppression active (30min):`,
-    affectedSymbols.slice(0, 8).join(', ') + (affectedSymbols.length > 8 ? ` +${affectedSymbols.length - 8} more` : ''),
+    `${beatIcon} Actual: <b>${event.actual || 'Released'}</b>${vs}${prev}`,
+    sentiment?.summary ? `<b>${sentiment.summary}</b>` : '',
+    sentiment?.magnitude ? `Surprise: ${sentiment.magnitude} (${sentiment.pctDelta || '?'}%)` : '',
+    ``,
+    `⏸ Signal suppression: 30min`,
+    `Affected: ${affectedSymbols.slice(0, 6).join(', ')}${affectedSymbols.length > 6 ? ` +${affectedSymbols.length - 6} more` : ''}`,
   ].filter(Boolean).join('\n');
   return sendMessage(text);
 }

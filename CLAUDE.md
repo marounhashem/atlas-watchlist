@@ -10,7 +10,17 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260331.10'`
+`SCORER_VERSION = '20260401.3'`
+
+Changes in 20260401.3:
+- Event sentiment scoring — calculateEventSentiment() analyzes actual vs forecast
+- Beat/miss detection for NFP, CPI, GDP, PMI, Employment, Retail Sales etc
+- Sentiment stored in economic_events table (beat direction, magnitude, summary)
+- Scorer: event sentiment adjusts conflictMultiplier (±5-15% based on magnitude)
+- Telegram fired alert now shows beat/miss analysis with 📈/📉 icons
+- Morning brief: "RECENT EVENT OUTCOMES" section for fired events within 12h
+- getEventSentiment(currency) combines all recent events for scoring
+- eventRiskTag field (PRE_EVENT/SUPPRESSED/CARRY_RISK) on signal records
 
 Changes in 20260331.10:
 - Macro context persisted to DB (`macro_context` table) — survives Railway restarts
@@ -102,7 +112,9 @@ All penalties multiply `conflictMultiplier` which scales the raw score:
 | Forward guidance | CB consensus contradicts | ×0.88 |
 | CB event risk | CB meeting within 48h | Cap to WATCH |
 | FF pre-event | HIGH impact event within 2h | ×0.75 + cap to WATCH |
-| FF post-event | Event fired within 30min | Signal blocked entirely |
+| FF post-event | Event fired within 30min | Score capped 65, WATCH/SUPPRESSED |
+| Event sentiment | Beat confirms direction | ×1.05 to ×1.15 bonus |
+| Event sentiment | Miss contradicts direction | ×0.85 to ×0.95 penalty |
 | FXSSI stale | OB data >25min old | ×0.82 |
 | Gravity against | Gravity pulls against direction | ×0.88 |
 | Cluster proximity | Losing cluster within 0.3% of entry | ×0.85 |
