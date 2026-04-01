@@ -99,9 +99,44 @@ async function sendEventFiredAlert(event, sentiment, affectedSymbols) {
   return sendMessage(text);
 }
 
+// Swing channel signal alert
+async function sendSwingMessage(text, parseMode = 'HTML') {
+  const token = process.env.TELEGRAM_SWING_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_SWING_CHAT_ID;
+  if (!token || !chatId) return false;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: parseMode, disable_web_page_preview: true })
+    });
+    const data = await res.json();
+    if (!data.ok) console.error('[Telegram-Swing] Send error:', data.description);
+    return data.ok;
+  } catch(e) { return false; }
+}
+
+async function sendSwingSignalAlert(signal) {
+  const dir = signal.direction === 'LONG' ? '🟢 LONG' : '🔴 SHORT';
+  const slPct = Math.round(Math.abs(signal.entry - signal.sl) / signal.entry * 1000) / 10;
+  const text = [
+    `📈 <b>ATLAS SWING // ${signal.symbol} ${dir}</b>`,
+    `✅ PROCEED — Score: ${signal.score}% | R:R: ${signal.rr}`,
+    `Structure: ${signal.weightedStructScore}/8.5 — swing confirmed`,
+    ``,
+    `🎯 Entry: <b>${signal.entry}</b>`,
+    `🛡 Stop: ${signal.sl} (${slPct}%)`,
+    `💰 Target: ${signal.tp}`,
+    `⏰ Session: ${signal.session}`,
+    ``,
+    `${(signal.reasoning || '').split(' · ').slice(0, 4).join('\n')}`,
+  ].filter(Boolean).join('\n');
+  return sendSwingMessage(text);
+}
+
 // Test message
 async function sendTest() {
   return sendMessage('✅ <b>ATLAS // WATCHLIST</b>\nTelegram connected successfully.');
 }
 
-module.exports = { sendMessage, sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendEventFiredAlert, sendTest };
+module.exports = { sendMessage, sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendEventFiredAlert, sendSwingSignalAlert, sendTest };

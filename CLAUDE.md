@@ -10,7 +10,21 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260401.3'`
+`SCORER_VERSION = '20260401.4'`
+
+Changes in 20260401.4:
+- Weighted structure: 1d=3, 4h=2, 1h=1.5, 15m=1, 5m=0.5, 1m=0.5 (max 8.5)
+- Structure cap tiers: >=7→95, >=5→93, >=3.5→89, >=2→84, >=1→78, <1→68
+- Position sizing + Kelly criterion on every scored signal
+- Settings API: GET/POST /api/settings, POST /api/settings/bulk (14 defaults)
+- 9 new global symbols: US500, DE40, UK100, J225, HK50, CN50, COPPER, PLATINUM + DXY ref
+- noOrderBook symbols: OB score neutral 0.4, ×0.92 penalty, DXY context injection
+- Macro context expanded to 10 symbols (+EURUSD, GBPUSD, USDJPY, AUDUSD)
+- MOVE_SL expiry: 2h → 6h, dedup: 0.1% tolerance + 3h window
+- Trade idea feedback: POST /api/trade-feedback (no Claude API — data only)
+- Market intel: POST/GET/DELETE /api/market-intel (24h TTL, hourly cleanup)
+- Swing channel prep: isSwing criteria, sendSwingSignalAlert, TELEGRAM_SWING_* env vars
+- DXY reference table + /api/dxy-status endpoint
 
 Changes in 20260401.3:
 - Event sentiment scoring — calculateEventSentiment() analyzes actual vs forecast

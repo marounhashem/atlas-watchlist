@@ -156,6 +156,55 @@ const SYMBOLS = {
     peakSession: 'newYork', scoringWeights: { pine: 0.40, fxssi: 0.45, session: 0.15 },
     macroEvents: ['FOMC'], minScoreProceed: 78
   },
+  // ── Global indices + commodities (no FXSSI order book) ───────────────────
+  US500: {
+    label: 'S&P 500', capitalTicker: 'US500', pineTicker: 'US500',
+    assetClass: 'index', sessions: { london: false, newYork: true, asia: false },
+    peakSession: 'newYork', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
+    macroEvents: ['FOMC','CPI','NFP'], minScoreProceed: 80, noOrderBook: true, group: 'global'
+  },
+  DE40: {
+    label: 'DAX', capitalTicker: 'DE40', pineTicker: 'DE40',
+    assetClass: 'index', sessions: { london: true, newYork: false, asia: false },
+    peakSession: 'london', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
+    macroEvents: ['ECB','CPI'], minScoreProceed: 80, noOrderBook: true, group: 'global'
+  },
+  UK100: {
+    label: 'FTSE 100', capitalTicker: 'UK100', pineTicker: 'UK100',
+    assetClass: 'index', sessions: { london: true, newYork: false, asia: false },
+    peakSession: 'london', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
+    macroEvents: ['BOE','CPI'], minScoreProceed: 80, noOrderBook: true, group: 'global'
+  },
+  J225: {
+    label: 'Nikkei 225', capitalTicker: 'J225', pineTicker: 'J225',
+    assetClass: 'index', sessions: { london: false, newYork: false, asia: true },
+    peakSession: 'asia', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
+    macroEvents: ['BOJ'], minScoreProceed: 80, noOrderBook: true, group: 'global'
+  },
+  HK50: {
+    label: 'Hang Seng', capitalTicker: 'HK50', pineTicker: 'HK50',
+    assetClass: 'index', sessions: { london: false, newYork: false, asia: true },
+    peakSession: 'asia', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
+    macroEvents: [], minScoreProceed: 80, noOrderBook: true, group: 'global'
+  },
+  CN50: {
+    label: 'China A50', capitalTicker: 'CN50', pineTicker: 'CN50',
+    assetClass: 'index', sessions: { london: false, newYork: false, asia: true },
+    peakSession: 'asia', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
+    macroEvents: [], minScoreProceed: 82, noOrderBook: true, group: 'global'
+  },
+  COPPER: {
+    label: 'Copper', capitalTicker: 'COPPER', pineTicker: 'COPPER',
+    assetClass: 'commodity', sessions: { london: true, newYork: true, asia: false },
+    peakSession: 'london', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
+    macroEvents: ['FOMC','CPI'], minScoreProceed: 80, noOrderBook: true, group: 'global'
+  },
+  PLATINUM: {
+    label: 'Platinum', capitalTicker: 'PLATINUM', pineTicker: 'PLATINUM',
+    assetClass: 'commodity', sessions: { london: true, newYork: true, asia: false },
+    peakSession: 'london', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
+    macroEvents: ['FOMC'], minScoreProceed: 80, noOrderBook: true, group: 'global'
+  },
 };
 
 function getSessionNow() {

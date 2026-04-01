@@ -78,6 +78,17 @@ function calculatePositionSize(entry, sl, assetClass) {
   };
 }
 
+function isSwingSignal(scored, weightedStructScore) {
+  return (
+    weightedStructScore >= 5.0 &&
+    scored.verdict === 'PROCEED' &&
+    scored.session !== 'offHours' &&
+    (scored.rr || 0) >= 2.0 &&
+    (scored.score || 0) >= 82 &&
+    !scored.eventRiskTag
+  );
+}
+
 const SYMBOL_CURRENCIES = {
   EURUSD: ['EUR','USD'], GBPUSD: ['GBP','USD'], USDJPY: ['USD','JPY'],
   USDCHF: ['USD','CHF'], USDCAD: ['USD','CAD'], AUDUSD: ['AUD','USD'],
@@ -86,7 +97,10 @@ const SYMBOL_CURRENCIES = {
   GBPCHF: ['GBP','CHF'], AUDJPY: ['AUD','JPY'],
   GOLD: ['XAU','USD'], SILVER: ['XAG','USD'], OILWTI: ['OIL','USD'],
   BTCUSD: ['BTC','USD'], US30: ['US30','USD'], US100: ['US100','USD'],
-  ETHUSD: ['ETH','USD']
+  ETHUSD: ['ETH','USD'],
+  US500: ['US500','USD'], DE40: ['DE40','EUR'], UK100: ['UK100','GBP'],
+  J225: ['J225','JPY'], HK50: ['HK50','CNY'], CN50: ['CN50','CNY'],
+  COPPER: ['COPPER','USD'], PLATINUM: ['PLATINUM','USD']
 };
 
 // ── Scorer version ────────────────────────────────────────────────────────────
@@ -644,8 +658,9 @@ function scoreSymbol(symbol) {
   }
 
   const biasSc    = scoreBias(data);
-  const fxssiSc   = scoreFXSSI(data, direction);
-  const obSc      = scoreOrderBook(data, direction);
+  const noOB      = cfg.noOrderBook === true;
+  const fxssiSc   = noOB ? 0.4 : scoreFXSSI(data, direction);
+  const obSc      = noOB ? 0.4 : scoreOrderBook(data, direction);
   const sessionSc = scoreSession(symbol);
 
   // ── Structure zero pre-check (needed by counter-trend gate below) ────────
@@ -897,6 +912,20 @@ function scoreSymbol(symbol) {
       }
     }
   } catch(e) {}
+
+  // ── No order book penalty ─────────────────────────────────────────────────
+  if (noOB) {
+    conflictMultiplier *= 0.92;
+    macroNote += macroNote ? ' · No Retail OB — Technical only' : 'No Retail OB — Technical only';
+    // DXY context for USD-correlated globals
+    try {
+      const dxy = global.atlasGetDXY?.();
+      if (dxy && ['US500','COPPER','PLATINUM'].includes(symbol)) {
+        if (dxy.trend === 'bearish' && direction === 'LONG') conflictMultiplier *= 1.03;
+        if (dxy.trend === 'bullish' && direction === 'SHORT') conflictMultiplier *= 1.03;
+      }
+    } catch(e) {}
+  }
 
   // ── COT extreme positioning penalty ─────────────────────────────────────────
   // Specs crowded in same direction as signal = fade risk = penalty
@@ -1783,6 +1812,7 @@ function scoreSymbol(symbol) {
     macroContextAvailable,
     eventRiskTag,
     weightedStructScore: Math.round(absWeightedStruct * 10) / 10,
+    isSwing: isSwingSignal({ verdict: macroVerdict, session: getSessionNow(), rr, score: macroAdjustedScore, eventRiskTag }, absWeightedStruct),
     positionSize: (entry && sl && cfg.assetClass) ? calculatePositionSize(entry, sl, cfg.assetClass) : null,
     ts: Date.now()
   };
@@ -2138,7 +2168,17 @@ function saveSignal(scored) {
     return null;
   }
 
-  return insertSignal({ ...scored, scorerVersion: SCORER_VERSION });
+  const signalId = insertSignal({ ...scored, scorerVersion: SCORER_VERSION });
+
+  // Swing channel alert — silent fail if token not set
+  if (scored.isSwing && signalId) {
+    try {
+      const { sendSwingSignalAlert } = require('./telegram');
+      sendSwingSignalAlert(scored).catch(() => {});
+    } catch(e) {}
+  }
+
+  return signalId;
 }
 
 module.exports = { scoreSymbol, scoreAllPriority, saveSignal, SCORER_VERSION };

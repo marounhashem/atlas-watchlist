@@ -145,6 +145,21 @@ function initSchema() {
   db.run(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY, value TEXT, ts INTEGER
   )`);
+  // Market intel — short-lived user-injected context
+  db.run(`CREATE TABLE IF NOT EXISTS market_intel (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    ts INTEGER NOT NULL
+  )`);
+
+  // DXY reference — stored but not scored
+  db.run(`CREATE TABLE IF NOT EXISTS dxy_reference (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    close REAL, bias INTEGER, ema_score INTEGER,
+    trend TEXT, ts INTEGER NOT NULL
+  )`);
+
   // Economic calendar events — Forex Factory HIGH impact events
   db.run(`CREATE TABLE IF NOT EXISTS economic_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -272,6 +287,8 @@ function initSchema() {
   try { db.run('ALTER TABLE signals ADD COLUMN rec_followed INTEGER DEFAULT 0'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN refine_ts INTEGER DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN event_risk_tag TEXT DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN weighted_struct_score REAL DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN is_swing INTEGER DEFAULT 0'); } catch(e) {}
   try { db.run('ALTER TABLE watch_signals ADD COLUMN event_risk_tag TEXT DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN macro_context_available INTEGER DEFAULT 0'); } catch(e) {}
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
@@ -334,12 +351,13 @@ function getLatestMarketData(symbol) {
 }
 
 function insertSignal(signal) {
-  run(`INSERT INTO signals (symbol,ts,direction,score,verdict,entry,sl,tp,rr,session,reasoning,scorer_version,macro_context_available,event_risk_tag)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  run(`INSERT INTO signals (symbol,ts,direction,score,verdict,entry,sl,tp,rr,session,reasoning,scorer_version,macro_context_available,event_risk_tag,weighted_struct_score,is_swing)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [signal.symbol, Date.now(), signal.direction, signal.score, signal.verdict,
      signal.entry, signal.sl, signal.tp, signal.rr, signal.session, signal.reasoning,
      signal.scorerVersion || null, signal.macroContextAvailable ? 1 : 0,
-     signal.eventRiskTag || null]);
+     signal.eventRiskTag || null, signal.weightedStructScore || null,
+     signal.isSwing ? 1 : 0]);
   const row = get("SELECT last_insert_rowid() as id");
   persist();
   return row ? row.id : null;
@@ -832,6 +850,40 @@ function updateWatchOutcome(id, outcome, pnlPct) {
   persist();
 }
 
+// ── Market intel ─────────────────────────────────────────────────────────────
+function insertMarketIntel(content) {
+  const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24h
+  run('INSERT INTO market_intel (content, expires_at, ts) VALUES (?,?,?)',
+    [content, expiresAt, Date.now()]);
+  persist();
+}
+
+function getActiveIntel() {
+  return all('SELECT * FROM market_intel WHERE expires_at > ? ORDER BY ts DESC', [Date.now()]);
+}
+
+function deleteIntel(id) {
+  run('DELETE FROM market_intel WHERE id=?', [id]);
+  persist();
+}
+
+function clearExpiredIntel() {
+  run('DELETE FROM market_intel WHERE expires_at <= ?', [Date.now()]);
+  persist();
+}
+
+// ── DXY reference ────────────────────────────────────────────────────────────
+function upsertDXY(data) {
+  run('DELETE FROM dxy_reference WHERE 1=1');
+  run('INSERT INTO dxy_reference (close, bias, ema_score, trend, ts) VALUES (?,?,?,?,?)',
+    [data.close, data.bias || 0, data.ema_score || 0, data.trend || 'neutral', Date.now()]);
+  persist();
+}
+
+function getLatestDXY() {
+  return get('SELECT * FROM dxy_reference ORDER BY ts DESC LIMIT 1');
+}
+
 // ── Economic calendar events ─────────────────────────────────────────────────
 function upsertEconomicEvent(event) {
   if (event.eventId) {
@@ -1003,6 +1055,8 @@ module.exports = {
   retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals,
   getSetting, setSetting,
   insertWatchSignal, getRecentWatchSignals, updateWatchOutcome,
+  insertMarketIntel, getActiveIntel, deleteIntel, clearExpiredIntel,
+  upsertDXY, getLatestDXY,
   upsertEconomicEvent, markEventFired, getRecentFiredEvents, getUpcomingEvents, getAllEconomicEvents,
   upsertMacroContext, getStoredMacroContext, getMacroContextAge,
   upsertCOTData, getCOTData, getAllCOTData,
