@@ -65,27 +65,32 @@ const MEETING_CALENDAR = [
   { currency: 'CHF', bank: 'SNB', date: '2026-12-17' },
 
   // ── Major US economic events ──────────────────────────────────────────────
-  // NFP — first Friday of every month
-  { currency: 'USD', bank: 'NFP', date: '2026-04-03', isEconomicEvent: true },
-  { currency: 'USD', bank: 'NFP', date: '2026-05-01', isEconomicEvent: true },
-  { currency: 'USD', bank: 'NFP', date: '2026-06-05', isEconomicEvent: true },
-  { currency: 'USD', bank: 'NFP', date: '2026-07-02', isEconomicEvent: true },
-  { currency: 'USD', bank: 'NFP', date: '2026-08-07', isEconomicEvent: true },
-  { currency: 'USD', bank: 'NFP', date: '2026-09-04', isEconomicEvent: true },
-  { currency: 'USD', bank: 'NFP', date: '2026-10-02', isEconomicEvent: true },
-  { currency: 'USD', bank: 'NFP', date: '2026-11-06', isEconomicEvent: true },
-  { currency: 'USD', bank: 'NFP', date: '2026-12-04', isEconomicEvent: true },
+  // NFP (Non-Farm Payrolls) — first Friday of each month
+  { currency: 'USD', bank: 'NFP', date: '2026-04-03', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'NFP', date: '2026-05-01', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'NFP', date: '2026-06-05', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'NFP', date: '2026-07-02', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'NFP', date: '2026-08-07', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'NFP', date: '2026-09-04', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'NFP', date: '2026-10-02', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'NFP', date: '2026-11-06', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'NFP', date: '2026-12-04', isEconomicEvent: true, impact: 'HIGH' },
 
-  // CPI — typically mid-month
-  { currency: 'USD', bank: 'CPI', date: '2026-04-10', isEconomicEvent: true },
-  { currency: 'USD', bank: 'CPI', date: '2026-05-12', isEconomicEvent: true },
-  { currency: 'USD', bank: 'CPI', date: '2026-06-10', isEconomicEvent: true },
-  { currency: 'USD', bank: 'CPI', date: '2026-07-14', isEconomicEvent: true },
-  { currency: 'USD', bank: 'CPI', date: '2026-08-12', isEconomicEvent: true },
-  { currency: 'USD', bank: 'CPI', date: '2026-09-11', isEconomicEvent: true },
-  { currency: 'USD', bank: 'CPI', date: '2026-10-13', isEconomicEvent: true },
-  { currency: 'USD', bank: 'CPI', date: '2026-11-10', isEconomicEvent: true },
-  { currency: 'USD', bank: 'CPI', date: '2026-12-10', isEconomicEvent: true },
+  // CPI — usually second or third week of month
+  { currency: 'USD', bank: 'CPI', date: '2026-04-10', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'CPI', date: '2026-05-13', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'CPI', date: '2026-06-10', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'CPI', date: '2026-07-14', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'CPI', date: '2026-08-12', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'CPI', date: '2026-09-09', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'CPI', date: '2026-10-08', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'CPI', date: '2026-11-12', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'CPI', date: '2026-12-09', isEconomicEvent: true, impact: 'HIGH' },
+
+  // GDP (advance estimate — quarterly)
+  { currency: 'USD', bank: 'GDP', date: '2026-04-29', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'GDP', date: '2026-07-29', isEconomicEvent: true, impact: 'HIGH' },
+  { currency: 'USD', bank: 'GDP', date: '2026-10-28', isEconomicEvent: true, impact: 'HIGH' },
 ];
 
 // Map ATLAS pair symbols → affected currencies
@@ -144,7 +149,8 @@ function getNextMeeting(currency) {
 
   if (upcoming.length === 0) return null;
   const m = upcoming[0];
-  return { currency: m.currency, bank: m.bank, date: m.date, daysUntil: daysUntil(m.date) };
+  return { currency: m.currency, bank: m.bank, date: m.date, daysUntil: daysUntil(m.date),
+           isEconomicEvent: m.isEconomicEvent || false, impact: m.impact || null };
 }
 
 // ── All upcoming meetings within N days ─────────────────────────────────────

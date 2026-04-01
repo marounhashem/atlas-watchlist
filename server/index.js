@@ -967,7 +967,8 @@ async function buildMorningBrief() {
     for (const m of meetings.slice(0, 8)) {
       const isEcon = m.isEconomicEvent;
       const urgency = m.daysUntil <= 1 ? '🚨' : m.daysUntil <= 2 ? '⚠️' : isEcon ? '📊' : '📅';
-      const note = m.daysUntil <= 1 ? ' ← extreme caution' : m.daysUntil <= 2 ? ' ← event risk' : '';
+      const pairNote = isEcon ? ' — USD pairs event risk' : '';
+      const note = m.daysUntil <= 1 ? ' ← extreme caution' : m.daysUntil <= 2 ? ' ← event risk' : pairNote;
       lines.push(`${urgency} ${m.bank} — ${m.date} (${m.daysUntil}d)${note}`);
     }
     lines.push('');

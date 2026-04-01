@@ -1562,15 +1562,23 @@ function scoreSymbol(symbol) {
     : macroAdjustedScore >= macroEffectiveMin - 8 ? 'WATCH' : 'SKIP';
   let macroVerdict = structureZero && macroRawVerdict === 'PROCEED' ? 'WATCH' : macroRawVerdict;
 
-  // ── Central bank event risk gate ────────────────────────────────────────────
-  // Cap to WATCH if a central bank meeting is within 48h for any affected currency
+  // ── Event risk gate ──────────────────────────────────────────────────────────
+  // CB meetings: cap to WATCH within 48h. Economic events (NFP/CPI/GDP): 24h.
   let eventRiskNote = '';
   try {
     const { isPairEventRisk } = getCbCalendar();
-    const eventRisk = isPairEventRisk(symbol, 48);
+    // Check CB meetings (48h window)
+    let eventRisk = isPairEventRisk(symbol, 48);
+    // If no CB meeting, check economic events (24h window)
+    if (!eventRisk) {
+      eventRisk = isPairEventRisk(symbol, 24);
+      // Only keep if it's actually an economic event within 24h
+      if (eventRisk && !eventRisk.isEconomicEvent) eventRisk = null;
+    }
     if (eventRisk && macroVerdict === 'PROCEED') {
       macroVerdict = 'WATCH';
-      eventRiskNote = `⚠ ${eventRisk.bank} meeting in ${eventRisk.daysUntil < 1 ? '<24h' : eventRisk.daysUntil + 'd'} — event risk, capped to WATCH`;
+      const label = eventRisk.isEconomicEvent ? eventRisk.bank : `${eventRisk.bank} meeting`;
+      eventRiskNote = `⚠ ${label} in ${eventRisk.daysUntil < 1 ? '<24h' : eventRisk.daysUntil + 'd'} — event risk, capped to WATCH`;
       console.log(`[Scorer] ${symbol} ${direction} — ${eventRiskNote}`);
     }
   } catch(e) {}
