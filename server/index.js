@@ -4,6 +4,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const cron = require('node-cron');
 const path = require('path');
+const fs = require('fs');
 
 const db = require('./db');
 const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome, updatePaperOutcome, getPaperTradeStats, retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals } = db;
@@ -1622,6 +1623,29 @@ async function runHealthCheck() {
     console.error('[Health] Email send error:', e.message);
   }
 }
+
+// Daily DB backup at midnight UTC — keep 3 rolling backups
+cron.schedule('0 0 * * *', () => {
+  try {
+    const dbPath = process.env.DB_PATH || path.join(__dirname, '../data/atlas.db');
+    const backupPath = dbPath.replace('.db', `_backup_${new Date().toISOString().slice(0, 10)}.db`);
+    if (fs.existsSync(dbPath)) {
+      fs.copyFileSync(dbPath, backupPath);
+      console.log(`[DB] Daily backup written to ${backupPath}`);
+      const backupDir = path.dirname(dbPath);
+      const backups = fs.readdirSync(backupDir)
+        .filter(f => f.includes('_backup_'))
+        .sort()
+        .reverse();
+      backups.slice(3).forEach(f => {
+        fs.unlinkSync(path.join(backupDir, f));
+        console.log(`[DB] Deleted old backup: ${f}`);
+      });
+    }
+  } catch(e) {
+    console.error('[DB] Backup error:', e.message);
+  }
+});
 
 // Run health check every 30 minutes
 cron.schedule('*/30 * * * *', () => {
