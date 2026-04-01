@@ -32,6 +32,9 @@
     --short:#f87171;
     --short-bg:rgba(248,113,113,.08);
     --accent:#818cf8;
+    --teal:#2dd4bf;
+    --teal-bg:rgba(45,212,191,.08);
+    --teal-border:rgba(45,212,191,.22);
     --accent-bg:rgba(129,140,248,.08);
     --accent-border:rgba(129,140,248,.25);
     --gold:#fbbf24;
@@ -557,6 +560,9 @@
   <div class="main-tabs">
     <div class="mtab active" id="mtab-signals" onclick="switchMainTab('signals')">SIGNALS</div>
     <div class="mtab" id="mtab-forex" onclick="switchMainTab('forex')">FOREX <span id="fx-count" style="font-size:9px;color:var(--dim);font-weight:400;"></span></div>
+    <div class="mtab" id="mtab-global" onclick="switchMainTab('global')" style="color:var(--teal)">🌐 GLOBAL</div>
+    <div class="mtab" id="mtab-idea" onclick="switchMainTab('idea')">💡 IDEA</div>
+    <div class="mtab" id="mtab-settings" onclick="switchMainTab('settings')">⚙</div>
   </div>
 
   <!-- Signals pane -->
@@ -570,6 +576,20 @@
         <div class="fbtn" onclick="setFilter('LONG')">LONG</div>
         <div class="fbtn" onclick="setFilter('SHORT')">SHORT</div>
         <div class="fbtn" id="past-tab-btn" onclick="setFilter('PAST')">PAST <span id="past-count" style="opacity:.6;font-size:9px;"></span></div>
+      </div>
+    </div>
+    <!-- Intel panel -->
+    <div id="intel-panel" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="document.getElementById('intel-body').style.display=document.getElementById('intel-body').style.display==='none'?'block':'none'">
+        <span style="font-size:10px;font-weight:700;letter-spacing:1px;">📡 MARKET INTEL</span>
+        <span id="intel-badge" style="font-size:9px;color:var(--dim);"></span>
+      </div>
+      <div id="intel-body" style="display:none;margin-top:6px;">
+        <div style="display:flex;gap:4px;margin-bottom:6px;">
+          <input id="intel-input" type="text" placeholder="e.g. Iran ceasefire talks progressing" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:10px;">
+          <button onclick="injectIntel()" style="background:var(--accent);color:var(--bg);border:none;border-radius:4px;padding:4px 10px;font-size:9px;font-weight:700;cursor:pointer;">INJECT</button>
+        </div>
+        <div id="intel-list"></div>
       </div>
     </div>
     <div id="signals-container"><div class="empty">Waiting for signals...<br>Technical alerts will appear here.</div></div>
@@ -587,6 +607,51 @@
       </div>
     </div>
     <div id="forex-signals-container"><div class="empty">Waiting for forex signals...<br>Add forex pairs to your TradingView alerts.</div></div>
+  </div>
+
+  <!-- Global pane -->
+  <div class="main-pane" id="pane-global">
+    <div style="padding:8px 0 4px;display:flex;align-items:center;justify-content:space-between;">
+      <div class="sec" style="margin:0;color:var(--teal);">🌐 Global indices &amp; commodities</div>
+      <div class="filters" style="margin:0;">
+        <div class="fbtn on" onclick="setGlobalFilter('ALL')">ALL</div>
+        <div class="fbtn" onclick="setGlobalFilter('PROCEED')">PROCEED</div>
+        <div class="fbtn" onclick="setGlobalFilter('WATCH')">WATCH</div>
+      </div>
+    </div>
+    <div id="global-container"><div class="empty">Waiting for global data...<br>Add US500, DE40, UK100, J225 to TradingView alerts.</div></div>
+  </div>
+
+  <!-- Idea pane -->
+  <div class="main-pane" id="pane-idea">
+    <div style="padding:12px 0;">
+      <div class="sec" style="margin:0 0 8px;">💡 TRADE IDEA FEEDBACK</div>
+      <textarea id="idea-input" placeholder="Describe your trade idea...&#10;e.g. GOLD SHORT at 4720, target 4680, stop 4740.&#10;RSI 72, rejected resistance twice." style="width:100%;height:80px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:10px;resize:vertical;"></textarea>
+      <div style="display:flex;gap:6px;margin-top:6px;">
+        <button onclick="submitIdea()" style="background:var(--accent);color:var(--bg);border:none;border-radius:4px;padding:6px 16px;font-size:10px;font-weight:700;cursor:pointer;">ANALYSE</button>
+        <button id="idea-copy-btn" onclick="copyIdeaExport()" style="display:none;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 12px;font-size:9px;cursor:pointer;">📋 COPY FOR CLAUDE</button>
+      </div>
+      <div id="idea-result" style="margin-top:10px;"></div>
+    </div>
+  </div>
+
+  <!-- Settings pane -->
+  <div class="main-pane" id="pane-settings">
+    <div style="padding:12px 0;">
+      <div class="sec" style="margin:0 0 8px;">⚙ TRADING SETTINGS</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:10px;">
+        <div><label style="color:var(--muted);">Account Balance (USD)</label><br><input id="set-balance" type="number" value="10000" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+        <div><label style="color:var(--muted);">Risk per trade (%)</label><br><input id="set-risk" type="number" value="1.0" step="0.1" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+        <div><label style="color:var(--muted);">Forex leverage</label><br><input id="set-lev-forex" type="number" value="100" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+        <div><label style="color:var(--muted);">Index leverage</label><br><input id="set-lev-index" type="number" value="20" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+        <div><label style="color:var(--muted);">Commodity leverage</label><br><input id="set-lev-commodity" type="number" value="50" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+        <div><label style="color:var(--muted);">Crypto leverage</label><br><input id="set-lev-crypto" type="number" value="10" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+        <div><label style="color:var(--muted);">Kelly fraction (%)</label><br><input id="set-kelly-frac" type="number" value="25" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"></div>
+        <div><label style="color:var(--muted);">Kelly mode</label><br><select id="set-kelly-mode" style="width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px;color:var(--text);font-size:10px;"><option value="auto">Auto</option><option value="manual">Manual</option></select></div>
+      </div>
+      <button onclick="saveSettings()" style="margin-top:10px;background:var(--proceed);color:var(--bg);border:none;border-radius:4px;padding:6px 20px;font-size:10px;font-weight:700;cursor:pointer;">SAVE SETTINGS</button>
+      <div id="settings-status" style="font-size:9px;color:var(--proceed);margin-top:4px;"></div>
+    </div>
   </div>
 </div>
 
@@ -983,6 +1048,14 @@ function renderCard(sig, isPast=false) {
     </div>
     ${bd.bias!=null?`<div class="bkd">
       ${['bias','fxssi','ob','session'].map(k=>`<div class="bi"><span class="bl">${{bias:'Technical',fxssi:'Retail OB',ob:'OB',session:'Session'}[k]}</span><div class="bw"><div class="bf" style="width:${Math.round((bd[k]||0)*100)}%"></div></div></div>`).join('')}
+    </div>`:''}
+    ${ert?`<div style="font-size:8px;padding:2px 6px;border-radius:3px;display:inline-block;margin-bottom:4px;${ert==='SUPPRESSED'?'background:#331100;color:#ff6600;':'background:#332800;color:#ffa000;'}">${ert==='SUPPRESSED'?'🔕 Suppressed':ert==='PRE_EVENT'?'⚠ Pre-event risk':ert==='CARRY_RISK'?'⚠ Carry risk':ert}</div>`:''}
+    ${sig.is_swing||sig.isSwing?'<span style="font-size:8px;color:var(--teal);border:1px solid var(--teal-border);border-radius:3px;padding:1px 5px;margin-left:4px;">📈 SWING</span>':''}
+    ${sig.positionSize?`<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:9px;background:var(--surface2);border-radius:4px;padding:5px 8px;margin:4px 0;">
+      <span style="color:var(--muted);">Fixed (${sig.positionSize.fixed.riskPct}% risk):</span><span style="color:var(--text);">${esc(sig.positionSize.fixed.display)}</span>
+      <span style="color:var(--muted);">Kelly (${sig.positionSize.kelly.fractionalKellyPct}%):</span><span style="color:var(--text);">${esc(sig.positionSize.kelly.display)}</span>
+      <span style="color:var(--muted);">Margin:</span><span style="color:var(--text);">~$${sig.positionSize.fixed.marginRequired?.toLocaleString()}</span>
+      <span style="color:var(--muted);">SL distance:</span><span style="color:var(--text);">${sig.positionSize.fixed.slDistancePct}%</span>
     </div>`:''}
     ${sig.reasoning?`<div class="reason">${esc(sig.reasoning)}</div>`:''}
     <div class="card-actions">
@@ -1560,6 +1633,8 @@ function switchMainTab(tab) {
   document.getElementById('mtab-' + tab).classList.add('active');
   document.getElementById('pane-' + tab).classList.add('active');
   if (tab === 'forex') renderForexSignals();
+  if (tab === 'global') renderGlobalSignals();
+  if (tab === 'settings') loadSettings();
 }
 
 // ── Forex data ─────────────────────────────────────────────────────────────
@@ -1688,7 +1763,124 @@ function renderForexSignals() {
   if (countEl) countEl.textContent = live.length > 0 ? '(' + live.length + ')' : '';
 }
 
+// ── Global signals ──────────────────────────────────────────────────────────
+const GLOBAL_SYMBOLS = ['US500','DE40','UK100','J225','HK50','CN50','COPPER','PLATINUM'];
+let globalFilter = 'ALL';
+function setGlobalFilter(f) { globalFilter = f; renderGlobalSignals(); }
+function renderGlobalSignals() {
+  const c = document.getElementById('global-container');
+  if (!c) return;
+  let filtered = allSignals.filter(s => GLOBAL_SYMBOLS.includes(s.symbol));
+  if (globalFilter === 'PROCEED') filtered = filtered.filter(s => s.verdict === 'PROCEED');
+  if (globalFilter === 'WATCH') filtered = filtered.filter(s => s.verdict === 'WATCH');
+  if (!filtered.length) { c.innerHTML = '<div class="empty">No global signals yet.</div>'; return; }
+  c.innerHTML = filtered.slice(0, 20).map(renderCard).join('');
+}
 
+// ── Intel panel ─────────────────────────────────────────────────────────────
+async function loadIntel() {
+  try {
+    const res = await fetch('/api/market-intel');
+    const data = await res.json();
+    const list = document.getElementById('intel-list');
+    const badge = document.getElementById('intel-badge');
+    if (!Array.isArray(data) || data.length === 0) {
+      if (list) list.innerHTML = '<span style="font-size:9px;color:var(--dim);">No active intel</span>';
+      if (badge) badge.textContent = '';
+      return;
+    }
+    if (badge) badge.textContent = `${data.length} active`;
+    if (list) list.innerHTML = data.map(i => {
+      const expiresIn = Math.round((i.expires_at - Date.now()) / 3600000);
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--border);font-size:9px;">
+        <span style="color:var(--text);">${esc(i.content)}</span>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span style="color:var(--dim);">${expiresIn}h</span>
+          <span style="cursor:pointer;color:var(--short);" onclick="deleteIntel(${i.id})">×</span>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
+async function injectIntel() {
+  const input = document.getElementById('intel-input');
+  if (!input || !input.value.trim()) return;
+  await fetch('/api/market-intel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: input.value.trim() }) });
+  input.value = '';
+  loadIntel();
+}
+async function deleteIntel(id) {
+  await fetch(`/api/market-intel/${id}`, { method: 'DELETE' });
+  loadIntel();
+}
+setInterval(loadIntel, 60000);
+setTimeout(loadIntel, 2000);
+
+// ── Settings ────────────────────────────────────────────────────────────────
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    const s = await res.json();
+    document.getElementById('set-balance').value = s.account_balance || '10000';
+    document.getElementById('set-risk').value = s.risk_pct || '1.0';
+    document.getElementById('set-lev-forex').value = s.leverage_forex || '100';
+    document.getElementById('set-lev-index').value = s.leverage_index || '20';
+    document.getElementById('set-lev-commodity').value = s.leverage_commodity || '50';
+    document.getElementById('set-lev-crypto').value = s.leverage_crypto || '10';
+    document.getElementById('set-kelly-frac').value = parseFloat(s.kelly_fraction || '0.25') * 100;
+    document.getElementById('set-kelly-mode').value = s.kelly_mode || 'auto';
+  } catch(e) {}
+}
+async function saveSettings() {
+  const bulk = {
+    account_balance: document.getElementById('set-balance').value,
+    risk_pct: document.getElementById('set-risk').value,
+    leverage_forex: document.getElementById('set-lev-forex').value,
+    leverage_index: document.getElementById('set-lev-index').value,
+    leverage_commodity: document.getElementById('set-lev-commodity').value,
+    leverage_crypto: document.getElementById('set-lev-crypto').value,
+    kelly_fraction: String(parseFloat(document.getElementById('set-kelly-frac').value) / 100),
+    kelly_mode: document.getElementById('set-kelly-mode').value
+  };
+  await fetch('/api/settings/bulk', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(bulk) });
+  document.getElementById('settings-status').textContent = '✓ Settings saved';
+  setTimeout(() => document.getElementById('settings-status').textContent = '', 2000);
+}
+
+// ── Trade idea feedback ─────────────────────────────────────────────────────
+let lastIdeaExport = '';
+async function submitIdea() {
+  const input = document.getElementById('idea-input');
+  const result = document.getElementById('idea-result');
+  if (!input || !input.value.trim()) return;
+  result.innerHTML = '<div style="color:var(--muted);font-size:9px;">Analysing...</div>';
+  try {
+    const res = await fetch('/api/trade-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idea: input.value.trim() }) });
+    const d = await res.json();
+    if (d.error) { result.innerHTML = `<div style="color:var(--short);font-size:10px;">${esc(d.error)}</div>`; return; }
+    lastIdeaExport = d.claudeExport || '';
+    document.getElementById('idea-copy-btn').style.display = 'inline-block';
+    const vColor = d.verdict === 'TAKE IT' ? 'var(--proceed)' : d.verdict === 'AVOID' ? 'var(--short)' : 'var(--watch)';
+    const html = [
+      `<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">`,
+      `<span style="font-size:12px;font-weight:700;color:${vColor};border:1px solid ${vColor};border-radius:4px;padding:3px 10px;">${d.verdict}</span>`,
+      `<span style="font-size:10px;color:var(--text);">${d.alignment} · Conviction: ${d.conviction}/10</span>`,
+      `</div>`,
+      d.strengths.length ? `<div style="margin-bottom:6px;"><span style="font-size:9px;font-weight:700;color:var(--proceed);">STRENGTHS</span>${d.strengths.map(s=>`<div style="font-size:9px;color:var(--proceed);padding:1px 0;">+ ${esc(s)}</div>`).join('')}</div>` : '',
+      d.risks.length ? `<div style="margin-bottom:6px;"><span style="font-size:9px;font-weight:700;color:var(--short);">RISKS</span>${d.risks.map(r=>`<div style="font-size:9px;color:var(--short);padding:1px 0;">- ${esc(r)}</div>`).join('')}</div>` : '',
+      d.warnings.length ? `<div style="margin-bottom:6px;"><span style="font-size:9px;font-weight:700;color:var(--watch);">WARNINGS</span>${d.warnings.map(w=>`<div style="font-size:9px;color:var(--watch);padding:1px 0;">! ${esc(w)}</div>`).join('')}</div>` : '',
+      d.checks.length ? `<div style="margin-bottom:6px;"><span style="font-size:9px;font-weight:700;color:var(--muted);">CHECKS</span>${d.checks.map(c=>`<div style="font-size:9px;color:var(--muted);padding:1px 0;">? ${esc(c)}</div>`).join('')}</div>` : '',
+      d.idea_entry ? `<div style="font-size:9px;color:var(--dim);margin-top:4px;">Entry: ${d.idea_entry} | SL: ${d.idea_sl||'—'} | TP: ${d.idea_tp||'—'} | R:R: ${d.idea_rr||'—'}</div>` : ''
+    ].filter(Boolean).join('');
+    result.innerHTML = html;
+  } catch(e) { result.innerHTML = `<div style="color:var(--short);font-size:9px;">${esc(e.message)}</div>`; }
+}
+function copyIdeaExport() {
+  navigator.clipboard.writeText(lastIdeaExport);
+  const btn = document.getElementById('idea-copy-btn');
+  btn.textContent = '✓ Copied!';
+  setTimeout(() => btn.textContent = '📋 COPY FOR CLAUDE', 2000);
+}
 
 </script>
 </body>
