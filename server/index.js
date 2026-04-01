@@ -1599,6 +1599,10 @@ async function runHealthCheck() {
     `  • Full health status: ${process.env.ATLAS_URL || 'https://atlas-watchlist-production.up.railway.app'}/api/health`,
   ].join('\n');
 
+  // Telegram — always send, regardless of email success
+  sendHealthAlert(problems).catch(e => console.error('[Telegram] Health alert error:', e.message));
+
+  // Email via Resend — best effort
   try {
     const { Resend } = require('resend');
     const resend = new Resend(process.env.RESEND_API_KEY);
@@ -1611,16 +1615,13 @@ async function runHealthCheck() {
     });
 
     console.log(`[Health] Alert email sent via Resend — ${problems.map(p => p.symbol).join(', ')}`);
-
-    // Also send via Telegram
-    sendHealthAlert(problems).catch(e => console.error('[Telegram] Health alert error:', e.message));
-
-    // Mark alert sent for all affected symbols
-    for (const p of problems) {
-      healthAlertState[p.symbol] = now;
-    }
   } catch (e) {
     console.error('[Health] Email send error:', e.message);
+  }
+
+  // Mark alert sent for all affected symbols
+  for (const p of problems) {
+    healthAlertState[p.symbol] = now;
   }
 }
 
