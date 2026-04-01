@@ -1449,6 +1449,17 @@ app.post('/api/trade-feedback', (req, res) => {
     analysis.checks.push(`Source rates this ${'⭐'.repeat(levels.external_confidence)} (${levels.external_confidence}/5) — low external conviction. Size down.`);
   }
 
+  // Stale entry detection
+  if (data?.close && levels.entry && direction) {
+    const currentPrice = data.close;
+    if (direction === 'LONG' && currentPrice > levels.entry * 1.05) {
+      analysis.warnings.push(`Current price ${currentPrice} is >5% above entry ${levels.entry} — chasing this entry carries risk.`);
+    }
+    if (direction === 'SHORT' && currentPrice < levels.entry * 0.95) {
+      analysis.warnings.push(`Current price ${currentPrice} is >5% below entry ${levels.entry} — entry already surpassed.`);
+    }
+  }
+
   // Verdict
   const pct = maxScore > 0 ? score / maxScore : 0;
   analysis.alignment = pct >= 0.7 ? 'ALIGNED' : pct >= 0.4 ? 'PARTIAL' : score < 0 ? 'AGAINST' : 'NEUTRAL';
@@ -1456,6 +1467,10 @@ app.post('/api/trade-feedback', (req, res) => {
   if (analysis.verdict !== 'AVOID') {
     analysis.verdict = pct >= 0.65 && analysis.warnings.length === 0 ? 'TAKE IT' : pct >= 0.40 ? 'WAIT' : 'AVOID';
   }
+
+  // supports_signal consistency
+  analysis.supports_signal = analysis.verdict === 'TAKE IT';
+  if (score < 0) { analysis.supports_signal = false; analysis.verdict = 'AVOID'; }
 
   // ── Full Claude export ─────────────────────────────────────────────────────
   let techData = {}; try { if (data?.raw_payload) techData = JSON.parse(data.raw_payload); } catch(e) {}
