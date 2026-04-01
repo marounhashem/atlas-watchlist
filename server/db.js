@@ -11,18 +11,38 @@ async function init() {
     SQL = await initSqlJs();
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
     if (fs.existsSync(DB_PATH)) {
-      const buf = fs.readFileSync(DB_PATH);
-      db = new SQL.Database(buf);
-      console.log('[DB] Loaded existing database from', DB_PATH);
+      const stat = fs.statSync(DB_PATH);
+      if (stat.size > 0) {
+        const buf = fs.readFileSync(DB_PATH);
+        db = new SQL.Database(buf);
+        console.log(`[DB] Loaded existing database from ${DB_PATH} (${Math.round(stat.size/1024)}KB)`);
+      } else {
+        console.warn('[DB] WARNING: DB file exists but is EMPTY — creating new database');
+        db = new SQL.Database();
+      }
     } else {
       db = new SQL.Database();
       console.log('[DB] Created new in-memory database');
     }
     initSchema();
-    persist();
-    setInterval(persist, 15000); // flush every 15s
+
+    // Safety: only persist if we didn't load an existing DB with data
+    // Prevents overwriting good DB with empty one on volume mount race
+    const signalCount = (() => {
+      try {
+        const row = db.exec("SELECT COUNT(*) as c FROM signals")[0];
+        return row?.values?.[0]?.[0] || 0;
+      } catch(e) { return 0; }
+    })();
+    if (signalCount > 0 || !fs.existsSync(DB_PATH)) {
+      persist();
+    } else {
+      console.log('[DB] Skipping initial persist — new empty DB, waiting for data before writing to disk');
+    }
+
+    setInterval(persist, 15000);
     ready = true;
-    console.log('[DB] Ready');
+    console.log(`[DB] Ready — ${signalCount} existing signals`);
   } catch(e) {
     console.error('[DB] Init failed:', e.message);
     throw e;
@@ -427,17 +447,23 @@ function getLatestOpenSignal(symbol, direction) {
 // Called on startup — cleans up stale setups after a deploy
 function expireOldVersionSignals(currentVersion) {
   if (!currentVersion) return 0;
+  // ONLY touches outcome='OPEN' — never WIN, LOSS, ACTIVE, EXPIRED, REPLACED
   const stale = all(
     "SELECT id FROM signals WHERE outcome='OPEN' AND (scorer_version IS NULL OR scorer_version != ?)",
     [currentVersion]
   );
   if (stale.length === 0) return 0;
+  // Safety cap — refuse to expire more than 50 signals at once
+  if (stale.length > 50) {
+    console.error(`[DB] expireOldVersionSignals SAFETY ABORT — would expire ${stale.length} signals, limit is 50`);
+    return 0;
+  }
   const ids = stale.map(s => s.id);
   const placeholders = ids.map(() => '?').join(',');
   run(`UPDATE signals SET outcome='EXPIRED', outcome_ts=? WHERE id IN (${placeholders})`,
     [Date.now(), ...ids]);
   persist();
-  console.log(`[DB] Expired ${stale.length} OPEN signal(s) from old scorer version — ACTIVE trades untouched`);
+  console.log(`[DB] Expired ${stale.length} OPEN signal(s) from old scorer version (${currentVersion}) — ACTIVE/WIN/LOSS untouched`);
   return stale.length;
 }
 function entriesWithinPct(e1, e2, pct) {
