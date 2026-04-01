@@ -1226,6 +1226,12 @@ async function runAgent(cardId, type, sig, acct) {
   const box = document.getElementById('agent-'+type+'-'+cardId);
   if(!box) return;
 
+  // RISK tab: render from server-calculated positionSize, no API call
+  if (type === 'risk' && sig.positionSize) {
+    renderRisk(box, null, sig, acct);
+    return;
+  }
+
   // Check cache first
   const cached = getCached(sig.symbol, type);
   if(cached) {
@@ -1376,29 +1382,55 @@ function renderText(box, text, type) {
 }
 
 function renderRisk(box, raw, sig, acct) {
+  // Use server-calculated position sizing if available (no API call needed)
+  const ps = sig.positionSize;
+  if (ps) {
+    box.innerHTML = `
+    <div class="agent-section">
+      <div class="agent-section-title" style="color:#ffd740">Position sizing — $${ps.balance?.toLocaleString()||acct.toLocaleString()} account</div>
+      <div class="kelly-grid">
+        <div class="kelly-card">
+          <div class="kelly-label">FIXED (${ps.fixed.riskPct}% risk)</div>
+          <div class="kelly-val">${ps.fixed.display}</div>
+          <div class="kelly-sub">Risk $${ps.fixed.riskAmount} · Margin ~$${ps.fixed.marginRequired?.toLocaleString()}</div>
+        </div>
+        <div class="kelly-card">
+          <div class="kelly-label">KELLY (${ps.kelly.fractionalKellyPct}%)</div>
+          <div class="kelly-val">${ps.kelly.display}</div>
+          <div class="kelly-sub">WR ${ps.kelly.winRate}% · R:R ${ps.kelly.avgRR} · ${ps.kelly.mode} (${ps.kelly.dataPoints} trades)</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:8px;">
+        <div class="kelly-card"><div class="kelly-label">SL DISTANCE</div><div class="kelly-val">${ps.fixed.slDistancePct}%</div></div>
+        <div class="kelly-card"><div class="kelly-label">LEVERAGE</div><div class="kelly-val">${ps.leverage}:1</div></div>
+        <div class="kelly-card"><div class="kelly-label">FULL KELLY</div><div class="kelly-val">${ps.kelly.fullKellyPct}%</div></div>
+      </div>`;
+    return;
+  }
+
+  // Fallback: parse Claude API response (legacy)
   let d;
   try {
     const clean = (raw||'').replace(/```json|```/g,'').trim();
     d = JSON.parse(clean);
   } catch(e) {
-    box.innerHTML=`<div style="font-size:9px;color:var(--muted);line-height:1.7;">${raw||'No data'}</div>`;
+    box.innerHTML=`<div style="font-size:12px;color:var(--muted);line-height:1.7;">${raw||'No position sizing data available.'}</div>`;
     return;
   }
   const vcls = d.verdict==='PROCEED'?'av-proceed':d.verdict==='CAUTION'?'av-watch':'av-caution';
-  const cardId = sig.id || sig.symbol;
   box.innerHTML = `
     <div class="agent-section">
       <div class="agent-section-title" style="color:#ffd740">Position sizing — $${acct.toLocaleString()} account</div>
       <div class="kelly-grid">
         <div class="kelly-card">
           <div class="kelly-label">KELLY (${d.kelly_pct}%)</div>
-          <div class="kelly-val">$${Number(d.kelly_usd).toLocaleString()}</div>
-          <div class="kelly-sub">${d.kelly_units} units · Risk $${Number(d.risk_per_trade_usd).toLocaleString()}</div>
+          <div class="kelly-val">$${Number(d.kelly_usd||0).toLocaleString()}</div>
+          <div class="kelly-sub">${d.kelly_units||0} units · Risk $${Number(d.risk_per_trade_usd||0).toLocaleString()}</div>
         </div>
         <div class="kelly-card">
           <div class="kelly-label">HALF KELLY (${d.half_kelly_pct}%)</div>
-          <div class="kelly-val">$${Number(d.half_kelly_usd).toLocaleString()}</div>
-          <div class="kelly-sub">${d.half_kelly_units} units · Max loss $${Number(d.max_loss_kelly).toLocaleString()}</div>
+          <div class="kelly-val">$${Number(d.half_kelly_usd||0).toLocaleString()}</div>
+          <div class="kelly-sub">${d.half_kelly_units||0} units · Max loss $${Number(d.max_loss_kelly||0).toLocaleString()}</div>
         </div>
       </div>
     </div>
