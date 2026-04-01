@@ -14,7 +14,7 @@ function getCbCalendar()   { return _cbCalendar   || (_cbCalendar   = require('.
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.2'; // morning brief direction labels, NFP/CPI economic events, event risk icons
+const SCORER_VERSION = '20260401.2'; // Forex Factory calendar, FF event risk gate, morning brief integration
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -1582,6 +1582,28 @@ function scoreSymbol(symbol) {
       console.log(`[Scorer] ${symbol} ${direction} — ${eventRiskNote}`);
     }
   } catch(e) {}
+
+  // ── Forex Factory event risk gate ───────────────────────────────────────────
+  // HIGH impact events from FF calendar — 24h window, caps to WATCH
+  if (!eventRiskNote && macroVerdict === 'PROCEED') {
+    try {
+      const { isCalendarEventRisk } = require('./forexCalendar');
+      // Check both currencies in the pair
+      const pairCurrencies = getCbCalendar().PAIR_CURRENCIES[symbol];
+      if (pairCurrencies) {
+        for (const cur of pairCurrencies) {
+          const ffRisk = isCalendarEventRisk(cur, 24);
+          if (ffRisk) {
+            macroVerdict = 'WATCH';
+            const hoursLabel = ffRisk.hoursUntil <= 0 ? 'NOW' : `${ffRisk.hoursUntil}h`;
+            eventRiskNote = `⚠ ${ffRisk.title} in ${hoursLabel} — event risk on ${cur} pairs`;
+            console.log(`[Scorer] ${symbol} ${direction} — ${eventRiskNote}`);
+            break;
+          }
+        }
+      }
+    } catch(e) {}
+  }
 
   // ── Forward guidance from consensus ─────────────────────────────────────────
   try {

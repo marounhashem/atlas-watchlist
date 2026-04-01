@@ -17,6 +17,7 @@ const { runCOTFetch, getLatestCOT, getCOTSummary, getCOTCurrencies } = require('
 const { runRateFetch, loadRatesFromDB, getLatestRates, getRateDifferential } = require('./rateFetcher');
 const { getUpcomingMeetings, isPairEventRisk, getMeetingContext } = require('./centralBankCalendar');
 const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTest } = require('./telegram');
+const { runCalendarFetch, getUpcomingHighImpactEvents, isCalendarEventRisk } = require('./forexCalendar');
 const { SYMBOLS } = require('./config');
 
 const app = express();
@@ -974,6 +975,18 @@ async function buildMorningBrief() {
     lines.push('');
   }
 
+  // Forex Factory HIGH impact events
+  const ffEvents = getUpcomingHighImpactEvents(7);
+  if (ffEvents.length > 0) {
+    lines.push('<b>📊 HIGH IMPACT EVENTS</b>');
+    for (const e of ffEvents.slice(0, 8)) {
+      const timeStr = e.time ? e.time.slice(0, 5) : '';
+      const urgency = e.daysUntil <= 0 ? '🚨' : e.daysUntil <= 1 ? '⚠️' : '📊';
+      lines.push(`${urgency} ${e.currency} ${e.title} — ${e.date} ${timeStr} (${e.daysUntil}d)`);
+    }
+    lines.push('');
+  }
+
   // Active signals
   const activeSignals = getCurrentCycleSignals(20).filter(s =>
     s.outcome === 'OPEN' || s.outcome === 'ACTIVE'
@@ -1169,6 +1182,22 @@ app.get('/api/cb-calendar', (req, res) => {
   res.json({ upcoming: result });
 });
 
+// Economic calendar — upcoming HIGH impact events from Forex Factory
+app.get('/api/calendar-status', (req, res) => {
+  const events = getUpcomingHighImpactEvents(14);
+  res.json({ count: events.length, events });
+});
+
+app.get('/api/calendar-force', async (req, res) => {
+  try {
+    const result = await runCalendarFetch();
+    const events = getUpcomingHighImpactEvents(14);
+    res.json({ ok: true, ...result, upcoming: events.length });
+  } catch(e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
 // Manual rate override — for BOJ/ECB announcements before next API fetch
 // POST /api/rate-update { currency: "JPY", ratePct: 0.75 }
 app.post('/api/rate-update', (req, res) => {
@@ -1295,6 +1324,18 @@ cron.schedule('0 5 * * *', async () => {
   } catch(e) {
     console.error('[Telegram] Morning brief error:', e.message);
   }
+});
+
+// Economic calendar fetch — Sundays 06:00 UTC + daily 06:45 for mid-week updates
+cron.schedule('0 6 * * 0', async () => {
+  try {
+    console.log('[Cron] Weekly calendar fetch...');
+    await runCalendarFetch();
+  } catch(e) { console.error('[Cron] Calendar error:', e.message); }
+});
+cron.schedule('45 6 * * 1-5', async () => {
+  try { await runCalendarFetch(); }
+  catch(e) { console.error('[Cron] Calendar error:', e.message); }
 });
 
 // Daily rate fetch — fires at 06:50 UTC (10 min before macro context)
@@ -1617,6 +1658,22 @@ server.listen(PORT, () => {
         console.error('[Startup] Rate load error:', e.message);
       }
     }, 8000);
+    // Seed economic calendar if empty
+    setTimeout(() => {
+      try {
+        const events = getUpcomingHighImpactEvents(14);
+        if (events.length === 0) {
+          console.log('[Startup] Calendar empty — fetching Forex Factory...');
+          runCalendarFetch()
+            .then(r => console.log(`[Startup] Calendar fetch complete — ${r.stored} events`))
+            .catch(e => console.error('[Startup] Calendar fetch error:', e.message));
+        } else {
+          console.log(`[Startup] Calendar has ${events.length} upcoming events`);
+        }
+      } catch(e) {
+        console.error('[Startup] Calendar seed error:', e.message);
+      }
+    }, 9000);
     // Load macro context from DB on startup (10s — after COT and rates are loaded)
     setTimeout(() => {
       try {

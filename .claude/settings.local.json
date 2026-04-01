@@ -8,7 +8,8 @@
       "Bash(curl -s 'https://publicreporting.cftc.gov/api/explore/dataset/fut_disagg_pos_hist_2006_to_present/records?limit=1&order_by=report_date_as_yyyy_mm_dd+desc&refine=market_and_exchange_names=GOLD+-+CHICAGO+MERCANTILE+EXCHANGE')",
       "Bash(node -e \"let d='''''''';process.stdin.on\\(''''data'''',c=>d+=c\\);process.stdin.on\\(''''end'''',\\(\\)=>{const j=JSON.parse\\(d\\);console.log\\(''''total_count:'''',j.total_count,''''records:'''',j.records?.length\\);if\\(j.records?.[0]\\){const f=j.records[0].record?.fields||j.records[0].fields||j.records[0];console.log\\(''''name:'''',f.market_and_exchange_names\\);console.log\\(''''date:'''',f.report_date_as_yyyy_mm_dd\\)}}\\)\")",
       "Bash(node:*)",
-      "Bash(wc -l server/*.js)"
+      "Bash(wc -l server/*.js)",
+      "Bash(curl -s 'https://nfs.faireconomy.media/ff_calendar_thisweek.json')"
     ]
   }
 }

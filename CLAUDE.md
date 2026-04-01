@@ -61,6 +61,7 @@ Changes in 20260331.2:
 | learning_log | Historical weight optimization cycles |
 | watch_signals | Non-tradeable WATCH signals for pattern learning |
 | settings | Key-value store for persistent state |
+| economic_events | Forex Factory HIGH impact events (weekly fetch) |
 | macro_context | Persisted macro sentiment per symbol (survives restarts) |
 | cb_consensus | Market expectations for upcoming CB meetings |
 | cot_data | Weekly CFTC institutional positioning per currency |
@@ -78,6 +79,7 @@ Changes in 20260331.2:
 - **persist()** is async with write coalescing — multiple rapid persist() calls collapse into a single disk write. The 15s interval flush remains as a safety net.
 - **Macro context** persisted to `macro_context` table. Loaded from DB on startup (3s), only fetches fresh via Claude web search if data is >26h stale. Macro penalises signals (×0.70 to ×0.94) — does not hard-block.
 - **Telegram alerts** via raw Bot API fetch (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID). PROCEED signals pushed on save, HIGH urgency recs + MEDIUM MOVE_SL at 80%+ progress, morning brief at 05:00 UTC, health alerts alongside email.
+- **Forex Factory calendar** fetched weekly from FairEconomy JSON feed. HIGH impact events stored in `economic_events` table. 24h event risk gate caps signals to WATCH. Shown in morning brief with 📊 icon. Cron: Sundays 06:00 UTC + weekdays 06:45.
 - **Central bank calendar** hardcoded 2026 meeting dates for 8 banks. Event risk gate caps signals to WATCH within 48h. Consensus auto-fetched via Claude for meetings within 21 days.
 - **Rate differentials** scraped daily from Trading Economics (no API key). 8 currencies with hardcoded fallback. Carry gate: >300bps against → ×0.88, >500bps → ×0.80, >300bps with → ×1.05.
 - **COT data** fetched weekly from CFTC SODA API. Stored at currency level (EUR, GBP, etc). Resolved to pair level on read. COT extreme penalty: >100k crowded against signal → ×0.88, with → ×1.05.

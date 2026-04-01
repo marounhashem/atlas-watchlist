@@ -125,6 +125,20 @@ function initSchema() {
   db.run(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY, value TEXT, ts INTEGER
   )`);
+  // Economic calendar events — Forex Factory HIGH impact events
+  db.run(`CREATE TABLE IF NOT EXISTS economic_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    currency TEXT NOT NULL,
+    event_date TEXT NOT NULL,
+    event_time TEXT,
+    impact TEXT,
+    forecast TEXT,
+    previous TEXT,
+    actual TEXT,
+    ts INTEGER NOT NULL
+  )`);
+
   // Macro context — persisted so it survives restarts
   db.run(`CREATE TABLE IF NOT EXISTS macro_context (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -778,6 +792,34 @@ function updateWatchOutcome(id, outcome, pnlPct) {
   persist();
 }
 
+// ── Economic calendar events ─────────────────────────────────────────────────
+function upsertEconomicEvent(event) {
+  // Dedup by title + currency + date
+  const existing = get('SELECT id FROM economic_events WHERE title=? AND currency=? AND event_date=?',
+    [event.title, event.currency, event.eventDate]);
+  if (existing) {
+    run('UPDATE economic_events SET event_time=?, impact=?, forecast=?, previous=?, ts=? WHERE id=?',
+      [event.eventTime, event.impact, event.forecast, event.previous, Date.now(), existing.id]);
+  } else {
+    run(`INSERT INTO economic_events (title, currency, event_date, event_time, impact, forecast, previous, ts)
+      VALUES (?,?,?,?,?,?,?,?)`,
+      [event.title, event.currency, event.eventDate, event.eventTime,
+       event.impact, event.forecast, event.previous, Date.now()]);
+  }
+  persist();
+}
+
+function getUpcomingEvents(days = 7) {
+  const now = new Date();
+  const future = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+  return all('SELECT * FROM economic_events WHERE event_date >= ? AND event_date <= ? AND impact=? ORDER BY event_date, event_time',
+    [now.toISOString().slice(0, 10), future.toISOString().slice(0, 10), 'High']);
+}
+
+function getAllEconomicEvents() {
+  return all('SELECT * FROM economic_events ORDER BY event_date DESC, event_time LIMIT 100');
+}
+
 // ── Macro context persistence ────────────────────────────────────────────────
 function upsertMacroContext(symbol, data) {
   const keyRisks = JSON.stringify(data.key_risks || []);
@@ -892,6 +934,7 @@ module.exports = {
   retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals,
   getSetting, setSetting,
   insertWatchSignal, getRecentWatchSignals, updateWatchOutcome,
+  upsertEconomicEvent, getUpcomingEvents, getAllEconomicEvents,
   upsertMacroContext, getStoredMacroContext, getMacroContextAge,
   upsertCOTData, getCOTData, getAllCOTData,
   upsertRateData, getRateData, getAllRateData,
