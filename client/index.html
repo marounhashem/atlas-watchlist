@@ -168,6 +168,7 @@
     border-radius:var(--card-radius);
     border-left:3px solid var(--border);
     padding:var(--card-padding);
+    padding-bottom:16px;
     margin-bottom:var(--card-gap);
     animation:slideUp .2s ease;
     transition:border-color .15s;
@@ -187,7 +188,7 @@
   .ctop{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
   .csym{
     font-family:'IBM Plex Mono',monospace;
-    font-size:18px;font-weight:700;letter-spacing:0.05em;color:var(--text);
+    font-size:20px;font-weight:800;letter-spacing:0.05em;color:var(--text);
   }
   .clabel{font-size:12px;color:var(--dim);margin-left:8px;}
 
@@ -198,9 +199,9 @@
     padding:4px 12px;border-radius:20px;
     display:inline-flex;align-items:center;gap:4px;
   }
-  .vP{background:var(--proceed-bg);color:var(--proceed);border:1px solid var(--proceed);}
+  .vP{background:var(--proceed-bg);color:var(--proceed);border:1px solid var(--proceed);padding:4px 16px;}
   .vA{background:var(--blue-dim);color:var(--blue);border:1px solid var(--blue);}
-  .vW{background:var(--watch-bg);color:var(--watch);border:1px solid var(--watch);}
+  .vW{background:#ffb34018;color:var(--watch);border:none;font-size:10px;}
   .vS{background:transparent;color:var(--dim);border:1px solid var(--border);}
   .vC{background:transparent;color:var(--dim);border:1px solid var(--border);}
   .vER{background:var(--watch-bg);color:var(--watch);border:1px solid var(--watch);}
@@ -236,7 +237,7 @@
 
   /* Reasoning */
   .reason{
-    font-size:12px;color:var(--text2);line-height:1.6;
+    font-size:12px;color:#7070a0;line-height:1.6;
     border-top:1px solid var(--border2);padding-top:10px;margin-top:8px;
   }
 
@@ -1045,7 +1046,7 @@ function renderCard(sig, isPast=false) {
   const dateStr = new Date(sig.ts).toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
 
   // Score styling
-  const scoreCls = v==='PROCEED'?'font-size:28px;font-weight:700;color:var(--txt,var(--text));':ert==='SUPPRESSED'?'font-size:16px;color:var(--txt3,var(--dim));':'font-size:20px;color:var(--txt2,var(--muted));';
+  const scoreCls = v==='PROCEED'?'font-size:40px;font-weight:700;color:var(--txt,var(--text));':ert==='SUPPRESSED'?'font-size:24px;color:var(--txt3,var(--dim));':'font-size:32px;color:var(--txt2,var(--muted));';
 
   // Expiry
   let expiryHtml = '';
@@ -1061,14 +1062,14 @@ function renderCard(sig, isPast=false) {
     const fill=pct>70?'var(--green,var(--proceed))':pct>40?'var(--blue,var(--accent))':'var(--amber,var(--watch))';
     return `<div style="display:grid;grid-template-columns:80px 1fr 36px;align-items:center;gap:10px;">
       <span style="font-size:11px;color:var(--txt2,var(--muted));text-align:right;letter-spacing:.04em;">${label}</span>
-      <div style="height:6px;background:var(--surface3,#1a1a28);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:${fill};border-radius:3px;transition:width .3s;"></div></div>
+      <div style="height:6px;background:var(--surface3,#1a1a28);border-radius:3px;overflow:hidden;max-width:70%;"><div style="height:100%;width:${pct}%;background:${fill};border-radius:3px;transition:width .3s;"></div></div>
       <span style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:11px;color:var(--txt2,var(--muted));text-align:right;">${pct}%</span>
     </div>`;
   }
 
   // Sizing
   const ps=sig.positionSize;
-  const sizingHtml=ps?`<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 12px;background:var(--surface2,#141420);border-radius:6px;margin:12px 0;">
+  const sizingHtml=ps?`<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 12px;background:var(--bg,#09090f);border-radius:6px;margin:12px 0;">
     <div><div style="font-size:10px;color:var(--txt3,var(--dim));text-transform:uppercase;letter-spacing:.06em;">Fixed (${ps.fixed.riskPct}%)</div><div style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:13px;color:var(--txt,var(--text));font-weight:500;">${esc(ps.fixed.display)}</div></div>
     <div><div style="font-size:10px;color:var(--txt3,var(--dim));text-transform:uppercase;letter-spacing:.06em;">Kelly (${ps.kelly.fractionalKellyPct}%)</div><div style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:13px;color:var(--txt,var(--text));font-weight:500;">${esc(ps.kelly.display)}</div></div>
     <div><div style="font-size:10px;color:var(--txt3,var(--dim));text-transform:uppercase;letter-spacing:.06em;">Margin</div><div style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:13px;color:var(--txt,var(--text));font-weight:500;">~$${ps.fixed.marginRequired?.toLocaleString()}</div></div>
@@ -1116,7 +1117,7 @@ function renderCard(sig, isPast=false) {
       </div>
 
       <!-- B2: Verdict + Score -->
-      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:80px;">
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:80px;border-left:1px solid var(--border);padding-left:20px;">
         <div style="font-family:var(--mono,'IBM Plex Mono',monospace);${scoreCls}">${sig.score||'—'}</div>
         <div style="font-size:10px;color:var(--txt3,var(--dim));text-transform:uppercase;letter-spacing:.1em;">Score</div>
         <span class="verdict ${vcls}">${v}</span>
@@ -1148,7 +1149,7 @@ function renderCard(sig, isPast=false) {
         ${renderRecommendations(sig)}
       </div>
       <div style="display:flex;align-items:center;gap:6px;">
-        ${showAgents?`<button style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--txt2,var(--muted));font-size:12px;cursor:pointer;" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</button>`:''}
+        ${showAgents?`<button style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:transparent;border:1px solid var(--accent,#8866ff);border-radius:6px;color:var(--txt2,var(--muted));font-size:12px;cursor:pointer;" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</button>`:''}
         ${showAgents?`<button style="padding:6px 10px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--txt3,var(--dim));cursor:pointer;font-size:12px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')">⊞</button>`:''}
         <span style="font-size:10px;color:var(--txt3,var(--dim));font-family:var(--mono,'IBM Plex Mono',monospace);">${sig.scorer_version||''}</span>
       </div>
