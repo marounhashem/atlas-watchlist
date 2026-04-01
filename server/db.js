@@ -43,9 +43,11 @@ async function init() {
     // Allows Railway volume to fully mount before any disk writes
     setTimeout(() => {
       _startupComplete = true;
+      global._dbStartupComplete = true;
       console.log('[DB] Startup persist protection lifted (30s elapsed)');
-      persist(); // flush whatever we have now
+      persist();
     }, 30000);
+    global._dbStartupComplete = false;
 
     setInterval(persist, 15000);
     ready = true;

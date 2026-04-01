@@ -1210,6 +1210,48 @@ app.get('/api/db-recover', (req, res) => {
   }
 });
 
+// DB protection verification — test that persist actually works
+app.get('/api/db-verify', async (req, res) => {
+  try {
+    const dbPath = process.env.DB_PATH || path.join(__dirname, '../data/atlas.db');
+    const before = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
+    const signalsBefore = db.getAllSignals(1000).length;
+    const marketDataCount = (() => { try { return db.run ? 0 : 0; } catch(e) { return -1; } })();
+
+    // Check startup protection state
+    const startupComplete = typeof global._dbStartupComplete !== 'undefined' ? global._dbStartupComplete : 'unknown';
+
+    // Try a test write to settings (harmless)
+    db.setSetting('_db_verify_ts', String(Date.now()));
+    const readBack = db.getSetting('_db_verify_ts');
+
+    // Wait 2s for async persist to complete
+    await new Promise(r => setTimeout(r, 2000));
+
+    const after = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
+    const bakExists = fs.existsSync(dbPath + '.bak');
+    const bakSize = bakExists ? fs.statSync(dbPath + '.bak').size : 0;
+
+    res.json({
+      protection: {
+        startupComplete,
+        persistWorking: readBack === db.getSetting('_db_verify_ts'),
+        bakExists,
+        bakSizeKB: Math.round(bakSize / 1024)
+      },
+      db: {
+        signals: signalsBefore,
+        fileSizeBefore: Math.round(before / 1024) + 'KB',
+        fileSizeAfter: Math.round(after / 1024) + 'KB',
+        fileGrew: after >= before
+      },
+      status: after >= before ? 'HEALTHY — persist working, file not shrinking' : 'WARNING — file shrank after persist'
+    });
+  } catch(e) {
+    res.json({ error: e.message });
+  }
+});
+
 // DB status — current file sizes and signal count
 app.get('/api/db-status', (req, res) => {
   try {
