@@ -79,7 +79,7 @@ Changes in 20260331.2:
 - **persist()** is async with write coalescing — multiple rapid persist() calls collapse into a single disk write. The 15s interval flush remains as a safety net.
 - **Macro context** persisted to `macro_context` table. Loaded from DB on startup (3s), only fetches fresh via Claude web search if data is >26h stale. Macro penalises signals (×0.70 to ×0.94) — does not hard-block.
 - **Telegram alerts** via raw Bot API fetch (TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID). PROCEED signals pushed on save, HIGH urgency recs + MEDIUM MOVE_SL at 80%+ progress, morning brief at 05:00 UTC, health alerts alongside email.
-- **Forex Factory calendar** fetched weekly from FairEconomy JSON feed. HIGH impact events stored in `economic_events` table. 24h event risk gate caps signals to WATCH. Shown in morning brief with 📊 icon. Cron: Sundays 06:00 UTC + weekdays 06:45.
+- **Forex Factory calendar** polled every 5 minutes from FairEconomy JSON feed. HIGH impact events stored in `economic_events` table. Two-state event risk: **pre-event** (2h window, ×0.75 penalty + cap WATCH) and **post-event** (30min suppression, all signals blocked on affected symbols). Fired events trigger Telegram alert + WebSocket broadcast. Morning brief merges CB meetings + FF events sorted by date.
 - **Central bank calendar** hardcoded 2026 meeting dates for 8 banks. Event risk gate caps signals to WATCH within 48h. Consensus auto-fetched via Claude for meetings within 21 days.
 - **Rate differentials** scraped daily from Trading Economics (no API key). 8 currencies with hardcoded fallback. Carry gate: >300bps against → ×0.88, >500bps → ×0.80, >300bps with → ×1.05.
 - **COT data** fetched weekly from CFTC SODA API. Stored at currency level (EUR, GBP, etc). Resolved to pair level on read. COT extreme penalty: >100k crowded against signal → ×0.88, with → ×1.05.
@@ -100,7 +100,9 @@ All penalties multiply `conflictMultiplier` which scales the raw score:
 | Carry with | >300bps with direction | ×1.05 |
 | Forward guidance | CB consensus confirms | ×1.08 |
 | Forward guidance | CB consensus contradicts | ×0.88 |
-| Event risk | CB meeting within 48h | Cap to WATCH |
+| CB event risk | CB meeting within 48h | Cap to WATCH |
+| FF pre-event | HIGH impact event within 2h | ×0.75 + cap to WATCH |
+| FF post-event | Event fired within 30min | Signal blocked entirely |
 | FXSSI stale | OB data >25min old | ×0.82 |
 | Gravity against | Gravity pulls against direction | ×0.88 |
 | Cluster proximity | Losing cluster within 0.3% of entry | ×0.85 |

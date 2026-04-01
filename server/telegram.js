@@ -77,9 +77,25 @@ async function sendHealthAlert(problems) {
   return sendMessage(text);
 }
 
+// Economic event fired alert
+async function sendEventFiredAlert(event, affectedSymbols) {
+  const vs = event.forecast ? ` vs Forecast: ${event.forecast}` : '';
+  const prev = event.previous ? `Previous: ${event.previous}` : '';
+  const text = [
+    `📊 <b>${event.title} RELEASED</b>`,
+    `Currency: ${event.currency} | Impact: HIGH`,
+    `Actual: <b>${event.actual || 'Released'}</b>${vs}`,
+    prev,
+    ``,
+    `⚠️ Signal suppression active (30min):`,
+    affectedSymbols.slice(0, 8).join(', ') + (affectedSymbols.length > 8 ? ` +${affectedSymbols.length - 8} more` : ''),
+  ].filter(Boolean).join('\n');
+  return sendMessage(text);
+}
+
 // Test message
 async function sendTest() {
   return sendMessage('✅ <b>ATLAS // WATCHLIST</b>\nTelegram connected successfully.');
 }
 
-module.exports = { sendMessage, sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTest };
+module.exports = { sendMessage, sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendEventFiredAlert, sendTest };

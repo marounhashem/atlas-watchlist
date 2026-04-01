@@ -128,6 +128,7 @@ function initSchema() {
   // Economic calendar events — Forex Factory HIGH impact events
   db.run(`CREATE TABLE IF NOT EXISTS economic_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id TEXT UNIQUE,
     title TEXT NOT NULL,
     currency TEXT NOT NULL,
     event_date TEXT NOT NULL,
@@ -136,8 +137,12 @@ function initSchema() {
     forecast TEXT,
     previous TEXT,
     actual TEXT,
+    fired INTEGER DEFAULT 0,
     ts INTEGER NOT NULL
   )`);
+  // Migrations for existing DBs
+  try { db.run('ALTER TABLE economic_events ADD COLUMN event_id TEXT UNIQUE'); } catch(e) {}
+  try { db.run('ALTER TABLE economic_events ADD COLUMN fired INTEGER DEFAULT 0'); } catch(e) {}
 
   // Macro context — persisted so it survives restarts
   db.run(`CREATE TABLE IF NOT EXISTS macro_context (
@@ -794,19 +799,42 @@ function updateWatchOutcome(id, outcome, pnlPct) {
 
 // ── Economic calendar events ─────────────────────────────────────────────────
 function upsertEconomicEvent(event) {
-  // Dedup by title + currency + date
-  const existing = get('SELECT id FROM economic_events WHERE title=? AND currency=? AND event_date=?',
-    [event.title, event.currency, event.eventDate]);
-  if (existing) {
-    run('UPDATE economic_events SET event_time=?, impact=?, forecast=?, previous=?, ts=? WHERE id=?',
-      [event.eventTime, event.impact, event.forecast, event.previous, Date.now(), existing.id]);
+  if (event.eventId) {
+    const existing = get('SELECT id, fired FROM economic_events WHERE event_id=?', [event.eventId]);
+    if (existing) {
+      run('UPDATE economic_events SET event_time=?, impact=?, forecast=?, previous=?, ts=? WHERE id=?',
+        [event.eventTime, event.impact, event.forecast, event.previous, Date.now(), existing.id]);
+    } else {
+      run(`INSERT INTO economic_events (event_id, title, currency, event_date, event_time, impact, forecast, previous, ts)
+        VALUES (?,?,?,?,?,?,?,?,?)`,
+        [event.eventId, event.title, event.currency, event.eventDate, event.eventTime,
+         event.impact, event.forecast, event.previous, Date.now()]);
+    }
   } else {
-    run(`INSERT INTO economic_events (title, currency, event_date, event_time, impact, forecast, previous, ts)
-      VALUES (?,?,?,?,?,?,?,?)`,
-      [event.title, event.currency, event.eventDate, event.eventTime,
-       event.impact, event.forecast, event.previous, Date.now()]);
+    // Legacy path without event_id
+    const existing = get('SELECT id FROM economic_events WHERE title=? AND currency=? AND event_date=?',
+      [event.title, event.currency, event.eventDate]);
+    if (existing) {
+      run('UPDATE economic_events SET event_time=?, impact=?, forecast=?, previous=?, ts=? WHERE id=?',
+        [event.eventTime, event.impact, event.forecast, event.previous, Date.now(), existing.id]);
+    } else {
+      run(`INSERT INTO economic_events (title, currency, event_date, event_time, impact, forecast, previous, ts)
+        VALUES (?,?,?,?,?,?,?,?)`,
+        [event.title, event.currency, event.eventDate, event.eventTime,
+         event.impact, event.forecast, event.previous, Date.now()]);
+    }
   }
   persist();
+}
+
+// Mark event as fired — returns true if this is the first time (newly fired)
+function markEventFired(eventId) {
+  const row = get('SELECT id, fired FROM economic_events WHERE event_id=?', [eventId]);
+  if (!row) return false;
+  if (row.fired === 1) return false; // already fired
+  run('UPDATE economic_events SET fired=1 WHERE id=?', [row.id]);
+  persist();
+  return true;
 }
 
 function getUpcomingEvents(days = 7) {
@@ -934,7 +962,7 @@ module.exports = {
   retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals, getCurrentCycleOpenSignals,
   getSetting, setSetting,
   insertWatchSignal, getRecentWatchSignals, updateWatchOutcome,
-  upsertEconomicEvent, getUpcomingEvents, getAllEconomicEvents,
+  upsertEconomicEvent, markEventFired, getUpcomingEvents, getAllEconomicEvents,
   upsertMacroContext, getStoredMacroContext, getMacroContextAge,
   upsertCOTData, getCOTData, getAllCOTData,
   upsertRateData, getRateData, getAllRateData,

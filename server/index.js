@@ -17,7 +17,7 @@ const { runCOTFetch, getLatestCOT, getCOTSummary, getCOTCurrencies } = require('
 const { runRateFetch, loadRatesFromDB, getLatestRates, getRateDifferential } = require('./rateFetcher');
 const { getUpcomingMeetings, isPairEventRisk, getMeetingContext } = require('./centralBankCalendar');
 const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTest } = require('./telegram');
-const { runCalendarFetch, getUpcomingHighImpactEvents, isCalendarEventRisk } = require('./forexCalendar');
+const { runCalendarCheck, runCalendarFetch, isPreEventRisk, isPostEventSuppressed, getUpcomingHighImpactEvents } = require('./forexCalendar');
 const { SYMBOLS } = require('./config');
 
 const app = express();
@@ -961,28 +961,34 @@ async function buildMorningBrief() {
   if (carryCount === 0) lines.push('No extreme carry differentials');
   lines.push('');
 
-  // Upcoming CB meetings + economic events
-  const meetings = getUpcomingMeetings(14);
-  if (meetings.length > 0) {
-    lines.push('<b>📅 EVENTS &amp; MEETINGS</b>');
-    for (const m of meetings.slice(0, 8)) {
-      const isEcon = m.isEconomicEvent;
-      const urgency = m.daysUntil <= 1 ? '🚨' : m.daysUntil <= 2 ? '⚠️' : isEcon ? '📊' : '📅';
-      const pairNote = isEcon ? ' — USD pairs event risk' : '';
-      const note = m.daysUntil <= 1 ? ' ← extreme caution' : m.daysUntil <= 2 ? ' ← event risk' : pairNote;
-      lines.push(`${urgency} ${m.bank} — ${m.date} (${m.daysUntil}d)${note}`);
-    }
-    lines.push('');
-  }
+  // Merged events: CB meetings + Forex Factory HIGH impact
+  const cbMeetings = getUpcomingMeetings(14).map(m => ({
+    label: m.isEconomicEvent ? m.bank : `🏦 ${m.bank}`,
+    currency: m.currency,
+    date: m.date,
+    time: null,
+    daysUntil: m.daysUntil,
+    isCB: !m.isEconomicEvent
+  }));
+  const ffEvents = getUpcomingHighImpactEvents(7).map(e => ({
+    label: `${e.currency} ${e.title}`,
+    currency: e.currency,
+    date: e.date,
+    time: e.time,
+    daysUntil: e.daysUntil,
+    isCB: false
+  }));
+  const allEvents = [...cbMeetings, ...ffEvents]
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .slice(0, 10);
 
-  // Forex Factory HIGH impact events
-  const ffEvents = getUpcomingHighImpactEvents(7);
-  if (ffEvents.length > 0) {
-    lines.push('<b>📊 HIGH IMPACT EVENTS</b>');
-    for (const e of ffEvents.slice(0, 8)) {
-      const timeStr = e.time ? e.time.slice(0, 5) : '';
-      const urgency = e.daysUntil <= 0 ? '🚨' : e.daysUntil <= 1 ? '⚠️' : '📊';
-      lines.push(`${urgency} ${e.currency} ${e.title} — ${e.date} ${timeStr} (${e.daysUntil}d)`);
+  if (allEvents.length > 0) {
+    lines.push('<b>📅 UPCOMING EVENTS</b>');
+    for (const e of allEvents) {
+      const urgency = e.daysUntil <= 0 ? '🚨' : e.daysUntil <= 1 ? '⚠️' : e.isCB ? '🏦' : '📊';
+      const timeStr = e.time ? ' ' + e.time.slice(0, 5) : '';
+      const note = e.daysUntil <= 1 ? ' ← event risk' : '';
+      lines.push(`${urgency} ${e.label} — ${e.date}${timeStr} (${e.daysUntil}d)${note}`);
     }
     lines.push('');
   }
@@ -1326,15 +1332,9 @@ cron.schedule('0 5 * * *', async () => {
   }
 });
 
-// Economic calendar fetch — Sundays 06:00 UTC + daily 06:45 for mid-week updates
-cron.schedule('0 6 * * 0', async () => {
-  try {
-    console.log('[Cron] Weekly calendar fetch...');
-    await runCalendarFetch();
-  } catch(e) { console.error('[Cron] Calendar error:', e.message); }
-});
-cron.schedule('45 6 * * 1-5', async () => {
-  try { await runCalendarFetch(); }
+// Economic calendar — poll every 5 minutes for new events + detect fired events
+cron.schedule('*/5 * * * *', async () => {
+  try { await runCalendarCheck(broadcast); }
   catch(e) { console.error('[Cron] Calendar error:', e.message); }
 });
 

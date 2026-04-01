@@ -14,7 +14,7 @@ function getCbCalendar()   { return _cbCalendar   || (_cbCalendar   = require('.
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.2'; // Forex Factory calendar, FF event risk gate, morning brief integration
+const SCORER_VERSION = '20260401.2'; // FF pre/post event risk, 5min polling, signal suppression on event fire
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -449,6 +449,15 @@ function scoreSymbol(symbol) {
   const minScore  = w ? w.min_score_proceed : cfg.minScoreProceed;
   const direction = inferDirection(data);
   if (!direction) return null;
+
+  // ── Post-event suppression — block all signals during volatility window ────
+  try {
+    const { isPostEventSuppressed } = require('./forexCalendar');
+    if (isPostEventSuppressed(symbol)) {
+      console.log(`[Scorer] ${symbol} suppressed — post-event volatility window`);
+      return null;
+    }
+  } catch(e) {}
 
   // ── Hard RSI block ────────────────────────────────────────────────────────
   // Analysis of 26 losses showed RSI opposing direction = 0% win rate
@@ -1583,24 +1592,18 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
-  // ── Forex Factory event risk gate ───────────────────────────────────────────
-  // HIGH impact events from FF calendar — 24h window, caps to WATCH
-  if (!eventRiskNote && macroVerdict === 'PROCEED') {
+  // ── Forex Factory pre-event risk gate ─────────────────────────────────────
+  // HIGH impact events within 2 hours — penalise and cap to WATCH
+  if (!eventRiskNote) {
     try {
-      const { isCalendarEventRisk } = require('./forexCalendar');
-      // Check both currencies in the pair
-      const pairCurrencies = getCbCalendar().PAIR_CURRENCIES[symbol];
-      if (pairCurrencies) {
-        for (const cur of pairCurrencies) {
-          const ffRisk = isCalendarEventRisk(cur, 24);
-          if (ffRisk) {
-            macroVerdict = 'WATCH';
-            const hoursLabel = ffRisk.hoursUntil <= 0 ? 'NOW' : `${ffRisk.hoursUntil}h`;
-            eventRiskNote = `⚠ ${ffRisk.title} in ${hoursLabel} — event risk on ${cur} pairs`;
-            console.log(`[Scorer] ${symbol} ${direction} — ${eventRiskNote}`);
-            break;
-          }
-        }
+      const { isPreEventRisk } = require('./forexCalendar');
+      const preEvent = isPreEventRisk(symbol, 2);
+      if (preEvent) {
+        macroAdjustedScore = Math.round(macroAdjustedScore * 0.75);
+        if (macroVerdict === 'PROCEED') macroVerdict = 'WATCH';
+        const timeLabel = preEvent.minutesUntil <= 0 ? 'NOW' : preEvent.minutesUntil < 60 ? `${preEvent.minutesUntil}min` : `${preEvent.hoursUntil}h`;
+        eventRiskNote = `⚠ ${preEvent.title} in ${timeLabel} — pre-event risk`;
+        console.log(`[Scorer] ${symbol} ${direction} — ${eventRiskNote}`);
       }
     } catch(e) {}
   }
