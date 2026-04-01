@@ -755,10 +755,12 @@ let _wsBackoff = 1000;
 function connect() {
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
-    _wsBackoff = 1000; // reset on successful connect
+    _wsBackoff = 1000;
     document.getElementById('conn-status').textContent = 'LIVE';
     document.getElementById('dot').style.background = 'var(--proceed)';
     document.getElementById('webhook-url').textContent = location.origin+'/webhook/pine';
+    // Refetch signals on reconnect — don't wait for next broadcast
+    fetch('/api/signals').then(r=>r.json()).then(data=>{if(data?.length){allSignals=data;renderSignals();}}).catch(()=>{});
   };
   ws.onmessage = e => handleMessage(JSON.parse(e.data));
   ws.onclose = () => {
@@ -1712,7 +1714,24 @@ function updateClock() {
 
 setInterval(fetchMarketStatus,60000);
 setInterval(updateClock,1000);
-updateClock();connect();
+updateClock();
+
+// Instant load — fetch signals via HTTP before WebSocket connects
+(async function initialLoad() {
+  try {
+    const c = document.getElementById('signals-container');
+    if (c) c.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:20px;color:var(--txt2,var(--muted));font-size:12px;"><span style="width:6px;height:6px;background:var(--accent,#8866ff);border-radius:50%;animation:pulse 1s infinite;display:inline-block;"></span> Loading signals...</div>';
+    const [sigRes, pastRes] = await Promise.all([
+      fetch('/api/signals').then(r=>r.json()).catch(()=>[]),
+      fetch('/api/past-signals').then(r=>r.json()).catch(()=>[])
+    ]);
+    if (sigRes.length > 0) { allSignals = sigRes; renderSignals(); }
+    if (pastRes.length > 0) { pastSignals = pastRes; updatePastCount(); }
+    fetchStats(); fetchLearningLog(); fetchMarketStatus(); fetchRegime();
+  } catch(e) { console.error('Initial load error:', e); }
+  // Then connect WebSocket for live updates
+  connect();
+})();
 
 // ── Main tab switcher ──────────────────────────────────────────────────────
 let activeMainTab = 'signals';
