@@ -983,12 +983,15 @@ async function buildMorningBrief() {
     .slice(0, 10);
 
   if (allEvents.length > 0) {
+    const { FEED_ICONS } = require('./forexCalendar');
     lines.push('<b>📅 UPCOMING EVENTS</b>');
     for (const e of allEvents) {
-      const urgency = e.daysUntil <= 0 ? '🚨' : e.daysUntil <= 1 ? '⚠️' : e.isCB ? '🏦' : '📊';
+      const icon = e.daysUntil <= 0 ? '🚨' : e.daysUntil <= 1 ? '⚠️'
+        : e.isCB ? '🏦' : (e.feedIcon || '📊');
       const timeStr = e.time ? ' ' + e.time.slice(0, 5) : '';
+      const srcTag = e.sources ? ` [${e.sources}]` : '';
       const note = e.daysUntil <= 1 ? ' ← event risk' : '';
-      lines.push(`${urgency} ${e.label} — ${e.date}${timeStr} (${e.daysUntil}d)${note}`);
+      lines.push(`${icon} ${e.label} — ${e.date}${timeStr} (${e.daysUntil}d)${srcTag}${note}`);
     }
     lines.push('');
   }
@@ -1202,10 +1205,10 @@ app.get('/api/cb-calendar', (req, res) => {
   res.json({ upcoming: result });
 });
 
-// Economic calendar — upcoming HIGH impact events from Forex Factory
+// Economic calendar — upcoming HIGH impact events from all 4 feeds
 app.get('/api/calendar-status', (req, res) => {
   const events = getUpcomingHighImpactEvents(14);
-  res.json({ count: events.length, events });
+  res.json({ totalEvents: events.length, highImpactCount: events.filter(e => e.impact === 'High').length, events });
 });
 
 app.get('/api/calendar-force', async (req, res) => {
