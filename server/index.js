@@ -254,11 +254,20 @@ app.post('/webhook/fxssi', (req, res) => {
   const sym = symbol.toUpperCase();
   const latest = require('./db').getLatestMarketData(sym);
   if (latest) {
+    // Only update FXSSI-specific fields — never overwrite Pine data via raw_payload spread
     upsertMarketData(sym, {
-      ...JSON.parse(latest.raw_payload || '{}'),
+      close: latest.close, high: latest.high, low: latest.low, volume: latest.volume,
+      ema200: latest.ema200, vwap: latest.vwap, rsi: latest.rsi, macdHist: latest.macd_hist,
+      bias: latest.bias, biasScore: latest.bias_score, structure: latest.structure,
+      fvgPresent: latest.fvg_present === 1,
+      fvgHigh: latest.fvg_high, fvgLow: latest.fvg_low, fvgMid: latest.fvg_mid,
       fxssiLongPct: longPct,
       fxssiShortPct: shortPct,
-      fxssiTrapped: trapped
+      fxssiTrapped: trapped,
+      obAbsorption: latest.ob_absorption,
+      obImbalance: latest.ob_imbalance,
+      obLargeOrders: latest.ob_large_orders,
+      fxssiAnalysis: latest.fxssi_analysis
     });
   }
   res.json({ ok: true });
@@ -1237,13 +1246,15 @@ cron.schedule('1,21,41 * * * *', async () => {
 // FXSSI scrapes first, then 1 minute later we retire ACTIVE signals
 // Fresh FXSSI data is now in DB when new signals start scoring
 cron.schedule('2,22,42 * * * *', async () => {
-  await runRetirementCycle(broadcast);
+  try { await runRetirementCycle(broadcast); }
+  catch(e) { console.error('[Cron] Retirement error:', e.message); }
 });
 
 // Learning engine — checks every hour, runs only when thresholds met
 // Minimum 30 closed trades per symbol + 30 new outcomes since last cycle + 6h gap
 cron.schedule('0 * * * *', async () => {
-  await runLearningCycle(broadcast);
+  try { await runLearningCycle(broadcast); }
+  catch(e) { console.error('[Cron] Learning error:', e.message); }
 });
 
 // Entry level optimisation — once per day at 18:00 UTC (after NY session closes)
@@ -1260,8 +1271,10 @@ cron.schedule('0 18 * * *', async () => {
 
 // Daily session summary — fires at 17:00 UTC (end of London session)
 cron.schedule('0 17 * * *', async () => {
-  console.log('[Cron] Running daily session summary...');
-  await claudeLearner.dailySessionSummary(broadcast);
+  try {
+    console.log('[Cron] Running daily session summary...');
+    await claudeLearner.dailySessionSummary(broadcast);
+  } catch(e) { console.error('[Cron] Session summary error:', e.message); }
 });
 
 // Morning brief via Telegram — 05:00 UTC (09:00 Dubai)
@@ -1292,8 +1305,10 @@ cron.schedule('0 7 * * *', async () => {
 
 // Weekly COT fetch — every Friday at 20:45 UTC (15 min after CFTC 15:30 EST release)
 cron.schedule('45 20 * * 5', async () => {
-  console.log('[Cron] Running weekly COT data fetch...');
-  await runCOTFetch();
+  try {
+    console.log('[Cron] Running weekly COT data fetch...');
+    await runCOTFetch();
+  } catch(e) { console.error('[Cron] COT fetch error:', e.message); }
 });
 
 // ── Signal retirement ─────────────────────────────────────────────────────────
@@ -1327,6 +1342,42 @@ async function runRetirementCycle(broadcast) {
 // { GOLD: { sentiment, summary, key_risks, supports_long, supports_short, ts } }
 const macroContext = {};
 
+// ── Claude web search helper (handles multi-turn tool_use pattern) ───────────
+async function callClaudeWithSearch(prompt) {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const headers = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
+  const tools = [{ type: 'web_search_20250305', name: 'web_search' }];
+  const sysPrompt = 'You are a macro analyst. Search for current market conditions and return ONLY a JSON object. No markdown, no explanation.';
+
+  // Turn 1
+  const res1 = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST', headers,
+    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1000, tools, system: sysPrompt, messages: [{ role: 'user', content: prompt }] })
+  });
+  const data1 = await res1.json();
+
+  // If tool_use requested, do turn 2
+  if (data1.stop_reason === 'tool_use') {
+    const textBlocks = (data1.content || []).filter(b => b.type === 'text');
+    if (textBlocks.length > 0) {
+      const text = textBlocks.map(b => b.text).join('');
+      if (text.includes('{')) return text;
+    }
+    const toolUseBlocks = (data1.content || []).filter(b => b.type === 'tool_use');
+    const toolResults = toolUseBlocks.map(tu => ({ type: 'tool_result', tool_use_id: tu.id, content: 'Search completed. Use the information you have to answer.' }));
+    const res2 = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', headers,
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 400, tools, system: sysPrompt,
+        messages: [{ role: 'user', content: prompt }, { role: 'assistant', content: data1.content }, { role: 'user', content: toolResults }] })
+    });
+    const data2 = await res2.json();
+    return (data2.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+  }
+
+  // end_turn — text returned directly
+  return (data1.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+}
+
 async function runMacroContextFetch(broadcast) {
   if (!process.env.ANTHROPIC_API_KEY) return;
 
@@ -1341,86 +1392,37 @@ async function runMacroContextFetch(broadcast) {
 
   for (const [symbol, query] of Object.entries(symbolQueries)) {
     try {
-      // Inject COT positioning data if available and fresh (< 8 days old)
-      let cotContext = '';
+      // Build context enrichment
+      let extraContext = '';
       try {
         const cot = getLatestCOT(symbol);
-        if (cot && cot.reportDate) {
-          const cotAge = Date.now() - (cot.ts || 0);
-          if (cotAge < 8 * 24 * 60 * 60 * 1000) { // < 8 days
-            const summary = getCOTSummary(symbol);
-            cotContext = `\n\nCOT INSTITUTIONAL POSITIONING (as of ${cot.reportDate}):\n${summary || 'N/A'}`;
-          }
+        if (cot && cot.reportDate && (Date.now() - (cot.ts || 0)) < 8 * 24 * 3600000) {
+          extraContext += `\n\nCOT INSTITUTIONAL POSITIONING (as of ${cot.reportDate}):\n${getCOTSummary(symbol) || 'N/A'}`;
         }
       } catch(e) {}
-
-      // Inject rate differential if available
       try {
         const rateDiff = getRateDifferential(symbol);
         if (rateDiff) {
-          cotContext += `\nRATE DIFFERENTIAL: ${rateDiff.summary}`;
-          if (rateDiff.strength === 'EXTREME') {
-            cotContext += ` — EXTREME carry, counter-trend signals heavily penalised`;
-          }
+          extraContext += `\nRATE DIFFERENTIAL: ${rateDiff.summary}`;
+          if (rateDiff.strength === 'EXTREME') extraContext += ` — EXTREME carry`;
         }
       } catch(e) {}
 
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': process.env.ANTHROPIC_API_KEY,
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001',
-          max_tokens: 400,
-          tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-          system: `You are a macro analyst. Search for current market conditions and return ONLY a JSON object. No markdown, no explanation.`,
-          messages: [{
-            role: 'user',
-            content: `Search: "${query}".${cotContext} Return ONLY this JSON:
-{
-  "sentiment": "BULLISH|BEARISH|NEUTRAL",
-  "strength": <1-10, how strong is the macro bias>,
-  "summary": "<one sentence, max 15 words>",
-  "key_risks": ["<risk 1>", "<risk 2>"],
-  "supports_long": <true|false>,
-  "supports_short": <true|false>,
-  "avoid_until": "<event or condition that would change this>"
-}`
-          }]
-        })
-      });
+      const prompt = `Search: "${query}".${extraContext} Return ONLY this JSON:\n{"sentiment":"BULLISH|BEARISH|NEUTRAL","strength":5,"summary":"one sentence max 15 words","key_risks":["risk1","risk2"],"supports_long":true,"supports_short":false,"avoid_until":"condition"}`;
 
-      const data = await response.json();
-      console.log(`[Macro] ${symbol} API status: ${response.status}, content blocks: ${data.content?.length || 0}, stop_reason: ${data.stop_reason}`);
-      const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-      console.log(`[Macro] ${symbol} text length: ${text.length}, first 200: ${text.slice(0, 200)}`);
+      const text = await callClaudeWithSearch(prompt);
       const clean = text.replace(/```json|```/g, '').trim();
+      console.log(`[Macro] ${symbol} text: ${clean.slice(0, 150)}`);
 
-      try {
-        const ctx = JSON.parse(clean);
-        console.log(`[Macro] ${symbol} parsed OK: sentiment=${ctx.sentiment} strength=${ctx.strength}`);
-        macroContext[symbol] = { ...ctx, ts: Date.now() };
-        // Persist to DB so it survives restarts
-        try {
-          db.upsertMacroContext(symbol, macroContext[symbol]);
-          console.log(`[Macro] ${symbol} persisted to DB`);
-        } catch(e) {
-          console.error(`[Macro] ${symbol} DB persist error:`, e.message, e.stack);
-        }
-        console.log(`[Macro] ${symbol}: ${ctx.sentiment} (${ctx.strength}/10) — ${ctx.summary}`);
-        if (broadcast) broadcast({ type: 'MACRO_UPDATE', symbol, context: macroContext[symbol], ts: Date.now() });
-      } catch(e) {
-        console.error(`[Macro] ${symbol} parse error:`, e.message, '| clean:', clean.slice(0, 200));
-      }
+      const ctx = JSON.parse(clean);
+      macroContext[symbol] = { ...ctx, ts: Date.now() };
+      db.upsertMacroContext(symbol, macroContext[symbol]);
+      console.log(`[Macro] ${symbol}: ${ctx.sentiment} (${ctx.strength}/10) — ${ctx.summary}`);
+      if (broadcast) broadcast({ type: 'MACRO_UPDATE', symbol, context: macroContext[symbol], ts: Date.now() });
 
-      // Small delay between symbols to avoid rate limiting
       await new Promise(r => setTimeout(r, 1500));
-
     } catch(e) {
-      console.error(`[Macro] ${symbol} fetch error:`, e.message);
+      console.error(`[Macro] ${symbol} error:`, e.message);
     }
   }
 
@@ -1607,35 +1609,26 @@ server.listen(PORT, () => {
         console.error('[Startup] Rate load error:', e.message);
       }
     }, 8000);
-    // Load macro context from DB on startup — survives restarts
+    // Load macro context from DB on startup (10s — after COT and rates are loaded)
     setTimeout(() => {
       try {
         const stored = db.getStoredMacroContext();
-        console.log('[Startup] getStoredMacroContext returned:', JSON.stringify(stored).slice(0, 200));
         const count = Object.keys(stored || {}).length;
-        console.log('[Startup] Macro context count:', count);
         if (count > 0) {
           Object.assign(macroContext, stored);
-          console.log('[Startup] macroContext keys after assign:', Object.keys(macroContext));
-        } else {
-          console.log('[Startup] No stored macro context — table empty, triggering fetch...');
-          runMacroContextFetch(broadcast)
-            .then(() => console.log('[Startup] Initial macro context fetch complete'))
-            .catch(e => console.error('[Startup] Macro context fetch error:', e.message));
+          console.log(`[Startup] Loaded ${count} macro contexts from DB`);
         }
-        // If stored context is stale (>26h), trigger a fresh fetch
         const age = db.getMacroContextAge();
-        console.log('[Startup] Macro context age:', Math.round(age / 3600000), 'hours');
-        if (count > 0 && age > 26 * 3600000) {
-          console.log('[Startup] Macro context stale — running fresh fetch...');
+        if (count === 0 || age > 26 * 3600000) {
+          console.log(`[Startup] Macro context ${count === 0 ? 'empty' : 'stale'} — fetching...`);
           runMacroContextFetch(broadcast)
             .then(() => console.log('[Startup] Macro context fetch complete'))
             .catch(e => console.error('[Startup] Macro context fetch error:', e.message));
         }
       } catch(e) {
-        console.error('[Startup] Macro context load error:', e.message, e.stack);
+        console.error('[Startup] Macro context load error:', e.message);
       }
-    }, 3000);
+    }, 10000);
     // Expire OPEN signals from old scorer versions — keeps board clean after deploys
     // ACTIVE signals (real trades) are never auto-expired
     try {

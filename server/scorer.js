@@ -1,11 +1,20 @@
 const { SYMBOLS, getSessionNow, sessionMultiplier } = require('./config');
-const { getLatestMarketData, getWeights, insertSignal } = require('./db');
+const { getLatestMarketData, getWeights, insertSignal, getOpenSignals, getLatestOpenSignal,
+        refineSignal, insertWatchSignal, getAllSignals } = require('./db');
+const { isMarketOpen } = require('./marketHours');
+
+// Lazy-loaded modules (avoid circular deps at startup)
+let _cotFetcher, _rateFetcher, _claudeLearner, _cbCalendar;
+function getCotFetcher()   { return _cotFetcher   || (_cotFetcher   = require('./cotFetcher')); }
+function getRateFetcher()  { return _rateFetcher  || (_rateFetcher  = require('./rateFetcher')); }
+function getClaudeLearner(){ return _claudeLearner|| (_claudeLearner= require('./claudeLearner')); }
+function getCbCalendar()   { return _cbCalendar   || (_cbCalendar   = require('./centralBankCalendar')); }
 
 // ── Scorer version ────────────────────────────────────────────────────────────
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260331.10'; // macro persists to DB, COT+macro penalties, active dedup, Telegram rec push
+const SCORER_VERSION = '20260401.1'; // macro multi-turn, startup ordering, cron safety, FXSSI isolation, require hoisting
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -802,7 +811,7 @@ function scoreSymbol(symbol) {
   // Specs crowded in same direction as signal = fade risk = penalty
   // Specs crowded opposite to signal = contrarian fuel = bonus
   try {
-    const { getLatestCOT } = require('./cotFetcher');
+    const { getLatestCOT } = getCotFetcher();
     const cot = getLatestCOT(symbol);
     if (cot) {
       const cotAgainst =
@@ -825,7 +834,7 @@ function scoreSymbol(symbol) {
   // ── Rate differential carry gate ────────────────────────────────────────────
   // Strong carry differentials penalise counter-carry trades, reward with-carry
   try {
-    const { getRateDifferential } = require('./rateFetcher');
+    const { getRateDifferential } = getRateFetcher();
     const rateDiff = getRateDifferential(symbol);
     if (rateDiff && rateDiff.differential !== 0) {
       const absBps = Math.abs(rateDiff.differential);
@@ -924,7 +933,7 @@ function scoreSymbol(symbol) {
   let regimeMinScoreAdj = 0;
   let regimeSlAdj = 1.0; // multiplier applied to SL distance
   try {
-    const { getRegime } = require('./claudeLearner');
+    const { getRegime } = getClaudeLearner();
     const regime = getRegime();
     if (regime && regime.confidence >= 50) {
       switch(regime.regime) {
@@ -1405,7 +1414,7 @@ function scoreSymbol(symbol) {
   // ── R:R sanity check with Claude multipliers ──────────────────────────────
   let claudeOpt = null;
   try {
-    const { getEntryOptimisation } = require('./claudeLearner');
+    const { getEntryOptimisation } = getClaudeLearner();
     claudeOpt = getEntryOptimisation(symbol);
   } catch(e) {}
 
@@ -1557,7 +1566,7 @@ function scoreSymbol(symbol) {
   // Cap to WATCH if a central bank meeting is within 48h for any affected currency
   let eventRiskNote = '';
   try {
-    const { isPairEventRisk } = require('./centralBankCalendar');
+    const { isPairEventRisk } = getCbCalendar();
     const eventRisk = isPairEventRisk(symbol, 48);
     if (eventRisk && macroVerdict === 'PROCEED') {
       macroVerdict = 'WATCH';
@@ -1568,7 +1577,7 @@ function scoreSymbol(symbol) {
 
   // ── Forward guidance from consensus ─────────────────────────────────────────
   try {
-    const { getConsensusImpact } = require('./centralBankCalendar');
+    const { getConsensusImpact } = getCbCalendar();
     const consensus = getConsensusImpact(symbol, direction);
     if (consensus) {
       if (consensus.impact === 'CONFIRMS') {
@@ -1789,8 +1798,7 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
 }
 
 function scoreAllPriority() {
-  const { SYMBOLS } = require('./config');
-  const { isMarketOpen } = require('./marketHours');
+  // SYMBOLS and isMarketOpen hoisted to module top
   const results = [];
   for (const symbol of Object.keys(SYMBOLS)) {
     try {
@@ -1810,7 +1818,7 @@ function scoreAllPriority() {
         results.push({
           symbol, label: SYMBOLS[symbol]?.label || symbol,
           direction: null, score: 0, verdict: 'SKIP',
-          session: require('./config').getSessionNow(),
+          session: getSessionNow(),
           reasoning: 'No data yet or insufficient bias signal',
           ts: Date.now()
         });
@@ -1859,7 +1867,7 @@ function saveSignal(scored) {
   // Saved separately for learning and pattern analysis only
   if (scored.verdict === 'WATCH') {
     try {
-      const { insertWatchSignal } = require('./db');
+      // insertWatchSignal hoisted to module top
       const wid = insertWatchSignal({ ...scored, scorerVersion: SCORER_VERSION });
       if (wid) console.log(`[Scorer] ${scored.symbol} ${scored.direction} WATCH saved to watch_signals (id:${wid})`);
     } catch(e) {
@@ -1887,7 +1895,6 @@ function saveSignal(scored) {
   // WATCH:   5min cooldown — just prevents rapid churn
   // Checks main signals table only (WATCH go to watch_signals, different table)
   try {
-    const { getAllSignals } = require('./db');
     const cooldownMs = scored.verdict === 'PROCEED' ? 30 * 60 * 1000 : 5 * 60 * 1000;
     const recent = getAllSignals(50).find(s =>
       s.symbol === scored.symbol &&
@@ -1909,7 +1916,6 @@ function saveSignal(scored) {
   // do NOT save this new signal — prevents simultaneous LONG+SHORT on same symbol
   // The existing trade takes priority; the new signal is discarded
   try {
-    const { getLatestOpenSignal } = require('./db');
     const oppositeDir = scored.direction === 'LONG' ? 'SHORT' : 'LONG';
     const oppositeSignal = getLatestOpenSignal(scored.symbol, oppositeDir);
     if (oppositeSignal) {
@@ -1923,7 +1929,7 @@ function saveSignal(scored) {
   // ── Active signal guard across ALL cycles ──────────────────────────────────
   // ACTIVE = entry touched = real trade. Don't double up regardless of cycle.
   try {
-    const activeAny = require('./db').getOpenSignals().find(s =>
+    const activeAny = getOpenSignals().find(s =>
       s.symbol === scored.symbol && s.direction === scored.direction && s.outcome === 'ACTIVE'
     );
     if (activeAny) {
@@ -1937,14 +1943,13 @@ function saveSignal(scored) {
   // Dedup checks CURRENT CYCLE signals (cycle=0) for OPEN signals
   let last = null;
   try {
-    const { getLatestOpenSignal, updateOutcome } = require('./db');
+    // getLatestOpenSignal hoisted to module top
     last = getLatestOpenSignal(scored.symbol, scored.direction);
   } catch(e) {
     console.error('[Scorer] dedup lookup error:', e.message);
   }
 
   if (last) {
-    const { getLatestMarketData, updateOutcome } = require('./db');
     const marketData = getLatestMarketData(scored.symbol);
     const currentPrice = marketData ? marketData.close : null;
 
@@ -1954,7 +1959,6 @@ function saveSignal(scored) {
     }
 
     if (isBetterSignal(last, scored)) {
-      const { refineSignal } = require('./db');
       const count = refineSignal(last.id, {
         score:         scored.score,
         entry:         scored.entry,
