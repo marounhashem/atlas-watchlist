@@ -51,6 +51,27 @@ async function sendSignalAlert(signal) {
 
 // HIGH urgency recommendation alert
 async function sendRecAlert(signal, rec) {
+  // Partial TP special format
+  if (rec.type === 'PARTIAL_CLOSE') {
+    return sendMessage([
+      `⚡ <b>ATLAS // ${signal.symbol} ${signal.direction}</b>`,
+      `PARTIAL CLOSE — 1:1 R:R achieved`, '',
+      `Close half position at: <b>${rec.price}</b>`,
+      `Move SL to breakeven: <b>${rec.new_sl}</b>`, '',
+      `R:R reached: ${rec.rr_achieved} | MFE: +${rec.mfe_pct}%`,
+      `Remaining runs to TP: ${signal.tp}`,
+    ].join('\n'));
+  }
+  // Time stop special format
+  if (rec.type === 'TIME_STOP') {
+    return sendMessage([
+      `⏱ <b>ATLAS // ${signal.symbol} TIME STOP</b>`, '',
+      `${rec.hours_active}h active — price not moving`,
+      `MFE only +${rec.mfe_pct}% — dead trade`, '',
+      `Consider closing to free capital`,
+      `Entry: ${signal.entry} | TP: ${signal.tp}`,
+    ].join('\n'));
+  }
   const urgencyIcon = rec.urgency === 'HIGH' ? '🚨' : '⚠️';
   const text = [
     `${urgencyIcon} <b>ATLAS // ${signal.symbol} ${signal.direction}</b>`,

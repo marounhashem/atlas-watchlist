@@ -342,6 +342,9 @@ function initSchema() {
   try { db.run('ALTER TABLE signals ADD COLUMN weighted_struct_score REAL DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN is_swing INTEGER DEFAULT 0'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN expires_at INTEGER DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN partial_closed INTEGER DEFAULT 0'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN outcome_category TEXT DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN outcome_notes TEXT DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE watch_signals ADD COLUMN event_risk_tag TEXT DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN macro_context_available INTEGER DEFAULT 0'); } catch(e) {}
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)

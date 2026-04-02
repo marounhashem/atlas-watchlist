@@ -1,7 +1,105 @@
-const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, updateMFE, run, addRecommendation, getRecommendations, markRecommendationFollowed, dismissRecommendation, resolveStaleRecommendations } = require('./db');
+const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, updateMFE, run, addRecommendation, getRecommendations, markRecommendationFollowed, dismissRecommendation, resolveStaleRecommendations, persist } = require('./db');
 let _sendRecAlert = null;
 try { _sendRecAlert = require('./telegram').sendRecAlert; } catch(e) {}
 const claudeLearner = require('./claudeLearner');
+let _SYMBOLS = null;
+function getSymbols() { return _SYMBOLS || (_SYMBOLS = require('./config').SYMBOLS); }
+
+// ── Partial TP at 1:1 R:R ──────────────────────────────────────────────────
+function checkPartialTP(sig, currentPrice) {
+  const { entry, sl, tp, direction } = sig;
+  if (!entry || !sl || !tp || !direction) return null;
+
+  const recs = JSON.parse(sig.recommendations || '[]');
+  if (recs.some(r => r.type === 'PARTIAL_CLOSE')) return null;
+
+  const risk = Math.abs(entry - sl);
+  const reward = direction === 'LONG' ? currentPrice - entry : entry - currentPrice;
+  if (reward <= 0) return null;
+
+  const rrAchieved = reward / risk;
+  if (rrAchieved >= 1.0) {
+    return {
+      type: 'PARTIAL_CLOSE',
+      reason: `1:1 R:R achieved — close 50% of position, move SL to breakeven (${entry})`,
+      urgency: 'MEDIUM',
+      close_pct: 50,
+      new_sl: entry,
+      price: currentPrice,
+      rr_achieved: Math.round(rrAchieved * 10) / 10,
+      mfe_pct: sig.mfe_pct || 0,
+      progress_pct: Math.round((reward / Math.abs(tp - entry)) * 100)
+    };
+  }
+  return null;
+}
+
+// ── Time stop on dead trades ────────────────────────────────────────────────
+function checkTimeStop(sig) {
+  if (sig.outcome !== 'ACTIVE') return null;
+  const cfg = getSymbols()[sig.symbol];
+  if (!cfg) return null;
+
+  const recs = JSON.parse(sig.recommendations || '[]');
+  if (recs.some(r => r.type === 'TIME_STOP')) return null;
+
+  const activeTs = sig.outcome_ts || sig.ts;
+  const hoursActive = (Date.now() - activeTs) / 3600000;
+  const mfePct = sig.mfe_pct || 0;
+
+  const thresholds = { forex: { hours: 6, minMfe: 0.2 }, index: { hours: 4, minMfe: 0.3 }, commodity: { hours: 8, minMfe: 0.3 }, crypto: { hours: 12, minMfe: 0.5 } };
+  const t = thresholds[cfg.assetClass] || thresholds.forex;
+
+  if (hoursActive >= t.hours && mfePct < t.minMfe) {
+    return {
+      type: 'TIME_STOP',
+      reason: `${Math.round(hoursActive)}h active with only +${mfePct}% MFE — dead trade, consider closing`,
+      urgency: 'MEDIUM',
+      hours_active: Math.round(hoursActive),
+      mfe_pct: mfePct,
+      price: null
+    };
+  }
+  return null;
+}
+
+// ── Loss/Win taxonomy ───────────────────────────────────────────────────────
+function categoriseOutcome(signal, outcome) {
+  const recs = JSON.parse(signal.recommendations || '[]');
+  const reasoning = signal.reasoning || '';
+  const mfePct = signal.mfe_pct || 0;
+  const structScore = signal.weighted_struct_score || 0;
+
+  if (outcome === 'LOSS') {
+    if (signal.event_risk_tag || reasoning.includes('pre-event') || reasoning.includes('Trump') || reasoning.includes('NFP'))
+      return { category: 'EVENT_RISK', notes: 'Loss around high-impact event.' };
+    const highCloses = recs.filter(r => r.type === 'CLOSE' && r.urgency === 'HIGH' && !r.resolved);
+    if (highCloses.length >= 2 && signal.rec_followed === 0)
+      return { category: 'IGNORED_RECS', notes: `${highCloses.length} HIGH CLOSE recs ignored.` };
+    if (recs.some(r => r.type === 'CLOSE' && r.reason?.includes('RSI') && r.urgency === 'HIGH') && mfePct < 0.3)
+      return { category: 'MOMENTUM_FAILURE', notes: 'RSI reversed sharply at entry.' };
+    if (structScore < 2.0)
+      return { category: 'WEAK_STRUCTURE', notes: `Structure ${structScore}/8.5 — lower TF only.` };
+    if (reasoning.includes('Counter-trend') || reasoning.includes('conflicts'))
+      return { category: 'COUNTER_TREND', notes: 'Counter to macro or daily trend.' };
+    if (!signal.macro_context_available)
+      return { category: 'NO_MACRO_CONTEXT', notes: 'Scored without macro context.' };
+    if (signal.session === 'offHours')
+      return { category: 'OFF_HOURS', notes: 'Off-hours session, reduced reliability.' };
+    if (reasoning.includes('No Retail OB'))
+      return { category: 'NO_OB_DATA', notes: 'Missing Retail Order Book data.' };
+    if (mfePct > 0.5)
+      return { category: 'MFE_CAPTURE_FAILURE', notes: `MFE was +${mfePct}% but not captured.` };
+    return { category: 'UNKNOWN', notes: 'Review manually.' };
+  }
+
+  // WIN categories
+  if (structScore >= 7.0) return { category: 'STRONG_STRUCTURE', notes: `Structure ${structScore}/8.5 — full TF confirmation.` };
+  if (reasoning.includes('Macro') && reasoning.includes('confirms')) return { category: 'MACRO_ALIGNED', notes: 'Macro confirmed direction.' };
+  if (reasoning.includes('COT extreme favours')) return { category: 'COT_CONTRARIAN', notes: 'COT extreme provided contrarian edge.' };
+  if (signal.session !== 'offHours') return { category: 'PEAK_SESSION', notes: 'Clean win during peak session.' };
+  return { category: 'TECHNICAL', notes: 'Technical setup executed cleanly.' };
+}
 
 // checkOutcomes runs across ALL cycles — retired signals still get WIN/LOSS detected
 // Only dedup (saveSignal) uses getCurrentCycleOpenSignals
@@ -75,6 +173,12 @@ function checkOutcomes(broadcast) {
       const currentRsi = data.rsi || null;
       resolveStaleRecommendations(id, currentRsi, sig.direction);
       const recs = generateRecommendations(sig, data, price);
+      // Partial TP at 1:1 R:R
+      const partialRec = checkPartialTP(sig, price);
+      if (partialRec) recs.push(partialRec);
+      // Time stop on dead trades
+      const timeRec = checkTimeStop(sig);
+      if (timeRec) { timeRec.price = price; recs.push(timeRec); }
       for (const rec of recs) {
         const added = addRecommendation(id, rec);
         if (added) {
@@ -91,7 +195,9 @@ function checkOutcomes(broadcast) {
           if (_sendRecAlert) {
             const pushHigh = rec.urgency === 'HIGH';
             const pushMoveSl = rec.urgency === 'MEDIUM' && rec.type === 'MOVE_SL' && rec.progress_pct >= 80;
-            if (pushHigh || pushMoveSl) {
+            const pushPartial = rec.type === 'PARTIAL_CLOSE';
+            const pushTimeStop = rec.type === 'TIME_STOP';
+            if (pushHigh || pushMoveSl || pushPartial || pushTimeStop) {
               _sendRecAlert(sig, rec).catch(e => console.error('[Telegram] Rec alert error:', e.message));
             }
           }
@@ -136,7 +242,15 @@ function checkOutcomes(broadcast) {
           } catch(e) {}
         }
         updateOutcome(id, outcome, pnlPct);
-        console.log(`[Outcome] ${sig.symbol} ${direction} → ${outcome} (${pnlPct > 0 ? '+' : ''}${pnlPct}%)`);
+        // Categorise outcome
+        try {
+          const cat = categoriseOutcome(sig, outcome);
+          run('UPDATE signals SET outcome_category=?, outcome_notes=? WHERE id=?', [cat.category, cat.notes, id]);
+          persist();
+          console.log(`[Outcome] ${sig.symbol} ${direction} → ${outcome} (${pnlPct > 0 ? '+' : ''}${pnlPct}%) [${cat.category}]`);
+        } catch(e) {
+          console.log(`[Outcome] ${sig.symbol} ${direction} → ${outcome} (${pnlPct > 0 ? '+' : ''}${pnlPct}%)`);
+        }
         if (broadcast) broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction, outcome, pnlPct, ts: Date.now() });
         // Fire Claude learning automatically
         claudeLearner.onOutcome({ ...sig, pnl_pct: pnlPct }, outcome, broadcast).catch(e =>

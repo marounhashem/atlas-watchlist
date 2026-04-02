@@ -142,7 +142,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.7'; // selective event impact for indices/metals, PLATINUM/COPPER macro
+const SCORER_VERSION = '20260401.7'; // partial TP at 1:1, time stop, loss taxonomy
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)

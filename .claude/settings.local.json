@@ -13,7 +13,10 @@
       "Bash(curl -s 'https://nfs.faireconomy.media/ee_calendar_thisweek.json')",
       "Bash(curl -s 'https://nfs.faireconomy.media/mm_calendar_thisweek.json')",
       "Bash(curl -s 'https://nfs.faireconomy.media/cc_calendar_thisweek.json')",
-      "Bash(curl -s 'https://atlas-watchlist-production.up.railway.app/api/debug')"
+      "Bash(curl -s 'https://atlas-watchlist-production.up.railway.app/api/debug')",
+      "Bash(curl -s 'https://atlas-watchlist-production.up.railway.app/api/health')",
+      "Bash(curl -s 'https://atlas-watchlist-production.up.railway.app/api/macro-context')",
+      "Bash(curl -s 'https://atlas-watchlist-production.up.railway.app/api/db-status')"
     ]
   }
 }

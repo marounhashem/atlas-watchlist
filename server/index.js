@@ -1197,6 +1197,35 @@ app.delete('/api/market-intel/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// Loss/Win taxonomy
+app.get('/api/taxonomy', (req, res) => {
+  try {
+    const signals = db.getAllSignals(500).filter(s => s.outcome === 'WIN' || s.outcome === 'LOSS');
+    const losses = {}, wins = {};
+    let lossTotal = 0, winTotal = 0;
+    for (const s of signals) {
+      const cat = s.outcome_category || 'UNKNOWN';
+      if (s.outcome === 'LOSS') { losses[cat] = (losses[cat] || 0) + 1; lossTotal++; }
+      else { wins[cat] = (wins[cat] || 0) + 1; winTotal++; }
+    }
+    const total = lossTotal + winTotal;
+    const mostCommonLoss = Object.entries(losses).sort((a, b) => b[1] - a[1])[0]?.[0] || 'NONE';
+    const insights = {
+      IGNORED_RECS: 'Following HIGH urgency CLOSE recs is your #1 improvement opportunity',
+      WEAK_STRUCTURE: 'Raise minimum structure threshold — lower TF signals are not working',
+      MFE_CAPTURE_FAILURE: 'Partial TP at 1:1 R:R would convert these losses to breakevens',
+      EVENT_RISK: 'Pre-event suppression is working but post-event re-entry needs work',
+      COUNTER_TREND: 'Counter-trend trades are underperforming — consider tighter filtering'
+    };
+    res.json({
+      losses, wins, lossTotal, winTotal,
+      winRate: total > 0 ? Math.round((winTotal / total) * 100) : null,
+      mostCommonLoss,
+      insight: insights[mostCommonLoss] || 'Review loss patterns to find improvement areas'
+    });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 // DB recovery — restore from .bak file if signals were lost
 app.get('/api/db-recover', (req, res) => {
   try {
