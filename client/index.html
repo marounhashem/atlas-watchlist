@@ -559,7 +559,7 @@
   <!-- Signals pane -->
   <div class="main-pane active" id="pane-signals">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0 4px;">
-      <div class="sec" style="margin:0;">Live signals</div>
+      <div class="sec" style="margin:0;">Spot signals</div>
       <div class="filters">
         <div class="fbtn on" onclick="setFilter('ALL')">ALL</div>
         <div class="fbtn" onclick="setFilter('PROCEED')">PROCEED</div>
@@ -1112,7 +1112,6 @@ function renderCard(sig, isPast=false) {
         <span class="csym">${esc(sig.symbol)}</span>
         <span class="clabel">${esc(sig.label)}</span>
         ${isActive?'<span style="display:inline-block;padding:2px 8px;background:rgba(77,158,255,.15);border:1px solid var(--blue,#4d9eff);border-radius:4px;font-size:10px;color:var(--blue,#4d9eff);font-weight:600;letter-spacing:.08em;">● ACTIVE</span>':''}
-        ${sig.is_swing||sig.isSwing?'<span style="display:inline-block;padding:2px 8px;background:rgba(0,212,212,.1);border:1px solid var(--teal,#00d4d4);border-radius:4px;font-size:10px;color:var(--teal,#00d4d4);font-weight:600;">↗ SWING</span>':''}
         ${isPast?'<span style="font-size:10px;color:var(--txt2,var(--muted));background:var(--surface3,#1a1a28);border:1px solid var(--border2,#1e1e2a);border-radius:4px;padding:2px 8px;">PAST</span>':''}
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
@@ -1128,7 +1127,7 @@ function renderCard(sig, isPast=false) {
       <div>
         <div style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:22px;font-weight:800;margin-bottom:10px;color:${d==='LONG'?'var(--green,var(--proceed))':'var(--red,var(--short))'}">${d}</div>
         <div style="display:flex;flex-direction:column;gap:6px;">
-          <div style="display:flex;gap:8px;align-items:center;font-size:13px;"><span style="color:var(--txt3,var(--dim));width:40px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Entry</span><span style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:14px;font-weight:500;">${sig.entry!=null?sig.entry:'—'}</span></div>
+          <div style="display:flex;gap:8px;align-items:center;font-size:13px;"><span style="color:var(--txt3,var(--dim));width:40px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Entry</span><span style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:14px;font-weight:500;">${sig.entry!=null?sig.entry:'—'}</span>${sig.entrySource==='limit_entry'?'<span style="font-size:10px;color:var(--amber,var(--watch));margin-left:6px;">⏳ Limit</span>':''}</div>
           <div style="display:flex;gap:8px;align-items:center;font-size:13px;"><span style="color:var(--txt3,var(--dim));width:40px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">SL</span><span style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:14px;font-weight:500;color:var(--red,var(--short));">${sig.sl!=null?sig.sl:'—'}</span></div>
           <div style="display:flex;gap:8px;align-items:center;font-size:13px;"><span style="color:var(--txt3,var(--dim));width:40px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">TP</span><span style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:14px;font-weight:500;color:var(--green,var(--proceed));">${sig.tp!=null?sig.tp:'—'}</span></div>
           <div style="display:inline-block;padding:2px 8px;background:var(--surface3,#1a1a28);border:1px solid var(--border);border-radius:4px;font-family:var(--mono,'IBM Plex Mono',monospace);font-size:12px;color:var(--txt2,var(--muted));margin-top:4px;">R:R ${sig.rr!=null?'1:'+sig.rr:'—'}</div>

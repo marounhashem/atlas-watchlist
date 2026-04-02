@@ -142,7 +142,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.7'; // partial TP at 1:1, time stop, loss taxonomy
+const SCORER_VERSION = '20260401.8'; // spot focus — RR 2.0, sub-session scoring, spot expiry, spot weights
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -474,7 +474,25 @@ function scoreOrderBook(data, direction) {
 }
 
 function scoreSession(symbol) {
-  return sessionMultiplier(symbol);
+  const now = new Date();
+  const h = now.getUTCHours() + now.getUTCMinutes() / 60;
+
+  // London open (best momentum)
+  if (h >= 7.0 && h < 9.0) return 1.0;
+  // NY-London overlap
+  if (h >= 13.0 && h < 16.0) return 0.95;
+  // London session
+  if (h >= 9.0 && h < 13.0) return 0.85;
+  // NY session
+  if (h >= 16.0 && h < 20.0) return 0.80;
+  // Asia session — full score for Asia pairs
+  if (h >= 0.0 && h < 7.0) {
+    const asiaPairs = ['USDJPY','AUDUSD','NZDUSD','EURJPY','AUDJPY','GBPJPY','J225','HK50','CN50'];
+    return asiaPairs.includes(symbol) ? 0.85 : 0.55;
+  }
+  // NY close / dead zone
+  if (h >= 20.0 && h < 23.0) return 0.45;
+  return 0.40;
 }
 
 function inferDirection(data) {
@@ -1659,14 +1677,21 @@ function scoreSymbol(symbol) {
   // Below 1.5 R:R is not worth taking regardless of score
   // Recalculate after all level adjustments are done
   rr = calcRR(entry, sl, tp, direction);
-  const minRRGate = (cfg.assetClass === 'index' || cfg.assetClass === 'forex') ? 1.8 : 1.5;
-  if (!rr || rr < minRRGate) {
-    console.log(`[Scorer] ${symbol} ${direction} — R:R ${rr} below minimum ${minRRGate}, skipping`);
+  // Minimum R:R: 2.0 for PROCEED, 1.5 for WATCH (below 1.5 = skip entirely)
+  const MIN_RR_PROCEED = 2.0;
+  const MIN_RR_WATCH = 1.5;
+  if (!rr || rr < MIN_RR_WATCH) {
+    console.log(`[Scorer] ${symbol} ${direction} — R:R ${rr} below ${MIN_RR_WATCH}, skipping`);
     return null;
+  }
+  let rrForcedWatch = false;
+  if (rr < MIN_RR_PROCEED) {
+    rrForcedWatch = true; // will cap to WATCH later
   }
 
   // ── Minimum SL distance per asset class ──────────────────────────────────
   // Prevents SL being placed within normal noise range — guaranteed stop-out
+  // Spot SL floors — prevent noise stop-outs
   const minSlPct = { crypto: 0.008, commodity: 0.005, index: 0.003, forex: 0.002 }[cfg.assetClass] || 0.004;
   const slDist = Math.abs(entry - sl) / entry;
   if (slDist < minSlPct) {
@@ -1748,6 +1773,11 @@ function scoreSymbol(symbol) {
   const macroRawVerdict = macroAdjustedScore >= macroEffectiveMin ? 'PROCEED'
     : macroAdjustedScore >= macroEffectiveMin - 8 ? 'WATCH' : 'SKIP';
   let macroVerdict = structureZero && macroRawVerdict === 'PROCEED' ? 'WATCH' : macroRawVerdict;
+  // R:R < 2.0 forces WATCH regardless of score
+  if (rrForcedWatch && macroVerdict === 'PROCEED') {
+    macroVerdict = 'WATCH';
+    eventRiskNote += (eventRiskNote ? ' · ' : '') + `⚠ R:R ${rr} below 2.0 — reduced to WATCH`;
+  }
 
   // ── Event risk tags ──────────────────────────────────────────────────────────
   // Tags surface risk in dashboard/Telegram instead of silently blocking
@@ -2232,7 +2262,8 @@ function saveSignal(scored) {
   }
 
   // Calculate expiry based on asset class
-  const EXPIRY_MS = { forex: 4, index: 8, commodity: 12, crypto: 24 };
+  // Spot expiry — tighter than swing (signals stale faster)
+  const EXPIRY_MS = { forex: 2, index: 3, commodity: 4, crypto: 6 };
   const cfg2 = SYMBOLS[scored.symbol];
   let expiryHours = EXPIRY_MS[cfg2?.assetClass] || 8;
   if (scored.session === 'offHours') expiryHours = Math.round(expiryHours * 1.5);

@@ -47,7 +47,8 @@ function checkTimeStop(sig) {
   const hoursActive = (Date.now() - activeTs) / 3600000;
   const mfePct = sig.mfe_pct || 0;
 
-  const thresholds = { forex: { hours: 6, minMfe: 0.2 }, index: { hours: 4, minMfe: 0.3 }, commodity: { hours: 8, minMfe: 0.3 }, crypto: { hours: 12, minMfe: 0.5 } };
+  // Spot-focused time stops — tighter than swing
+  const thresholds = { forex: { hours: 4, minMfe: 0.15 }, index: { hours: 3, minMfe: 0.20 }, commodity: { hours: 6, minMfe: 0.25 }, crypto: { hours: 8, minMfe: 0.30 } };
   const t = thresholds[cfg.assetClass] || thresholds.forex;
 
   if (hoursActive >= t.hours && mfePct < t.minMfe) {
