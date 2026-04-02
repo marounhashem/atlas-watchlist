@@ -1060,136 +1060,63 @@ function renderRecommendations(sig) {
 
 function renderCard(sig, isPast=false) {
   const v=sig.verdict||'SKIP';
-  if(v==='CLOSED') return `<div class="card closed"><div style="padding:12px 16px;"><span class="csym">${esc(sig.symbol)}</span> <span class="clabel">${esc(sig.label)}</span> <span class="verdict vC">CLOSED</span><div style="font-size:12px;color:var(--txt3,var(--dim));margin-top:6px;">${esc(sig.reasoning||'Market closed')}</div></div></div>`;
+  if(v==='CLOSED') return '';
 
   const d=sig.direction||'—';
   const bd=sig.breakdown||{};
-  const isOpen=sig.outcome==='OPEN'||sig.outcome==='ACTIVE';
-  const outcomeClass = {ACTIVE:'active',WIN:'win',LOSS:'loss',IGNORED:'ignored',REPLACED:'replaced',EXPIRED:'ignored'}[sig.outcome]||'';
   const isActive = sig.outcome==='ACTIVE';
   const ert = sig.event_risk_tag || sig.eventRiskTag;
   const showAgents = v==='PROCEED' || v==='WATCH';
+  const vcls = isActive?'vA':ert==='SUPPRESSED'?'vSUP':ert?'vER':v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
+  const ts = new Date(sig.ts).toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
+  const noOB = (sig.reasoning||'').includes('No Retail OB');
+  const ps = sig.positionSize;
 
-  // Verdict badge
-  const vcls = isActive ? 'vA' : ert==='SUPPRESSED'?'vSUP':ert?'vER':v==='PROCEED'?'vP':v==='WATCH'?'vW':'vS';
-  const ertText = ert==='SUPPRESSED'?'🔕 Suppressed':ert==='PRE_EVENT'?'⚠ Pre-event':ert==='CARRY_RISK'?'⚠ Carry':'';
-
-  // Outcome
-  const outcomeColor = sig.outcome==='WIN'?'var(--green,var(--proceed))':sig.outcome==='LOSS'?'var(--red,var(--short))':'var(--txt3,var(--dim))';
-  const outcomeHtml = !isOpen?`<span style="font-size:11px;font-weight:700;color:${outcomeColor};">${sig.outcome}${sig.pnl_pct!=null?' '+(sig.pnl_pct>0?'+':'')+sig.pnl_pct+'%':''}</span>`:'';
-  const ts = new Date(sig.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});
-  const dateStr = new Date(sig.ts).toLocaleDateString('en-GB',{day:'2-digit',month:'short'});
-
-  // Score styling
-  const scoreCls = v==='PROCEED'?'font-size:40px;font-weight:700;color:var(--txt,var(--text));':ert==='SUPPRESSED'?'font-size:24px;color:var(--txt3,var(--dim));':'font-size:32px;color:var(--txt2,var(--muted));';
+  // Bars helper
+  function bar(lbl,val){const p=Math.round((val||0)*100);const c=p>=70?'var(--green,#00c896)':p>=40?'var(--blue,#4488ff)':'var(--amber,#f5a623)';return `<div style="display:grid;grid-template-columns:68px 1fr 30px;align-items:center;gap:6px;"><span style="font-size:9px;color:var(--txt3,#55556a);text-align:right;white-space:nowrap;">${lbl}</span><div style="height:4px;background:var(--surface3,#1a1a28);border-radius:2px;overflow:hidden;"><div style="height:100%;width:${p}%;background:${c};border-radius:2px;"></div></div><span style="font-family:var(--mono,monospace);font-size:9px;color:var(--txt3,#55556a);text-align:right;">${p}%</span></div>`;}
 
   // Expiry
-  let expiryHtml = '';
-  if (sig.outcome==='OPEN' && sig.expires_at) {
-    const ms=sig.expires_at-Date.now();
-    if(ms<0) expiryHtml=`<div style="color:var(--red,var(--short));font-size:11px;">⚠ Expired</div>`;
-    else { const h=Math.floor(ms/3600000),m=Math.floor((ms%3600000)/60000); expiryHtml=`<div style="color:${ms<1800000?'var(--amber,var(--watch))':'var(--txt3,var(--dim))'};font-size:11px;">⌛ ${h}h ${m}m</div>`; }
-  }
+  let expStr='';if(sig.outcome==='OPEN'&&sig.expires_at){const ms=sig.expires_at-Date.now();if(ms<0)expStr='<span style="color:var(--red,#ff4466);font-size:10px;">⚠Exp</span>';else{const h=Math.floor(ms/3600000),m=Math.floor((ms%3600000)/60000);expStr=`<span style="color:${ms<1800000?'var(--amber,#f5a623)':'var(--txt3,#55556a)'};font-size:10px;">⌛${h}h${m}m</span>`;}}
 
-  // Progress bar helper
-  function pbar(label, val) {
-    const pct=Math.round((val||0)*100);
-    const fill=pct>=85?'var(--green,var(--proceed))':pct<=35?'var(--amber,var(--watch))':'var(--blue,var(--accent))';
-    return `<div style="display:grid;grid-template-columns:80px 1fr 36px;align-items:center;gap:10px;">
-      <span style="font-size:11px;color:var(--txt2,var(--muted));text-align:right;letter-spacing:.04em;">${label}</span>
-      <div style="height:6px;background:var(--surface3,#1a1a28);border-radius:3px;overflow:hidden;max-width:70%;"><div style="height:100%;width:${pct}%;background:${fill};border-radius:3px;transition:width .3s;"></div></div>
-      <span style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:11px;color:var(--txt2,var(--muted));text-align:right;">${pct}%</span>
-    </div>`;
-  }
+  // First active rec
+  let recHtml='';try{const recs=JSON.parse(sig.recommendations||'[]').filter(r=>!r.resolved&&!r.dismissed);if(recs.length){const r=recs[0];const icon=r.urgency==='HIGH'?'🚨':r.type==='PARTIAL_CLOSE'?'⚡':r.type==='TIME_STOP'?'⏱':'⚠';const cls=r.urgency==='HIGH'?'color:var(--red,#ff4466)':r.type==='PARTIAL_CLOSE'?'color:var(--teal,#00d4d4)':r.type==='TIME_STOP'?'color:var(--accent,#8866ff)':'color:var(--amber,#f5a623)';recHtml=`<span style="font-size:11px;${cls};flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${icon} ${r.type} — ${(r.reason||'').slice(0,55)}</span>`;}}catch(e){}
 
-  // Sizing
-  const ps=sig.positionSize;
-  const sizingHtml=ps?`<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:10px 12px;background:var(--bg,#09090f);border-radius:6px;margin:12px 0;">
-    <div><div style="font-size:10px;color:var(--txt3,var(--dim));text-transform:uppercase;letter-spacing:.06em;">Fixed (${ps.fixed.riskPct}%)</div><div style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:13px;color:var(--txt,var(--text));font-weight:500;">${esc(ps.fixed.display)}</div></div>
-    <div><div style="font-size:10px;color:var(--txt3,var(--dim));text-transform:uppercase;letter-spacing:.06em;">Kelly (${ps.kelly.fractionalKellyPct}%)</div><div style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:13px;color:var(--txt,var(--text));font-weight:500;">${esc(ps.kelly.display)}</div></div>
-    <div><div style="font-size:10px;color:var(--txt3,var(--dim));text-transform:uppercase;letter-spacing:.06em;">Margin</div><div style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:13px;color:var(--txt,var(--text));font-weight:500;">~$${ps.fixed.marginRequired?.toLocaleString()}</div></div>
-    <div><div style="font-size:10px;color:var(--txt3,var(--dim));text-transform:uppercase;letter-spacing:.06em;">SL Dist</div><div style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:13px;color:var(--txt,var(--text));font-weight:500;">${ps.fixed.slDistancePct}%</div></div>
-  </div>`:'';
-
-  // Reasoning
-  const reasoning=sig.reasoning||'';
-  const reasonCollapse=(v!=='PROCEED'&&reasoning.length>120);
-  const reasonHtml=reasoning?(reasonCollapse
-    ?`<div class="reason" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:pointer;" onclick="this.style.webkitLineClamp=this.style.webkitLineClamp==='2'?'unset':'2';this.style.overflow=this.style.overflow==='hidden'?'visible':'hidden'">${esc(reasoning)}<span style="color:var(--accent,#8866ff);font-size:11px;margin-left:4px;">▼</span></div>`
-    :`<div class="reason">${esc(reasoning)}</div>`):'';
-
-  return `<div class="card ${v.toLowerCase()} ${outcomeClass}" id="card-${sig.id||sig.symbol}">
-
-    <!-- ROW A: Header -->
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;">
-      <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
-        <span class="csym">${esc(sig.symbol)}</span>
-        <span class="clabel">${esc(sig.label)}</span>
-        ${isActive?'<span style="display:inline-block;padding:2px 8px;background:rgba(77,158,255,.15);border:1px solid var(--blue,#4d9eff);border-radius:4px;font-size:10px;color:var(--blue,#4d9eff);font-weight:600;letter-spacing:.08em;">● ACTIVE</span>':''}
-        ${isPast?'<span style="font-size:10px;color:var(--txt2,var(--muted));background:var(--surface3,#1a1a28);border:1px solid var(--border2,#1e1e2a);border-radius:4px;padding:2px 8px;">PAST</span>':''}
-      </div>
-      <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-        ${outcomeHtml}
-        <span style="font-size:11px;color:var(--txt3,var(--dim));">${dateStr} ${ts}</span>
-      </div>
+  return `<div class="card ${v.toLowerCase()}" id="card-${sig.id||sig.symbol}" style="margin-bottom:6px;">
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);">
+      <span style="font-family:var(--mono,monospace);font-size:14px;font-weight:700;color:var(--text,#e8e8f0);letter-spacing:.04em;min-width:70px;">${esc(sig.symbol)}</span>
+      <span style="font-size:10px;color:var(--txt3,#55556a);">${esc(sig.label)}</span>
+      ${isActive?'<span style="padding:1px 6px;background:#4d9eff18;border:1px solid var(--blue,#4488ff);border-radius:3px;font-size:9px;font-weight:700;color:var(--blue,#4488ff);">●ACTIVE</span>':''}
+      ${isPast?'<span style="padding:1px 6px;background:var(--surface3,#1a1a28);border:1px solid var(--border);border-radius:3px;font-size:9px;color:var(--txt3,#55556a);">PAST</span>':''}
+      <span style="margin-left:auto;"></span>
+      <span class="verdict ${vcls}" style="font-size:10px;padding:2px 8px;">${v}</span>
+      <span style="font-family:var(--mono,monospace);font-size:18px;font-weight:800;color:var(--text,#e8e8f0);min-width:30px;text-align:right;">${sig.score||'—'}</span>
+      <span style="font-family:var(--mono,monospace);font-size:10px;color:var(--txt3,#55556a);">${ts}</span>
     </div>
-
-    <!-- ROW B: Main grid — levels | verdict+score | bars -->
-    <div style="display:grid;grid-template-columns:200px auto 1fr;gap:20px;margin-bottom:14px;">
-
-      <!-- B1: Direction + Levels -->
+    <div style="display:grid;grid-template-columns:180px 1fr;padding:8px 12px;min-height:72px;align-items:center;">
       <div>
-        <div style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:22px;font-weight:800;margin-bottom:10px;color:${d==='LONG'?'var(--green,var(--proceed))':'var(--red,var(--short))'}">${d}</div>
-        <div style="display:flex;flex-direction:column;gap:6px;">
-          <div style="display:flex;gap:8px;align-items:center;font-size:13px;"><span style="color:var(--txt3,var(--dim));width:40px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">Entry</span><span style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:14px;font-weight:500;">${sig.entry!=null?sig.entry:'—'}</span>${sig.entrySource==='limit_entry'?'<span style="font-size:10px;color:var(--amber,var(--watch));margin-left:6px;">⏳ Limit</span>':''}</div>
-          <div style="display:flex;gap:8px;align-items:center;font-size:13px;"><span style="color:var(--txt3,var(--dim));width:40px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">SL</span><span style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:14px;font-weight:500;color:var(--red,var(--short));">${sig.sl!=null?sig.sl:'—'}</span></div>
-          <div style="display:flex;gap:8px;align-items:center;font-size:13px;"><span style="color:var(--txt3,var(--dim));width:40px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;">TP</span><span style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:14px;font-weight:500;color:var(--green,var(--proceed));">${sig.tp!=null?sig.tp:'—'}</span></div>
-          <div style="display:inline-block;padding:2px 8px;background:var(--surface3,#1a1a28);border:1px solid var(--border);border-radius:4px;font-family:var(--mono,'IBM Plex Mono',monospace);font-size:12px;color:var(--txt2,var(--muted));margin-top:4px;">R:R ${sig.rr!=null?'1:'+sig.rr:'—'}</div>
-          ${expiryHtml}
-          ${sig.mfe_pct>0?`<div style="font-family:var(--mono,'IBM Plex Mono',monospace);font-size:12px;color:var(--green,var(--proceed));">MFE +${sig.mfe_pct}%</div>`:''}
+        <div style="font-family:var(--mono,monospace);font-size:16px;font-weight:800;color:${d==='LONG'?'var(--green,#00c896)':'var(--red,#ff4466)'};margin-bottom:3px;">${d}</div>
+        <div style="font-family:var(--mono,monospace);font-size:11px;color:var(--txt3,#55556a);white-space:nowrap;"><span style="color:var(--txt2,#8888aa);">${sig.entry!=null?sig.entry:'—'}</span> <span style="color:var(--border);">/</span> <span style="color:var(--red,#ff4466);">${sig.sl!=null?sig.sl:'—'}</span> <span style="color:var(--border);">/</span> <span style="color:var(--green,#00c896);">${sig.tp!=null?sig.tp:'—'}</span></div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:3px;">
+          <span style="font-family:var(--mono,monospace);font-size:10px;color:var(--txt3,#55556a);background:var(--surface3,#1a1a28);padding:1px 5px;border-radius:3px;">R:R ${sig.rr!=null?sig.rr:'—'}</span>
+          ${sig.mfe_pct>0?`<span style="font-family:var(--mono,monospace);font-size:10px;color:var(--green,#00c896);">+${sig.mfe_pct}%</span>`:''}
+          ${expStr}
+          ${ert?`<span style="font-size:9px;color:var(--amber,#f5a623);">⚠${ert==='PRE_EVENT'?'Pre-event':ert==='CARRY_RISK'?'Carry':ert}</span>`:''}
         </div>
       </div>
-
-      <!-- B2: Verdict + Score -->
-      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:80px;border-left:1px solid var(--border);padding-left:20px;">
-        <div style="font-family:var(--mono,'IBM Plex Mono',monospace);${scoreCls}">${sig.score||'—'}</div>
-        <div style="font-size:10px;color:var(--txt3,var(--dim));text-transform:uppercase;letter-spacing:.1em;">Score</div>
-        <span class="verdict ${vcls}">${v}</span>
-        ${v==='WATCH'&&sig.rr&&sig.rr<2.0?`<div style="font-size:10px;color:var(--dim);">R:R ${sig.rr} < 2.0</div>`:''}
-        ${v==='WATCH'&&sig.weighted_struct_score&&sig.weighted_struct_score<2.0&&!(sig.rr<2.0)?`<div style="font-size:10px;color:var(--dim);">Weak structure</div>`:''}
-        ${ertText?`<div style="font-size:11px;color:var(--amber,var(--watch));opacity:.85;">${ertText}</div>`:''}
-      </div>
-
-      <!-- B3: Score bars -->
-      <div style="display:flex;flex-direction:column;justify-content:center;gap:10px;">
-        ${bd.bias!=null?(()=>{
-          const noOB=(sig.reasoning||'').includes('No Retail OB');
-          return noOB
-            ? [pbar('Technical',bd.bias),pbar('Session',bd.session),'<div style="font-size:11px;color:var(--txt3,var(--dim));font-style:italic;text-align:right;margin-top:4px;">No Retail Order Book data</div>'].join('')
-            : [pbar('Technical',bd.bias),pbar('Sentiment',bd.fxssi),pbar('OB Levels',bd.ob),pbar('Session',bd.session)].join('');
-        })():''}
-      </div>
-
+      ${noOB?`<div style="font-size:10px;color:var(--txt3,#55556a);padding-left:12px;border-left:1px solid var(--border);font-style:italic;">No Retail OB — Technical only<br>${bar('Technical',bd.bias)}${bar('Session',bd.session)}</div>`:
+      `<div style="display:flex;flex-direction:column;gap:5px;padding-left:12px;border-left:1px solid var(--border);">${bar('Technical',bd.bias)}${bar('Sentiment',bd.fxssi)}${bar('OB Levels',bd.ob)}${bar('Session',bd.session)}</div>`}
     </div>
-
-    <!-- ROW C: Position sizing -->
-    ${sizingHtml}
-
-    <!-- ROW D: Reasoning -->
-    ${reasonHtml}
-
-    <!-- ROW E: Footer -->
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;">
-      <div style="display:flex;align-items:center;gap:6px;">
-        ${sig.outcome==='ACTIVE'?'<span style="font-size:11px;color:#ffd740;">● MONITORING</span>':''}
-        ${renderRecommendations(sig)}
+    ${ps?`<div style="display:flex;gap:0;background:var(--bg,#09090f);border-top:1px solid var(--border);padding:5px 12px;font-family:var(--mono,monospace);font-size:10px;color:var(--txt3,#55556a);">${[`<span style="padding-right:14px;border-right:1px solid var(--border);margin-right:14px;"><span style="font-size:8px;text-transform:uppercase;letter-spacing:.08em;opacity:.7;">Fixed</span><br><span style="font-size:11px;color:var(--txt2,#8888aa);font-weight:600;">${esc(ps.fixed.display)}</span></span>`,`<span style="padding-right:14px;border-right:1px solid var(--border);margin-right:14px;"><span style="font-size:8px;text-transform:uppercase;letter-spacing:.08em;opacity:.7;">Kelly</span><br><span style="font-size:11px;color:var(--txt2,#8888aa);font-weight:600;">${esc(ps.kelly.display)}</span></span>`,`<span style="padding-right:14px;border-right:1px solid var(--border);margin-right:14px;"><span style="font-size:8px;text-transform:uppercase;letter-spacing:.08em;opacity:.7;">Margin</span><br><span style="font-size:11px;color:var(--txt2,#8888aa);font-weight:600;">~$${ps.fixed.marginRequired}</span></span>`,`<span><span style="font-size:8px;text-transform:uppercase;letter-spacing:.08em;opacity:.7;">SL</span><br><span style="font-size:11px;color:var(--txt2,#8888aa);font-weight:600;">${ps.fixed.slDistancePct}%</span></span>`].join('')}</div>`:''}
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 12px;border-top:1px solid var(--border);min-height:28px;">
+      <div style="display:flex;align-items:center;gap:6px;flex:1;overflow:hidden;">
+        ${recHtml || `<button style="font-size:9px;color:var(--txt3,#55556a);cursor:pointer;border:none;background:none;letter-spacing:.04em;opacity:.7;" onclick="const el=document.getElementById('reason-${sig.id||sig.symbol}');if(el){el.style.display=el.style.display==='none'?'block':'none';this.textContent=el.style.display==='none'?'▼ reasoning':'▲ hide';}">▼ reasoning</button>`}
       </div>
-      <div style="display:flex;align-items:center;gap:6px;">
-        ${showAgents?`<button style="display:inline-flex;align-items:center;gap:6px;padding:6px 14px;background:transparent;border:1px solid var(--accent,#8866ff);border-radius:6px;color:var(--txt2,var(--muted));font-size:12px;cursor:pointer;" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</button>`:''}
-        ${showAgents?`<button style="padding:6px 10px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--txt3,var(--dim));cursor:pointer;font-size:12px;" onclick="copyTradeDossier('${sig.id||sig.symbol}')">⊞</button>`:''}
-        <span style="font-size:10px;color:var(--txt3,var(--dim));font-family:var(--mono,'IBM Plex Mono',monospace);">${sig.scorer_version||''}</span>
+      <div style="display:flex;gap:4px;align-items:center;flex-shrink:0;">
+        ${showAgents?`<button style="padding:3px 10px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--txt3,#55556a);font-size:10px;font-weight:600;cursor:pointer;" onclick="toggleAgents('${sig.id||sig.symbol}',this)">▼ ANALYSE</button>`:''}
+        ${showAgents?`<button style="padding:3px 7px;background:transparent;border:1px solid var(--border);border-radius:3px;color:var(--txt3,#55556a);font-size:11px;cursor:pointer;" onclick="copyTradeDossier('${sig.id||sig.symbol}')">⊞</button>`:''}
       </div>
     </div>
+    <div id="reason-${sig.id||sig.symbol}" style="display:none;padding:8px 12px;font-size:11px;color:#7070a0;line-height:1.6;border-top:1px solid var(--border);background:var(--bg,#09090f);">${esc(sig.reasoning||'')}</div>
     ${showAgents?`<div class="agents-panel" id="agents-${sig.id||sig.symbol}">
       <div class="agent-tabs">
         <div class="atab active" onclick="switchTab('${sig.id||sig.symbol}','research')">RESEARCH</div>
