@@ -1205,19 +1205,34 @@ app.get('/api/market-intel', (req, res) => {
 app.post('/api/market-intel', async (req, res) => {
   const { content, symbol, expiresInHours } = req.body;
   if (!content) return res.status(400).json({ error: 'Need content' });
+
+  // Clean input before processing
+  const cleaned = content
+    .replace(/\[\d+\/\d+\/\d{4}\s+\d+:\d+\s+[AP]M\]/g, '')
+    .replace(/Capital\.com International:/g, '')
+    .replace(/[├└│┌┐┘┤┬┴┼─]/g, '-')
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\s{3,}/g, ' ')
+    .replace(/CFDs are complex instruments.*?money\./gs, '')
+    .replace(/Past performance.*?results\)/g, '')
+    .replace(/Opinions shared.*?only\./g, '')
+    .trim();
+
   const { resolveSymbol } = require('./symbolAliases');
-  const resolvedSym = symbol || resolveSymbol(content) || null;
+  const resolvedSym = symbol || resolveSymbol(cleaned) || null;
   const validExpiries = [4, 8, 24, 48, 72, 168];
   let expiry = validExpiries.includes(Number(expiresInHours)) ? Number(expiresInHours) : 24;
 
-  // Analyse with Haiku
+  // Analyse with Haiku (system + user message for better instruction following)
   let analysis = null;
   try {
     if (process.env.ANTHROPIC_API_KEY) {
-      const prompt = `Analyse this market research note. Return ONLY valid JSON, no markdown:\n{"summary":"<2 sentences max>","bias":"BULLISH|BEARISH|NEUTRAL|MIXED","affected_symbols":["SYMBOL"],"key_levels":["level"],"time_horizon":"INTRADAY|SWING|LONG_TERM"}\n\nValid symbols: GOLD,SILVER,OILWTI,BTCUSD,ETHUSD,US30,US100,US500,DE40,UK100,J225,HK50,CN50,COPPER,PLATINUM,EURUSD,GBPUSD,USDJPY,USDCHF,USDCAD,AUDUSD,NZDUSD,EURJPY,EURGBP,EURAUD,EURCHF,GBPJPY,GBPCHF,AUDJPY\nAliases: NKD/Nikkei=J225, WTI/Crude=OILWTI, Dow=US30, Nasdaq=US100, SPX=US500, DAX=DE40, FTSE=UK100\n\nResearch:\n${content}`;
+      const sysPrompt = 'You are a market research analyser for a trading system. Extract the key trading insight from research notes. Ignore timestamps, disclaimers, source attribution. Focus only on: market direction, affected assets, key price levels, and time horizon. Return ONLY valid JSON. No markdown. No explanation.';
+      const userPrompt = `Analyse this market research. Return ONLY this JSON:\n{"summary":"<2 sentences max — key trading insight only>","bias":"BULLISH|BEARISH|NEUTRAL|MIXED","affected_symbols":["SYMBOL"],"key_levels":["level"],"time_horizon":"INTRADAY|SWING|LONG_TERM"}\n\nValid symbols: GOLD,SILVER,OILWTI,BTCUSD,ETHUSD,US30,US100,US500,DE40,UK100,J225,HK50,CN50,COPPER,PLATINUM,EURUSD,GBPUSD,USDJPY,USDCHF,USDCAD,AUDUSD,NZDUSD,EURJPY,EURGBP,EURAUD,EURCHF,GBPJPY,GBPCHF,AUDJPY\nAliases: NKD/Nikkei=J225, WTI/Crude=OILWTI, Dow=US30, Nasdaq=US100, S&P=US500, DAX=DE40, FTSE=UK100, BTC=BTCUSD\n\nResearch:\n${cleaned}`;
       const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 300, messages: [{ role: 'user', content: prompt }] })
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 300, system: sysPrompt, messages: [{ role: 'user', content: userPrompt }] })
       });
       const apiData = await apiRes.json();
       const text = apiData.content?.[0]?.text || '{}';
@@ -1226,19 +1241,17 @@ app.post('/api/market-intel', async (req, res) => {
     }
   } catch(e) { console.error('[Intel] Haiku error:', e.message); }
 
-  // Suggest expiry based on horizon
   const suggestedExpiry = analysis?.time_horizon === 'INTRADAY' ? 8 : analysis?.time_horizon === 'SWING' ? 72 : analysis?.time_horizon === 'LONG_TERM' ? 168 : 24;
-  // Use suggested if user didn't override
   if (!expiresInHours) expiry = suggestedExpiry;
 
-  const id = db.insertMarketIntel(content, resolvedSym || analysis?.affected_symbols?.[0] || null, analysis, expiry);
+  // Store CLEANED content + analysis
+  const id = db.insertMarketIntel(cleaned, resolvedSym || analysis?.affected_symbols?.[0] || null, analysis, expiry);
   res.json({
     ok: true, id, symbol: resolvedSym || 'global',
     summary: analysis?.summary, bias: analysis?.bias,
     affected_symbols: analysis?.affected_symbols, key_levels: analysis?.key_levels,
     time_horizon: analysis?.time_horizon,
-    suggested_expiry_hours: suggestedExpiry,
-    expires_in_hours: expiry
+    suggested_expiry_hours: suggestedExpiry, expires_in_hours: expiry
   });
 });
 

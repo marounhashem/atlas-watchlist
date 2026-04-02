@@ -1947,7 +1947,7 @@ async function loadIntel() {
             <button onclick="deleteIntel(${i.id})" style="background:transparent;border:none;color:var(--dim);font-size:16px;cursor:pointer;padding:2px 6px;border-radius:4px;line-height:1;" onmouseover="this.style.color='var(--red,var(--short))'" onmouseout="this.style.color='var(--dim)'" title="Delete">×</button>
           </div>
         </div>
-        <div style="font-size:13px;color:var(--txt2,var(--muted));line-height:1.6;margin-bottom:8px;">${esc(i.summary || i.content)}</div>
+        <div style="font-size:13px;color:var(--txt2,var(--muted));line-height:1.6;margin-bottom:8px;">${esc(i.summary || (i.content||'').slice(0,200)+(i.content?.length>200?'...':''))}</div>
         ${symBadges ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">${symBadges}</div>` : ''}
         ${lvls}
       </div>`;
