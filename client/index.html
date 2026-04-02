@@ -240,12 +240,13 @@
     grid-template-columns:190px 118px 1fr;
     border-bottom:1px solid #12121e;
     min-height:88px;
+    gap:1px;
+    background:#111120;
   }
   .card-levels{
     display:flex;flex-direction:column;
     justify-content:center;gap:8px;
     padding:10px 12px 10px 16px;
-    border-right:1px solid #12121e;
     background:#0e0e1a;
   }
   .card-direction{
@@ -265,7 +266,7 @@
   }
   .card-lvl-name{
     font-size:8px;font-weight:700;
-    letter-spacing:.14em;text-transform:uppercase;color:#44445a;
+    letter-spacing:.14em;text-transform:uppercase;color:#555575;
   }
   .card-lvl-val{
     font-family:'JetBrains Mono',monospace;
@@ -290,7 +291,6 @@
     display:flex;flex-direction:column;
     justify-content:center;gap:7px;
     padding:10px 10px;
-    border-right:1px solid #12121e;
     background:#0d0d19;
   }
   .bar-row{
@@ -298,7 +298,7 @@
     grid-template-columns:52px 1fr 24px;
     align-items:center;gap:5px;
   }
-  .bar-name{font-size:8px;font-weight:600;color:#5a5a7a;text-align:right;white-space:nowrap;}
+  .bar-name{font-size:9px;font-weight:700;color:#6868a0;text-align:right;white-space:nowrap;}
   .bar-track{height:4px;background:#111120;border-radius:2px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.4);}
   .bar-fill{height:100%;border-radius:2px;}
   .bar-hi{background:#00c880;box-shadow:0 0 5px rgba(0,200,128,.25);}
@@ -306,7 +306,7 @@
   .bar-lo{background:#e0a030;box-shadow:0 0 5px rgba(224,160,48,.25);}
   .bar-pct{
     font-family:'JetBrains Mono',monospace;
-    font-size:8px;color:#5a5a7a;text-align:right;font-weight:600;
+    font-size:9px;color:#6868a0;text-align:right;font-weight:700;
   }
   .no-ob-note{
     font-size:9px;color:#282840;font-style:italic;
@@ -317,7 +317,7 @@
   /* ── CARD REASONING ── */
   .card-reasoning{
     padding:10px 14px;
-    font-size:11px;color:#6868a0;line-height:1.85;
+    font-size:11.5px;color:#8080b8;font-weight:500;line-height:1.9;
     display:-webkit-box;
     -webkit-line-clamp:4;
     -webkit-box-orient:vertical;
@@ -356,11 +356,11 @@
     font-size:10px;font-weight:500;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
-  .rec-high{color:#c05070;}
-  .rec-medium{color:#c08830;}
+  .rec-high{color:#cc5570;}
+  .rec-medium{color:#cc8830;}
   .rec-partial{color:#00b8b8;}
   .rec-time{color:#9966dd;}
-  .rec-none{color:#252538;}
+  .rec-none{color:#333358;}
   .card-footer-right{
     display:flex;align-items:center;gap:5px;flex-shrink:0;
   }
