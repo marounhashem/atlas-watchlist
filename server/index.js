@@ -1191,8 +1191,11 @@ app.get('/api/market-intel', (req, res) => {
 app.post('/api/market-intel', (req, res) => {
   const { content, symbol } = req.body;
   if (!content) return res.status(400).json({ error: 'Need content' });
-  db.insertMarketIntel(content, symbol || null);
-  res.json({ ok: true, symbol: symbol || 'global' });
+  const { resolveSymbol } = require('./symbolAliases');
+  // Auto-detect symbol from content if not explicitly provided
+  const resolvedSym = symbol || resolveSymbol(content) || null;
+  db.insertMarketIntel(content, resolvedSym);
+  res.json({ ok: true, symbol: resolvedSym || 'global', autoDetected: !symbol && !!resolvedSym });
 });
 
 app.delete('/api/market-intel/:id', (req, res) => {
@@ -1362,18 +1365,9 @@ app.post('/api/trade-feedback', (req, res) => {
     return result;
   }
 
-  // Auto-detect symbol
-  const aliases = {
-    gold:'GOLD',silver:'SILVER',oil:'OILWTI',bitcoin:'BTCUSD',btc:'BTCUSD',eth:'ETHUSD',
-    nasdaq:'US100',nas100:'US100',ndx:'US100',dow:'US30',dji:'US30',
-    euro:'EURUSD',eur:'EURUSD',pound:'GBPUSD',gbp:'GBPUSD',yen:'USDJPY',jpy:'USDJPY',
-    aussie:'AUDUSD',aud:'AUDUSD',dax:'DE40',ftse:'UK100',nikkei:'J225',
-    copper:'COPPER',platinum:'PLATINUM','sp500':'US500','s&p':'US500',spx:'US500'
-  };
-  const lower = idea.toLowerCase();
-  let symbol = null;
-  for (const sym of Object.keys(SYMBOLS)) { if (lower.includes(sym.toLowerCase())) { symbol = sym; break; } }
-  if (!symbol) { for (const [alias, sym] of Object.entries(aliases)) { if (lower.includes(alias)) { symbol = sym; break; } } }
+  // Auto-detect symbol using alias mapping
+  const { resolveSymbol } = require('./symbolAliases');
+  let symbol = resolveSymbol(idea);
 
   // Direction — includes Buy Limit / Sell Limit
   let direction = null;
