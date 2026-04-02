@@ -15,12 +15,13 @@ const FF_NEXT = 'https://nfs.faireconomy.media/ff_calendar_nextweek.json';
 
 const RELEVANT_CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD'];
 
-// Currency → affected ATLAS symbols
+// Currency → affected ATLAS symbols (forex pairs always affected by their currency)
+// Indices and commodities use selective routing via isEventRelevant()
 const EVENT_IMPACT_SYMBOLS = {
-  USD: ['GOLD','SILVER','OILWTI','BTCUSD','US30','US100','US500','COPPER','PLATINUM',
+  USD: ['OILWTI','BTCUSD',
         'EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD',
         'EURJPY','GBPJPY','AUDJPY','EURAUD','EURGBP','EURCHF','GBPCHF'],
-  EUR: ['EURUSD','EURGBP','EURJPY','EURAUD','EURCHF','GOLD','DE40'],
+  EUR: ['EURUSD','EURGBP','EURJPY','EURAUD','EURCHF','DE40'],
   GBP: ['GBPUSD','EURGBP','GBPJPY','GBPCHF','UK100'],
   JPY: ['USDJPY','EURJPY','GBPJPY','AUDJPY','J225'],
   AUD: ['AUDUSD','EURAUD','AUDJPY','NZDUSD'],
@@ -29,6 +30,34 @@ const EVENT_IMPACT_SYMBOLS = {
   CHF: ['USDCHF','EURCHF','GBPCHF'],
   CNY: ['CN50','HK50','COPPER'],
 };
+
+// Events that actually move indices (macro, political, monetary)
+const INDEX_MOVING_KEYWORDS = [
+  'Non-Farm', 'NFP', 'FOMC', 'Fed Chair', 'Federal Reserve', 'Powell',
+  'CPI', 'GDP', 'Retail Sales', 'ISM Manufacturing', 'ISM Services',
+  'Trump', 'President', 'Tariff', 'PCE', 'Consumer Confidence'
+];
+
+// Events that move precious metals (monetary, political, safe-haven)
+const METALS_MOVING_KEYWORDS = [
+  'Non-Farm', 'NFP', 'FOMC', 'Fed Chair', 'Powell', 'CPI', 'GDP',
+  'Trump', 'President', 'Tariff', 'PCE', 'Rate Decision'
+];
+
+const INDEX_SYMBOLS = ['US30','US100','US500','DE40','UK100','J225','HK50','CN50'];
+const METALS_SYMBOLS = ['GOLD','SILVER','PLATINUM','COPPER'];
+
+// Check if an event is relevant to a specific symbol
+function isEventRelevant(eventTitle, symbol) {
+  const title = eventTitle.toLowerCase();
+  if (INDEX_SYMBOLS.includes(symbol)) {
+    return INDEX_MOVING_KEYWORDS.some(k => title.includes(k.toLowerCase()));
+  }
+  if (METALS_SYMBOLS.includes(symbol)) {
+    return METALS_MOVING_KEYWORDS.some(k => title.includes(k.toLowerCase()));
+  }
+  return true; // forex pairs + OILWTI + crypto: always relevant
+}
 
 // Post-event suppression: { symbol: suppressUntilTs }
 const postEventSuppression = {};
@@ -147,12 +176,17 @@ async function fetchCalendarURL(url) {
 }
 
 // ── Build affected symbols for an event ─────────────────────────────────────
-function buildAffectedSymbols(currency, feedSources) {
+function buildAffectedSymbols(currency, feedSources, eventTitle) {
   const symbols = new Set(EVENT_IMPACT_SYMBOLS[currency] || []);
-  // Add feed-specific symbols
   for (const src of feedSources) {
     const feed = FEEDS.find(f => f.name === src);
     if (feed?.symbols) feed.symbols.forEach(s => symbols.add(s));
+  }
+  // Political/Fed speeches route to all precious metals + indices
+  const title = (eventTitle || '').toLowerCase();
+  if (title.includes('trump') || title.includes('president') || title.includes('fed chair') || title.includes('powell')) {
+    METALS_SYMBOLS.forEach(s => symbols.add(s));
+    INDEX_SYMBOLS.forEach(s => symbols.add(s));
   }
   return Array.from(symbols);
 }
@@ -239,7 +273,7 @@ async function runCalendarCheck(broadcast) {
         const wasFired = markEventFired(eventId, sentiment);
         if (wasFired) {
           fired++;
-          const affectedSymbols = buildAffectedSymbols(e.country, sourcesArr);
+          const affectedSymbols = buildAffectedSymbols(e.country, sourcesArr, e.title);
 
           const suppressUntil = Date.now() + SUPPRESSION_MS;
           for (const sym of affectedSymbols) {
@@ -290,13 +324,21 @@ function isPreEventRisk(symbol, hours = 2) {
     const now = new Date();
 
     for (const r of rows) {
-      const affected = EVENT_IMPACT_SYMBOLS[r.currency] || [];
-      // Also check feed-specific symbols from any feed that tracks this currency
-      const allAffected = new Set(affected);
+      // Build affected symbols list from currency + feed-specific
+      const affected = new Set(EVENT_IMPACT_SYMBOLS[r.currency] || []);
       for (const f of FEEDS) {
-        if (f.symbols) f.symbols.forEach(s => allAffected.add(s));
+        if (f.symbols) f.symbols.forEach(s => affected.add(s));
       }
-      if (!allAffected.has(symbol)) continue;
+      // Political/Fed speeches also affect precious metals
+      const title = (r.title || '').toLowerCase();
+      if (title.includes('trump') || title.includes('president') || title.includes('fed chair') || title.includes('powell')) {
+        METALS_SYMBOLS.forEach(s => affected.add(s));
+        INDEX_SYMBOLS.forEach(s => affected.add(s));
+      }
+      if (!affected.has(symbol)) continue;
+
+      // Selective: indices and metals only penalised for relevant events
+      if (!isEventRelevant(r.title, symbol)) continue;
 
       const eventTs = new Date(r.event_date + 'T' + (r.event_time || '12:00:00') + 'Z');
       const minutesUntil = Math.round((eventTs - now) / 60000);

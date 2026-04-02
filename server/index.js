@@ -1881,7 +1881,9 @@ async function runMacroContextFetch(broadcast) {
     EURUSD: `EURUSD outlook today ${dateStr} — last 12 hours Fed ECB USD strength`,
     GBPUSD: `GBPUSD outlook today ${dateStr} — last 12 hours BOE Fed USD`,
     USDJPY: `USDJPY outlook today ${dateStr} — last 12 hours BOJ Fed USD strength carry`,
-    AUDUSD: `AUDUSD outlook today ${dateStr} — last 12 hours RBA China commodity`
+    AUDUSD: `AUDUSD outlook today ${dateStr} — last 12 hours RBA China commodity`,
+    PLATINUM: `Platinum price outlook today ${dateStr} — search last 12 hours — precious metals, USD strength, safe haven flows, industrial demand`,
+    COPPER: `Copper price outlook today ${dateStr} — search last 12 hours — China demand, USD, industrial activity, trade tariffs`
   };
 
   for (const [symbol, baseQuery] of Object.entries(symbolQueries)) {
