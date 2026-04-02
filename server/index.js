@@ -1262,6 +1262,31 @@ app.get('/api/taxonomy', (req, res) => {
   } catch(e) { res.json({ error: e.message }); }
 });
 
+// Calendar debug — shows stored events with computed UTC and fired status
+app.get('/api/calendar-debug', (req, res) => {
+  try {
+    const now = new Date();
+    const events = db.getAllEconomicEvents().slice(0, 15);
+    res.json({
+      server_utc: now.toISOString(),
+      server_ts: now.getTime(),
+      events: events.map(e => {
+        const dtStr = e.event_date + 'T' + (e.event_time || '00:00:00') + 'Z';
+        const eventTs = new Date(dtStr).getTime();
+        const minutesUntil = Math.round((eventTs - now.getTime()) / 60000);
+        return {
+          title: e.title, currency: e.currency,
+          stored_date: e.event_date, stored_time: e.event_time,
+          fired_in_db: e.fired, actual: e.actual,
+          computed_utc: dtStr,
+          minutes_until: minutesUntil,
+          should_be_fired: eventTs < now.getTime()
+        };
+      })
+    });
+  } catch(e) { res.json({ error: e.message }); }
+});
+
 // DB recovery — restore from .bak file if signals were lost
 app.get('/api/db-recover', (req, res) => {
   try {

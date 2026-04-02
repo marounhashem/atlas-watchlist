@@ -241,11 +241,10 @@ async function runCalendarCheck(broadcast) {
     console.log(`[Calendar] Processing ${highImpact.length} HIGH impact events for storage...`);
 
     for (const { event: e, sources } of highImpact) {
-      // FF dates include timezone offset (e.g. "2026-04-01T21:00:00-04:00")
-      // Parse as Date to get correct UTC, then store UTC date/time
-      const parsed = new Date(e.date);
-      const eventDate = isNaN(parsed) ? e.date.slice(0, 10) : parsed.toISOString().slice(0, 10);
-      const eventTime = isNaN(parsed) ? (e.date.slice(11, 19) || null) : parsed.toISOString().slice(11, 19);
+      // FF dates are already in UTC — store as-is, no timezone conversion
+      const eventDate = e.date ? e.date.slice(0, 10) : null;
+      const eventTime = e.date ? e.date.slice(11, 19) || null : null;
+      if (!eventDate) continue;
       const eventId = `${e.country}_${eventDate}_${e.title}`;
       const sourcesArr = Array.from(sources);
 
