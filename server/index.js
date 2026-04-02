@@ -1203,12 +1203,14 @@ app.get('/api/market-intel', (req, res) => {
 });
 
 app.post('/api/market-intel', async (req, res) => {
-  const { content, symbol } = req.body;
+  const { content, symbol, expiresInHours } = req.body;
   if (!content) return res.status(400).json({ error: 'Need content' });
   const { resolveSymbol } = require('./symbolAliases');
   const resolvedSym = symbol || resolveSymbol(content) || null;
+  const validExpiries = [4, 8, 24, 48, 72, 168];
+  let expiry = validExpiries.includes(Number(expiresInHours)) ? Number(expiresInHours) : 24;
 
-  // Analyse with Haiku if API key available
+  // Analyse with Haiku
   let analysis = null;
   try {
     if (process.env.ANTHROPIC_API_KEY) {
@@ -1220,17 +1222,40 @@ app.post('/api/market-intel', async (req, res) => {
       const apiData = await apiRes.json();
       const text = apiData.content?.[0]?.text || '{}';
       analysis = JSON.parse(text.replace(/```json|```/g, '').trim());
-      console.log(`[Intel] Haiku analysis: ${analysis.bias} — ${analysis.summary?.slice(0, 80)}`);
+      console.log(`[Intel] Haiku: ${analysis.bias} — ${analysis.summary?.slice(0, 80)}`);
     }
-  } catch(e) { console.error('[Intel] Haiku analysis error:', e.message); }
+  } catch(e) { console.error('[Intel] Haiku error:', e.message); }
 
-  const id = db.insertMarketIntel(content, resolvedSym || analysis?.affected_symbols?.[0] || null, analysis);
-  res.json({ ok: true, id, symbol: resolvedSym || 'global', ...analysis });
+  // Suggest expiry based on horizon
+  const suggestedExpiry = analysis?.time_horizon === 'INTRADAY' ? 8 : analysis?.time_horizon === 'SWING' ? 72 : analysis?.time_horizon === 'LONG_TERM' ? 168 : 24;
+  // Use suggested if user didn't override
+  if (!expiresInHours) expiry = suggestedExpiry;
+
+  const id = db.insertMarketIntel(content, resolvedSym || analysis?.affected_symbols?.[0] || null, analysis, expiry);
+  res.json({
+    ok: true, id, symbol: resolvedSym || 'global',
+    summary: analysis?.summary, bias: analysis?.bias,
+    affected_symbols: analysis?.affected_symbols, key_levels: analysis?.key_levels,
+    time_horizon: analysis?.time_horizon,
+    suggested_expiry_hours: suggestedExpiry,
+    expires_in_hours: expiry
+  });
 });
 
 app.delete('/api/market-intel/:id', (req, res) => {
-  db.deleteIntel(parseInt(req.params.id));
-  res.json({ ok: true });
+  const id = parseInt(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid id' });
+  db.deleteIntel(id);
+  console.log(`[Intel] Deleted intel id:${id}`);
+  res.json({ ok: true, deleted: id });
+});
+
+app.delete('/api/market-intel', (req, res) => {
+  db.clearExpiredIntel(); // clear expired
+  db.run('DELETE FROM market_intel'); // clear all
+  db.persist();
+  console.log('[Intel] All intel cleared');
+  res.json({ ok: true, message: 'All intel cleared' });
 });
 
 // Loss/Win taxonomy

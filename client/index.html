@@ -622,12 +622,21 @@
         <span id="intel-badge" style="font-size:11px;color:var(--amber,var(--watch));"></span>
       </div>
       <div style="background:var(--surface,#0f0f18);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px;">
-        <textarea id="intel-input" placeholder="Paste research, analyst notes, breaking news...&#10;Claude Haiku will summarise and detect affected symbols." style="width:100%;min-height:120px;background:var(--bg,#09090f);border:1px solid var(--border);border-radius:6px;padding:10px;color:var(--text);font-size:13px;resize:vertical;font-family:var(--sans,'Inter',sans-serif);line-height:1.5;"></textarea>
-        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
-          <input id="intel-symbol" type="text" placeholder="Symbol (auto-detected)" style="width:140px;background:var(--bg,#09090f);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-size:12px;text-transform:uppercase;">
-          <button onclick="injectIntel()" id="intel-inject-btn" style="padding:8px 20px;background:var(--amber,var(--watch));border:none;border-radius:6px;color:#000;font-size:12px;font-weight:700;cursor:pointer;">ANALYSE & INJECT</button>
+        <textarea id="intel-input" placeholder="Paste research, analyst notes, breaking news...&#10;Claude Haiku will summarise and detect affected symbols." style="width:100%;min-height:120px;background:var(--bg,#09090f);border:1px solid var(--border);border-radius:6px;padding:10px;color:var(--text);font-size:13px;resize:vertical;font-family:var(--sans,'Inter',sans-serif);line-height:1.5;box-sizing:border-box;"></textarea>
+        <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
+          <input id="intel-symbol" type="text" placeholder="Symbol (auto)" style="width:120px;background:var(--bg,#09090f);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-size:12px;text-transform:uppercase;">
+          <select id="intel-expiry" style="background:var(--bg,#09090f);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-size:12px;">
+            <option value="4">4 hours</option>
+            <option value="8">8 hours</option>
+            <option value="24" selected>24 hours</option>
+            <option value="48">48 hours</option>
+            <option value="72">72 hours</option>
+            <option value="168">1 week</option>
+          </select>
+          <button onclick="injectIntel()" id="intel-inject-btn" style="padding:8px 20px;background:var(--amber,var(--watch));border:none;border-radius:6px;color:#000;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;">ANALYSE & INJECT</button>
         </div>
       </div>
+      <div id="intel-preview" style="display:none;"></div>
       <div id="intel-list"></div>
     </div>
   </div>
@@ -1961,6 +1970,23 @@ function renderGlobalSignals() {
 }
 
 // ── Intel panel ─────────────────────────────────────────────────────────────
+function getSymbolAssetClass(s) {
+  if (['US30','US100','US500','DE40','UK100','J225','HK50','CN50'].includes(s)) return 'index';
+  if (['GOLD','SILVER','OILWTI','COPPER','PLATINUM'].includes(s)) return 'commodity';
+  if (['BTCUSD','ETHUSD'].includes(s)) return 'crypto';
+  return 'forex';
+}
+function fmtIntelExpiry(ea) {
+  const r = ea - Date.now(); if (r <= 0) return { text: 'EXPIRED', cls: 'urgent' };
+  const h = Math.floor(r/3600000), m = Math.floor((r%3600000)/60000);
+  if (h >= 48) return { text: `${Math.floor(h/24)}d ${h%24}h`, cls: h >= 120 ? 'week' : 'normal' };
+  if (h >= 1) return { text: `${h}h ${m}m`, cls: h <= 4 ? 'warning' : 'normal' };
+  return { text: `${m}m`, cls: 'urgent' };
+}
+const symBadgeColors = { index: 'var(--teal)', forex: 'var(--blue,var(--accent))', commodity: 'var(--amber,var(--watch))', crypto: 'var(--accent,#8866ff)' };
+const biasColors = { BULLISH: 'var(--green,var(--proceed))', BEARISH: 'var(--red,var(--short))', NEUTRAL: 'var(--dim)', MIXED: 'var(--amber,var(--watch))' };
+const horizColors = { INTRADAY: 'var(--blue,var(--accent))', SWING: 'var(--teal)', LONG_TERM: 'var(--accent,#8866ff)' };
+
 async function loadIntel() {
   try {
     const res = await fetch('/api/market-intel');
@@ -1968,38 +1994,33 @@ async function loadIntel() {
     const list = document.getElementById('intel-list');
     const badge = document.getElementById('intel-badge');
     if (!Array.isArray(data) || data.length === 0) {
-      if (list) list.innerHTML = '<div style="font-size:12px;color:var(--dim);padding:12px;">No active intel. Paste research notes above to inject.</div>';
+      if (list) list.innerHTML = '<div style="font-size:12px;color:var(--dim);padding:12px;">No active intel.</div>';
       if (badge) badge.textContent = '';
       return;
     }
-    if (badge) badge.textContent = `Active: ${data.length} items`;
-    const biasColors = { BULLISH: 'var(--green,var(--proceed))', BEARISH: 'var(--red,var(--short))', NEUTRAL: 'var(--dim)', MIXED: 'var(--amber,var(--watch))' };
-    const horizonColors = { INTRADAY: 'var(--blue,var(--accent))', SWING: 'var(--teal)', LONG_TERM: 'var(--accent,#8866ff)' };
+    if (badge) badge.textContent = `Active: ${data.length}`;
     if (list) list.innerHTML = data.map(i => {
-      const expiresIn = Math.round((i.expires_at - Date.now()) / 3600000);
+      const exp = fmtIntelExpiry(i.expires_at);
       const biasC = biasColors[i.bias] || 'var(--dim)';
-      const horizC = horizonColors[i.time_horizon] || 'var(--dim)';
-      let affectedBadges = '';
-      try {
-        const syms = JSON.parse(i.affected_symbols || '[]');
-        affectedBadges = syms.map(s => `<span style="font-size:10px;padding:1px 6px;border-radius:3px;border:1px solid var(--border);color:var(--txt2,var(--muted));">${s}</span>`).join(' ');
-      } catch(e) {}
-      let levelsStr = '';
-      try { const lvls = JSON.parse(i.key_levels || '[]'); if (lvls.length) levelsStr = `<div style="font-size:11px;color:var(--dim);margin-top:6px;">Key levels: ${lvls.join(' | ')}</div>`; } catch(e) {}
-      return `<div style="background:var(--surface,#0f0f18);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;">
+      const horizC = horizColors[i.time_horizon] || 'var(--dim)';
+      const expColor = exp.cls === 'urgent' ? 'var(--red,var(--short))' : exp.cls === 'warning' ? 'var(--amber,var(--watch))' : exp.cls === 'week' ? 'var(--accent,#8866ff)' : 'var(--dim)';
+      let symBadges = '';
+      try { const syms = JSON.parse(i.affected_symbols || '[]'); symBadges = syms.map(s => { const c = symBadgeColors[getSymbolAssetClass(s)]; return `<span style="font-size:10px;padding:1px 6px;border-radius:10px;border:1px solid ${c};color:${c};font-family:var(--mono,'monospace');font-weight:700;">${s}</span>`; }).join(' '); } catch(e) {}
+      let lvls = ''; try { const l = JSON.parse(i.key_levels || '[]'); if (l.length) lvls = `<div style="font-family:var(--mono,'monospace');font-size:11px;color:var(--dim);margin-top:6px;">Levels: ${l.join(' | ')}</div>`; } catch(e) {}
+      return `<div id="intel-card-${i.id}" style="background:var(--surface,#0f0f18);border:1px solid var(--border);border-left:3px solid var(--amber,var(--watch));border-radius:8px;padding:14px;margin-bottom:10px;transition:all .3s;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
           <div style="display:flex;gap:6px;align-items:center;">
-            ${i.bias ? `<span style="font-size:10px;font-weight:700;color:${biasC};border:1px solid ${biasC};border-radius:4px;padding:2px 8px;">${i.bias}</span>` : ''}
-            ${i.time_horizon ? `<span style="font-size:10px;color:${horizC};border:1px solid ${horizC};border-radius:4px;padding:2px 8px;">${i.time_horizon}</span>` : ''}
+            ${i.bias ? `<span style="font-size:10px;font-weight:700;color:${biasC};border:1px solid ${biasC};border-radius:12px;padding:2px 10px;">${i.bias}</span>` : ''}
+            ${i.time_horizon ? `<span style="font-size:10px;color:${horizC};border:1px solid ${horizC};border-radius:12px;padding:2px 10px;">${i.time_horizon}</span>` : ''}
           </div>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <span style="font-size:11px;color:var(--dim);">${expiresIn}h</span>
-            <span style="cursor:pointer;color:var(--red,var(--short));font-size:14px;" onclick="deleteIntel(${i.id})">×</span>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <span style="font-family:var(--mono,'monospace');font-size:11px;color:${expColor};">${exp.text}</span>
+            <button onclick="deleteIntel(${i.id})" style="background:transparent;border:none;color:var(--dim);font-size:16px;cursor:pointer;padding:2px 6px;border-radius:4px;line-height:1;" onmouseover="this.style.color='var(--red,var(--short))'" onmouseout="this.style.color='var(--dim)'" title="Delete">×</button>
           </div>
         </div>
         <div style="font-size:13px;color:var(--txt2,var(--muted));line-height:1.6;margin-bottom:8px;">${esc(i.summary || i.content)}</div>
-        ${affectedBadges ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">${affectedBadges}</div>` : ''}
-        ${levelsStr}
+        ${symBadges ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">${symBadges}</div>` : ''}
+        ${lvls}
       </div>`;
     }).join('');
   } catch(e) {}
@@ -2007,21 +2028,36 @@ async function loadIntel() {
 async function injectIntel() {
   const input = document.getElementById('intel-input');
   const symInput = document.getElementById('intel-symbol');
+  const expirySelect = document.getElementById('intel-expiry');
   const btn = document.getElementById('intel-inject-btn');
   if (!input || !input.value.trim()) return;
   const sym = symInput?.value?.trim().toUpperCase() || null;
+  const expiry = expirySelect?.value || '24';
   if (btn) { btn.textContent = 'Analysing...'; btn.disabled = true; }
   try {
-    await fetch('/api/market-intel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: input.value.trim(), symbol: sym }) });
+    const res = await fetch('/api/market-intel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: input.value.trim(), symbol: sym, expiresInHours: Number(expiry) }) });
+    const data = await res.json();
+    // Update expiry selector to suggested value
+    if (data.suggested_expiry_hours && expirySelect) {
+      const sugVal = String(data.suggested_expiry_hours);
+      for (const opt of expirySelect.options) { if (opt.value === sugVal) opt.selected = true; }
+    }
     input.value = '';
     if (symInput) symInput.value = '';
     loadIntel();
   } catch(e) {}
   if (btn) { btn.textContent = 'ANALYSE & INJECT'; btn.disabled = false; }
 }
+setInterval(loadIntel, 60000); // refresh countdowns
+setTimeout(loadIntel, 2000);
 async function deleteIntel(id) {
-  await fetch(`/api/market-intel/${id}`, { method: 'DELETE' });
-  loadIntel();
+  const card = document.getElementById('intel-card-' + id);
+  if (card) card.style.opacity = '0.4';
+  try {
+    await fetch(`/api/market-intel/${id}`, { method: 'DELETE' });
+    if (card) { card.style.height = '0'; card.style.overflow = 'hidden'; card.style.padding = '0'; card.style.margin = '0'; setTimeout(() => { card.remove(); loadIntel(); }, 300); }
+    else loadIntel();
+  } catch(e) { if (card) card.style.opacity = '1'; }
 }
 setInterval(loadIntel, 60000);
 setTimeout(loadIntel, 2000);

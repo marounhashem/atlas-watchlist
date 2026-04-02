@@ -916,8 +916,8 @@ function updateWatchOutcome(id, outcome, pnlPct) {
 }
 
 // ── Market intel ─────────────────────────────────────────────────────────────
-function insertMarketIntel(content, symbol = null, analysis = null) {
-  const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+function insertMarketIntel(content, symbol = null, analysis = null, expiresInHours = 24) {
+  const expiresAt = Date.now() + expiresInHours * 3600000;
   run(`INSERT INTO market_intel (content, symbol, summary, bias, affected_symbols, key_levels, time_horizon, expires_at, ts)
     VALUES (?,?,?,?,?,?,?,?,?)`,
     [content, symbol || null,
