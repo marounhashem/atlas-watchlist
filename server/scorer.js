@@ -51,6 +51,7 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
     const cfdLotSize = parseFloat(getSetting(`cfd_lot_${symLower}`) || '1');
     sizeFixed = Math.round((unitsRaw / cfdLotSize) * 100) / 100; // convert to lots
     var positionValue = unitsRaw * entry;
+    console.log(`[Sizing commodity] ${symbol} tickValue=${tickValue} cfdLotSize=${cfdLotSize} slDist=${slDistance} unitsRaw=${unitsRaw} sizeFixed=${sizeFixed}`);
     // If lot size is 1 (not configured), show raw units instead
     if (cfdLotSize <= 1) { displayUnit = COMMODITY_UNITS[symbol] || 'units'; sizeFixed = Math.round(unitsRaw * 100) / 100; }
   } else {
