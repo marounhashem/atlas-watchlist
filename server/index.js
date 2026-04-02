@@ -1916,7 +1916,10 @@ async function runMacroContextFetch(broadcast) {
     USDJPY: `USDJPY outlook today ${dateStr} — last 12 hours BOJ Fed USD strength carry`,
     AUDUSD: `AUDUSD outlook today ${dateStr} — last 12 hours RBA China commodity`,
     PLATINUM: `Platinum price outlook today ${dateStr} — search last 12 hours — precious metals, USD strength, safe haven flows, industrial demand`,
-    COPPER: `Copper price outlook today ${dateStr} — search last 12 hours — China demand, USD, industrial activity, trade tariffs`
+    COPPER: `Copper price outlook today ${dateStr} — search last 12 hours — China demand, USD, industrial activity, trade tariffs`,
+    AUDJPY: `AUDJPY Australian dollar yen outlook today ${dateStr} — BOJ rate hike expectations, AUD strength, RBA vs BOJ policy divergence, last 12 hours news`,
+    EURJPY: `EURJPY euro yen outlook today ${dateStr} — BOJ policy, ECB rates, JPY safe haven flows, last 12 hours`,
+    GBPJPY: `GBPJPY pound yen outlook today ${dateStr} — BOJ rate hike risk, BOE policy, JPY volatility, last 12 hours`
   };
 
   for (const [symbol, baseQuery] of Object.entries(symbolQueries)) {

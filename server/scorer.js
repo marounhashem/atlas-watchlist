@@ -142,7 +142,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.9'; // spot penalty calibration — remove double-counting, macro decay, COT disabled
+const SCORER_VERSION = '20260401.10'; // AUDJPY/EURJPY/GBPJPY direct macro fetch
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
