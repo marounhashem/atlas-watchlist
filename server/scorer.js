@@ -142,7 +142,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.8'; // spot focus — RR 2.0, sub-session scoring, spot expiry, spot weights
+const SCORER_VERSION = '20260401.9'; // spot penalty calibration — remove double-counting, macro decay, COT disabled
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -530,7 +530,7 @@ function estimateATR(data, assetClass) {
 }
 
 const FXSSI_MAX_AGE_MS = 25 * 60 * 1000; // 25 minutes — FXSSI updates at :00/:20/:40, we fetch at :01/:21/:41
-const FXSSI_STALE_PENALTY = 0.82; // multiply score when FXSSI data is stale — less confident without order book
+const FXSSI_STALE_PENALTY = 0.90; // spot: one cycle late is barely stale
 
 function scoreSymbol(symbol) {
   let data;
@@ -781,7 +781,7 @@ function scoreSymbol(symbol) {
                      (pineDir === 'SELL' && fxssiSentiment === 'BUY');
     const agree    = (pineDir === 'BUY' && fxssiSentiment === 'BUY') ||
                      (pineDir === 'SELL' && fxssiSentiment === 'SELL');
-    if (conflict) conflictMultiplier = 0.72;
+    if (conflict) conflictMultiplier = 0.82; // reduced for spot (FXSSI may be stale)
     else if (agree) conflictMultiplier = 1.12;
   }
 
@@ -858,8 +858,8 @@ function scoreSymbol(symbol) {
   const longPct  = data.fxssi_long_pct  || 50;
   const shortPct = data.fxssi_short_pct || 50;
   // Asymmetric crowd thresholds — SHORT needs lower bar to trigger
-  const crowdWithUs      = (direction === 'LONG'  && longPct  >= 60) ||
-                           (direction === 'SHORT' && shortPct >= 55);
+  const crowdWithUs      = (direction === 'LONG'  && longPct  > 70) ||
+                           (direction === 'SHORT' && shortPct > 70);
   const crowdTrappedOpp  = (direction === 'LONG'  && shortPct >= 60) ||
                            (direction === 'SHORT' && longPct  >= 55);
   const crowdStrongTrap  = (direction === 'LONG'  && shortPct >= 65) ||
@@ -908,23 +908,22 @@ function scoreSymbol(symbol) {
   if (direction === 'LONG') {
     if      (weightedStructScore >= 5.0)  conflictMultiplier *= 1.08;
     else if (weightedStructScore >= 2.0)  conflictMultiplier *= 1.03;
-    else if (weightedStructScore <= -5.0) conflictMultiplier *= 0.72;
+    else if (weightedStructScore <= -5.0) conflictMultiplier *= 0.78;
     else if (weightedStructScore <= -2.0) conflictMultiplier *= 0.88;
   } else {
     if      (weightedStructScore <= -5.0) conflictMultiplier *= 1.08;
     else if (weightedStructScore <= -2.0) conflictMultiplier *= 1.03;
-    else if (weightedStructScore >= 5.0)  conflictMultiplier *= 0.72;
+    else if (weightedStructScore >= 5.0)  conflictMultiplier *= 0.78;
     else if (weightedStructScore >= 2.0)  conflictMultiplier *= 0.88;
   }
 
   // RSI momentum filter — Claude learned: RSI > 60 on SHORT or < 40 on LONG = momentum against trade
   const rsi = data.rsi || 50;
-  if (direction === 'SHORT' && rsi > 60) {
-    const rsiPenalty = rsi > 70 ? 0.80 : 0.90; // extreme RSI = bigger penalty
-    conflictMultiplier *= rsiPenalty;
+  // Spot RSI — only penalise genuinely extreme levels
+  if (direction === 'SHORT' && rsi > 65) {
+    conflictMultiplier *= rsi > 72 ? 0.85 : 0.95;
   } else if (direction === 'LONG' && rsi < 40) {
-    const rsiPenalty = rsi < 30 ? 0.80 : 0.90;
-    conflictMultiplier *= rsiPenalty;
+    conflictMultiplier *= rsi < 32 ? 0.85 : 0.95;
   }
   // RSI confirming direction = small bonus
   if (direction === 'SHORT' && rsi < 45) conflictMultiplier *= 1.05;
@@ -951,13 +950,13 @@ function scoreSymbol(symbol) {
         (direction === 'SHORT' && macro.supports_short && !macro.supports_long);
 
       if (macroConflict) {
-        // Stronger penalties — macro strength 6+ should meaningfully suppress signals
-        const penalty = macro.strength >= 8 ? 0.70
-                      : macro.strength >= 6 ? 0.78
-                      : macro.strength >= 4 ? 0.88
-                      : 0.94;
-        conflictMultiplier *= penalty;
-        macroNote = `⚠ Macro ${macro.sentiment} (${macro.strength}/10) conflicts — ${macro.summary}`;
+        // Macro penalty with age decay — stale macro has less weight
+        const macroAgeH = (Date.now() - macro.ts) / 3600000;
+        const decayFactor = macroAgeH < 6 ? 1.00 : macroAgeH < 12 ? 0.75 : macroAgeH < 20 ? 0.50 : 0.25;
+        const basePenalty = macro.strength >= 8 ? 0.70 : macro.strength >= 6 ? 0.78 : macro.strength >= 4 ? 0.88 : 0.94;
+        const decayedPenalty = 1 - ((1 - basePenalty) * decayFactor);
+        conflictMultiplier *= decayedPenalty;
+        macroNote = `⚠ Macro ${macro.sentiment} (${macro.strength}/10${macroAgeH > 6 ? ', ' + Math.round(macroAgeH) + 'h old' : ''}) conflicts — ${macro.summary}`;
       } else if (macroConfirm) {
         const bonus = macro.strength >= 7 ? 1.08 : 1.04;
         conflictMultiplier *= bonus;
@@ -980,29 +979,13 @@ function scoreSymbol(symbol) {
     } catch(e) {}
   }
 
-  // ── COT extreme positioning penalty ─────────────────────────────────────────
-  // Specs crowded in same direction as signal = fade risk = penalty
-  // Specs crowded opposite to signal = contrarian fuel = bonus
-  try {
-    const { getLatestCOT } = getCotFetcher();
-    const cot = getLatestCOT(symbol);
-    if (cot) {
-      const cotAgainst =
-        (direction === 'LONG'  && cot.netNonComm > 100000) ||
-        (direction === 'SHORT' && cot.netNonComm < -100000);
-      const cotWith =
-        (direction === 'SHORT' && cot.netNonComm > 100000) ||
-        (direction === 'LONG'  && cot.netNonComm < -100000);
-
-      if (cotAgainst) {
-        conflictMultiplier *= 0.88;
-        macroNote += macroNote ? ' · ⚠ COT extreme crowding' : '⚠ COT extreme crowding';
-      } else if (cotWith) {
-        conflictMultiplier *= 1.05;
-        macroNote += macroNote ? ' · ✓ COT extreme favours' : '✓ COT extreme favours';
-      }
-    }
-  } catch(e) {}
+  // ── COT — disabled for spot trading ─────────────────────────────────────────
+  // Weekly institutional positioning is not relevant for 2-4h spot entries.
+  // COT remains in morning brief and macro context for informational purposes.
+  // try {
+  //   const { getLatestCOT } = getCotFetcher();
+  //   const cot = getLatestCOT(symbol);
+  //   if (cot) { ... COT penalty ... }
 
   // ── Rate differential carry gate ────────────────────────────────────────────
   // Strong carry differentials penalise counter-carry trades, reward with-carry
@@ -1019,15 +1002,16 @@ function scoreSymbol(symbol) {
       const againstCarry = (rateDiff.direction === 'BASE_FAVOURED' && direction === 'SHORT') ||
                            (rateDiff.direction === 'QUOTE_FAVOURED' && direction === 'LONG');
 
+      // Spot: carry matters less (no overnight swap) — reduced penalties
       if (againstCarry && absBps > 500) {
-        conflictMultiplier *= 0.80;
-        macroNote += ` | ⚠ Extreme carry fight (${rateDiff.differential}bps)`;
+        conflictMultiplier *= 0.90;
+        macroNote += ` | ⚠ Carry ${rateDiff.differential}bps against`;
         if (!eventRiskTag) eventRiskTag = 'CARRY_RISK';
       } else if (againstCarry && absBps > 300) {
-        conflictMultiplier *= 0.88;
-        macroNote += ` | ⚠ Strong carry fight (${rateDiff.differential}bps)`;
+        conflictMultiplier *= 0.95;
+        macroNote += ` | ⚠ Carry ${rateDiff.differential}bps against`;
       } else if (withCarry && absBps > 300) {
-        conflictMultiplier *= 1.05;
+        conflictMultiplier *= 1.03;
       }
     }
   } catch(e) {}
@@ -1216,7 +1200,7 @@ function scoreSymbol(symbol) {
   const effectiveMinScore = adjustedMinScore + rangingPenalty;
   // verdict here is intermediate — final verdict is macroVerdict below
   const rawVerdict = finalScore >= effectiveMinScore ? 'PROCEED'
-    : finalScore >= effectiveMinScore - 8 ? 'WATCH'
+    : finalScore >= effectiveMinScore - 12 ? 'WATCH'
     : 'SKIP';
   const verdict = rawVerdict; // structureZero cap applied to macroVerdict below
   const reasoning = buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, data, cfg, regimeNote, macroNote });
@@ -1708,70 +1692,16 @@ function scoreSymbol(symbol) {
     console.log(`[Scorer] ${symbol} ${direction} — SL widened to min ${(minSlPct*100).toFixed(1)}% distance`);
   }
 
-  // ── Macro context score adjustment ────────────────────────────────────────
-  // Apply macro backdrop to final score — not just reasoning text
-  // Bearish macro + LONG signal = lower score, Bullish macro + LONG = higher score
-  let macroScoreAdj = 0;
-  try {
-    const macro = global.atlasGetMacroContext?.()[symbol];
-    if (macro && macro.sentiment && (Date.now() - macro.ts) < 24 * 3600000) {
-      if (direction === 'LONG') {
-        if (macro.sentiment === 'BULLISH'  && macro.strength >= 6) macroScoreAdj = +3;
-        if (macro.sentiment === 'BULLISH'  && macro.strength >= 3) macroScoreAdj = +1;
-        if (macro.sentiment === 'BEARISH'  && macro.strength >= 6) macroScoreAdj = -5;
-        if (macro.sentiment === 'BEARISH'  && macro.strength >= 3) macroScoreAdj = -3;
-      } else {
-        if (macro.sentiment === 'BEARISH'  && macro.strength >= 6) macroScoreAdj = +3;
-        if (macro.sentiment === 'BEARISH'  && macro.strength >= 3) macroScoreAdj = +1;
-        if (macro.sentiment === 'BULLISH'  && macro.strength >= 6) macroScoreAdj = -5;
-        if (macro.sentiment === 'BULLISH'  && macro.strength >= 3) macroScoreAdj = -3;
-      }
-    }
-  } catch(e) {}
-  let macroAdjustedScore = Math.min(structureCap, Math.min(95, Math.max(0, finalScore + macroScoreAdj)));
+  // Spot: removed double-counting penalties (macro additive, FXSSI stale post-score,
+  // gravity post-score, cluster proximity post-score) — all already in conflictMultiplier
+  let macroAdjustedScore = Math.min(structureCap, Math.min(95, Math.max(0, finalScore)));
 
-  // ── FXSSI stale penalty ─────────────────────────────────────────────────────
-  // Without fresh order book, reduce confidence in the score
-  if (hasFxssi && fxssiAge > FXSSI_MAX_AGE_MS) {
-    macroAdjustedScore = Math.round(macroAdjustedScore * FXSSI_STALE_PENALTY);
-    console.log(`[Scorer] ${symbol} — FXSSI stale penalty applied (×${FXSSI_STALE_PENALTY})`);
-  }
-
-  // ── Gravity direction gate ──────────────────────────────────────────────────
-  // Penalise score when FXSSI gravity (price magnet) points against trade direction
-  // Gravity below + LONG = price pulled down against you = 0.88 penalty
-  // Gravity above + SHORT = price pulled up against you = 0.88 penalty
-  try {
-    if (fxssiLevels?.gravity?.price && close > 0) {
-      const gp = fxssiLevels.gravity.price;
-      const gravityAgainst = (direction === 'LONG' && gp < close) || (direction === 'SHORT' && gp > close);
-      if (gravityAgainst) {
-        macroAdjustedScore = Math.round(macroAdjustedScore * 0.88);
-        console.log(`[Scorer] ${symbol} ${direction} — gravity direction gate (gravity ${gp} vs close ${close}) → ×0.88`);
-      }
-    }
-  } catch(e) {}
-
-  // ── Losing cluster proximity penalty ────────────────────────────────────────
-  // If losing clusters (trapped traders) are within 0.3% of entry, the stop-hunt zone
-  // is dangerously close — penalise by 0.85 to discourage entry near the kill zone
-  try {
-    if (fxssiLevels?.losingClusters?.length > 0 && entry && close > 0) {
-      const tooClose = fxssiLevels.losingClusters.some(c =>
-        Math.abs(c.price - entry) / entry <= 0.003
-      );
-      if (tooClose) {
-        macroAdjustedScore = Math.round(macroAdjustedScore * 0.85);
-        console.log(`[Scorer] ${symbol} ${direction} — losing cluster within 0.3% of entry → ×0.85`);
-      }
-    }
-  } catch(e) {}
-
-  const macroRangingPenalty = data._dailyBias === 0 ? 4 : 0;
+  // Ranging daily: reduced floor for spot (was +4, now +2)
+  const macroRangingPenalty = data._dailyBias === 0 ? 2 : 0;
   const macroEffectiveMin = adjustedMinScore + macroRangingPenalty;
   // Structure 0/5 caps verdict to WATCH maximum — cannot be PROCEED
   const macroRawVerdict = macroAdjustedScore >= macroEffectiveMin ? 'PROCEED'
-    : macroAdjustedScore >= macroEffectiveMin - 8 ? 'WATCH' : 'SKIP';
+    : macroAdjustedScore >= macroEffectiveMin - 12 ? 'WATCH' : 'SKIP';
   let macroVerdict = structureZero && macroRawVerdict === 'PROCEED' ? 'WATCH' : macroRawVerdict;
   // R:R < 2.0 forces WATCH regardless of score
   if (rrForcedWatch && macroVerdict === 'PROCEED') {
