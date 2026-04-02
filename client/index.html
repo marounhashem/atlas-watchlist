@@ -225,10 +225,6 @@
     font-size:26px;font-weight:700;line-height:1;
     color:#e8e8f5 !important;
   }
-  .card-score-unit{
-    font-family:'JetBrains Mono',monospace;
-    font-size:12px;color:#44445a;margin-left:1px;
-  }
   .card-ts{
     font-family:'JetBrains Mono',monospace;
     font-size:9px;color:#1e1e30;
@@ -237,7 +233,7 @@
   /* ── CARD BODY ── */
   .card-body{
     display:grid;
-    grid-template-columns:190px 118px 1fr;
+    grid-template-columns:200px 110px 1fr;
     border-bottom:1px solid #12121e;
     min-height:88px;
     gap:1px;
@@ -295,7 +291,7 @@
   }
   .bar-row{
     display:grid;
-    grid-template-columns:52px 1fr 24px;
+    grid-template-columns:52px 1fr 26px;
     align-items:center;gap:5px;
   }
   .bar-name{font-size:9px;font-weight:700;color:#6868a0;text-align:right;white-space:nowrap;}
@@ -1350,7 +1346,6 @@ function renderCard(sig, isPast) {
     + '<span class="card-verdict verdict-'+v.toLowerCase()+'">'+v+'</span>'
     + '<div class="card-score-wrap">'
     + '<span class="card-score-num '+scoreClass+'">'+(sig.score||0)+'</span>'
-    + '<span class="card-score-unit">%</span>'
     + '</div>'
     + '<span class="card-ts">'+ts+'</span>'
     + '</div>'
