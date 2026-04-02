@@ -1155,6 +1155,8 @@ function renderCard(sig, isPast=false) {
         <div style="font-family:var(--mono,'IBM Plex Mono',monospace);${scoreCls}">${sig.score||'—'}</div>
         <div style="font-size:10px;color:var(--txt3,var(--dim));text-transform:uppercase;letter-spacing:.1em;">Score</div>
         <span class="verdict ${vcls}">${v}</span>
+        ${v==='WATCH'&&sig.rr&&sig.rr<2.0?`<div style="font-size:10px;color:var(--dim);">R:R ${sig.rr} < 2.0</div>`:''}
+        ${v==='WATCH'&&sig.weighted_struct_score&&sig.weighted_struct_score<2.0&&!(sig.rr<2.0)?`<div style="font-size:10px;color:var(--dim);">Weak structure</div>`:''}
         ${ertText?`<div style="font-size:11px;color:var(--amber,var(--watch));opacity:.85;">${ertText}</div>`:''}
       </div>
 

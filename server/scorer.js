@@ -29,12 +29,14 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
 
   if (assetClass === 'forex') {
     displayUnit = 'lots';
-    const pipValue = parseFloat(getSetting('pip_value_forex') || '10');
-    const slPips = slDistance * 10000;
-    unitsRaw = riskAmount / (slPips * pipValue); // lots
-    sizeFixed = Math.max(parseFloat(getSetting('min_lot_forex') || '0.01'), Math.round(unitsRaw * 100) / 100);
-    // For margin: lots × contractSize × entry / leverage
     const contractSize = parseFloat(getSetting('contract_size_forex') || '100000');
+    // JPY pairs: pip = 0.01, others: pip = 0.0001
+    const isJPY = (symbol || '').includes('JPY');
+    const pipSize = isJPY ? 0.01 : 0.0001;
+    const slPips = slDistance / pipSize;
+    const pipValueUSD = (pipSize / entry) * contractSize;
+    unitsRaw = riskAmount / (slPips * pipValueUSD); // lots
+    sizeFixed = Math.max(parseFloat(getSetting('min_lot_forex') || '0.01'), Math.round(unitsRaw * 100) / 100);
     var positionValue = sizeFixed * contractSize * entry;
   } else if (assetClass === 'index') {
     displayUnit = 'contracts';
@@ -93,9 +95,12 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
   const kellyUnits = kellyRiskAmount / slDistance;
   let sizeKelly;
   if (assetClass === 'forex') {
-    const pipValue = parseFloat(getSetting('pip_value_forex') || '10');
-    const slPips = slDistance * 10000;
-    sizeKelly = Math.round((kellyRiskAmount / (slPips * pipValue)) * 100) / 100;
+    const contractSizeK = parseFloat(getSetting('contract_size_forex') || '100000');
+    const isJPYK = (symbol || '').includes('JPY');
+    const pipSizeK = isJPYK ? 0.01 : 0.0001;
+    const slPipsK = slDistance / pipSizeK;
+    const pipValueK = (pipSizeK / entry) * contractSizeK;
+    sizeKelly = Math.round((kellyRiskAmount / (slPipsK * pipValueK)) * 100) / 100;
   } else if (assetClass === 'commodity') {
     const cfdLotSizeK = parseFloat(getSetting(`cfd_lot_${symLower}`) || '1');
     sizeKelly = cfdLotSizeK > 1 ? Math.round((kellyUnits / cfdLotSizeK) * 100) / 100 : Math.round(kellyUnits * 100) / 100;
@@ -104,7 +109,16 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
   } else {
     sizeKelly = Math.round(kellyUnits * 100) / 100;
   }
-  const displayKelly = `${sizeKelly} ${displayUnit}`;
+  // Cap Kelly when insufficient data — prevent outsized positions
+  if (dataPoints < 10) {
+    const maxKelly = sizeFixed * 1.5;
+    if (sizeKelly > maxKelly) {
+      sizeKelly = Math.round(maxKelly * 100) / 100;
+    }
+  }
+  const displayKelly = dataPoints < 10
+    ? `${sizeKelly} ${displayUnit} (capped)`
+    : `${sizeKelly} ${displayUnit}`;
 
   return {
     fixed: { riskAmount: Math.round(riskAmount), riskPct: riskPct * 100, slDistancePct, size: sizeFixed, display: displayFixed, marginRequired },
@@ -142,7 +156,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.11'; // intel key levels scoring — resistance/support proximity
+const SCORER_VERSION = '20260401.12'; // JPY pip calc, Kelly cap, zero SL, WATCH reason badge
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -1726,9 +1740,12 @@ function scoreSymbol(symbol) {
 
   // ── Minimum SL distance per asset class ──────────────────────────────────
   // Prevents SL being placed within normal noise range — guaranteed stop-out
-  // Spot SL floors — prevent noise stop-outs
+  // Zero SL protection + Spot SL floors
+  if (!sl || sl === entry || Math.abs(entry - sl) < 0.0000001) {
+    console.log(`[Scorer] ${symbol} Zero SL detected — enforcing minimum`);
+  }
   const minSlPct = { crypto: 0.008, commodity: 0.005, index: 0.003, forex: 0.002 }[cfg.assetClass] || 0.004;
-  const slDist = Math.abs(entry - sl) / entry;
+  const slDist = entry > 0 ? Math.abs(entry - sl) / entry : 0;
   if (slDist < minSlPct) {
     // Widen SL to minimum distance, recalculate TP to maintain R:R
     const minSlDist = entry * minSlPct;
