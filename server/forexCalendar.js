@@ -324,7 +324,7 @@ async function runCalendarCheck(broadcast) {
 async function runCalendarFetch() { return runCalendarCheck(null); }
 
 // ── Pre-event risk check ────────────────────────────────────────────────────
-function isPreEventRisk(symbol, hours = 2) {
+function isPreEventRisk(symbol, hours = 10/60) { // 10 minutes default
   try {
     const { getUpcomingEvents } = require('./db');
     const rows = getUpcomingEvents(3);

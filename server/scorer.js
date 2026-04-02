@@ -1787,7 +1787,7 @@ function scoreSymbol(symbol) {
   if (!eventRiskTag) {
     try {
       const { isPreEventRisk } = require('./forexCalendar');
-      const preEvent = isPreEventRisk(symbol, 2);
+      const preEvent = isPreEventRisk(symbol, 10/60); // 10 minutes
       if (preEvent) {
         macroAdjustedScore = Math.round(macroAdjustedScore * 0.75);
         if (macroVerdict === 'PROCEED') macroVerdict = 'WATCH';
