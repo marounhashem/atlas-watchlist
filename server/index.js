@@ -1790,31 +1790,28 @@ cron.schedule('2,22,42 * * * *', async () => {
   catch(e) { console.error('[Cron] Retirement error:', e.message); }
 });
 
-// Learning engine — checks every hour, runs only when thresholds met
-// Minimum 30 closed trades per symbol + 30 new outcomes since last cycle + 6h gap
-cron.schedule('0 * * * *', async () => {
-  try { await runLearningCycle(broadcast); }
-  catch(e) { console.error('[Cron] Learning error:', e.message); }
-});
-
-// Entry level optimisation — once per day at 18:00 UTC (after NY session closes)
-// Runs per symbol — costs tokens so keep daily not hourly
-cron.schedule('0 18 * * *', async () => {
-  console.log('[Cron] Running daily entry level optimisation...');
-  for (const symbol of Object.keys(SYMBOLS)) {
-    await claudeLearner.optimiseEntryLevels(symbol).catch(e =>
-      console.error(`[Claude] optimiseEntryLevels ${symbol}:`, e.message)
-    );
-    await new Promise(r => setTimeout(r, 2000));
-  }
-});
-
-// Daily session summary — fires at 17:00 UTC (end of London session)
-cron.schedule('0 17 * * *', async () => {
+// Nightly review — 23:00 UTC: weight learning + daily summary
+cron.schedule('0 23 * * *', async () => {
   try {
-    console.log('[Cron] Running daily session summary...');
+    console.log('[Cron] Nightly review starting — learning + summary...');
+    await runLearningCycle(broadcast);
     await claudeLearner.dailySessionSummary(broadcast);
-  } catch(e) { console.error('[Cron] Session summary error:', e.message); }
+    console.log('[Cron] Nightly review complete');
+  } catch(e) { console.error('[Cron] Nightly review error:', e.message); }
+});
+
+// Weekly entry optimisation — Sunday 22:00 UTC (before Monday open)
+cron.schedule('0 22 * * 0', async () => {
+  try {
+    console.log('[Cron] Weekly entry optimisation starting...');
+    for (const symbol of Object.keys(SYMBOLS)) {
+      await claudeLearner.optimiseEntryLevels(symbol).catch(e =>
+        console.error(`[Claude] optimiseEntryLevels ${symbol}:`, e.message)
+      );
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    console.log('[Cron] Weekly entry optimisation complete');
+  } catch(e) { console.error('[Cron] Weekly optimisation error:', e.message); }
 });
 
 // Morning brief via Telegram — 05:00 UTC (09:00 Dubai)

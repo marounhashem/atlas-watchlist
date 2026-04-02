@@ -3,9 +3,8 @@
 // Fires: after every WIN/LOSS + daily at 17:00 UTC (end London) + every 20 outcomes
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL_SONNET = 'claude-sonnet-4-5-20251001'; // exact levels only
-const MODEL_HAIKU  = 'claude-haiku-4-5-20251001';  // all other tasks — 20x cheaper
-const MODEL = MODEL_HAIKU; // default
+const MODEL_HAIKU  = 'claude-haiku-4-5-20251001';  // all calls use Haiku
+const MODEL = MODEL_HAIKU;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let outcomesSinceLastRegime = 0;
@@ -408,9 +407,9 @@ function applyWeightAdjustment(symbol, adj) {
 
 let entryOptimisation = {}; // { GOLD: { slMultiplier, tpMultiplier, confidence, ... } }
 
-// Calculate exact levels for a live signal
+// Calculate exact levels — DISABLED (insufficient trade history, was using Sonnet)
 async function calculateExactLevels(symbol, direction, currentData, fxssi) {
-  if (!ANTHROPIC_API_KEY) return null;
+  return null; // disabled — all level calculation done in scorer.js
 
   try {
     const db = require('./db');
@@ -502,7 +501,7 @@ Return ONLY this JSON (no markdown):
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: MODEL_SONNET, // Sonnet for exact levels — quality matters here
+        model: MODEL_HAIKU, // was MODEL_SONNET — function disabled
         max_tokens: 500,
         messages: [{ role: 'user', content: prompt }]
       })
