@@ -157,7 +157,25 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.13'; // Intel key levels in macro fetch queries
+const SCORER_VERSION = '20260401.14'; // Zero SL hard gate + enforceMinSL
+
+// ── Minimum SL enforcement ──────────────────────────────────────────────────
+// Catches identical entry/SL (Pine sends same price for both) and suspiciously
+// tight SLs that would produce infinite position sizes or zero risk distance.
+function enforceMinSL(entry, sl, direction, assetClass) {
+  const dist = Math.abs(entry - sl);
+  const minPct = { forex: 0.20, index: 0.30, commodity: 0.50, crypto: 0.80 }[assetClass] || 0.20;
+  const minDist = entry * (minPct / 100);
+
+  if (dist < minDist) {
+    const newSL = direction === 'LONG'
+      ? entry - minDist
+      : entry + minDist;
+    console.warn(`[Scorer] ${direction} SL too tight (${dist.toFixed(5)}) — widened to ${newSL.toFixed(5)} (min ${minPct}%)`);
+    return Math.round(newSL * 100000) / 100000;
+  }
+  return sl;
+}
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -1890,6 +1908,20 @@ function scoreSymbol(symbol) {
     ? `⚠ Retail Order Book stale (${Math.round(fxssiAge/60000)}m) — OB scoring neutral · ` + reasoning
     : reasoning;
   if (eventRiskNote) finalReasoning = eventRiskNote + ' · ' + finalReasoning;
+
+  // ── Enforce minimum SL distance ─────────────────────────────────────────────
+  // Must run AFTER all SL calculation paths, BEFORE signal is returned/saved.
+  // Catches Pine sending identical entry/SL (e.g. EURCHF 0.92/0.92)
+  sl = enforceMinSL(entry, sl, direction, cfg.assetClass);
+
+  // Hard gate — if SL is still effectively equal to entry, block the signal
+  if (Math.abs(sl - entry) < entry * 0.001) {
+    console.error(`[Scorer] ${symbol} SL === entry after enforcement (entry=${entry}, sl=${sl}) — blocking signal`);
+    return null;
+  }
+
+  // Recalculate RR after SL enforcement (SL may have been widened)
+  rr = calcRR(entry, sl, tp, direction) || rr;
 
   return {
     symbol, label: cfg.label, direction, score: macroAdjustedScore, verdict: macroVerdict,
