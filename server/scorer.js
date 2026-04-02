@@ -1753,15 +1753,33 @@ function scoreSymbol(symbol) {
   // Tags surface risk in dashboard/Telegram instead of silently blocking
   let eventRiskNote = '';
 
-  // Post-event suppression — downgrade to WATCH/SUPPRESSED
+  // Post-event 3-phase system: VOLATILITY (5min block) → OPPORTUNITY (2h boost) → NORMAL
   try {
-    const { isPostEventSuppressed } = require('./forexCalendar');
-    if (isPostEventSuppressed(symbol)) {
-      macroAdjustedScore = Math.min(macroAdjustedScore, 65);
-      macroVerdict = 'WATCH';
-      eventRiskTag = 'SUPPRESSED';
-      eventRiskNote = '⚠ Post-event suppression active';
-      console.log(`[Scorer] ${symbol} ${direction} — SUPPRESSED (post-event)`);
+    const { getPostEventState } = require('./forexCalendar');
+    const postState = getPostEventState(symbol);
+
+    if (postState.phase === 'VOLATILITY') {
+      // Hard block — 5 min spike window, no signals
+      console.log(`[Scorer] ${symbol} blocked — volatility spike: ${postState.tag}`);
+      return null;
+    }
+
+    if (postState.phase === 'OPPORTUNITY') {
+      // Enhanced scoring with event result — no penalty
+      const sent = postState.sentiment;
+      if (sent && sent.beat !== 0) {
+        // Determine if event result helps or hurts this signal direction
+        const currencies = SYMBOL_CURRENCIES[symbol] || [];
+        const isBase = currencies.length > 0;
+        const pairBias = isBase && sent.beat > 0 ? 'LONG' : isBase && sent.beat < 0 ? 'SHORT' : null;
+        if (pairBias === direction) {
+          conflictMultiplier *= 1.10;
+          macroNote += macroNote ? ` · ✓ ${postState.event} ${sent.beat > 0 ? 'beat' : 'miss'} confirms` : `✓ ${postState.event} ${sent.beat > 0 ? 'beat' : 'miss'} confirms`;
+        } else if (pairBias && pairBias !== direction) {
+          conflictMultiplier *= 0.90;
+          macroNote += macroNote ? ` · ⚠ ${postState.event} result contradicts ${direction}` : `⚠ ${postState.event} result contradicts ${direction}`;
+        }
+      }
     }
   } catch(e) {}
 

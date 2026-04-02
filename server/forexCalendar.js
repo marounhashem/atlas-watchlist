@@ -59,9 +59,10 @@ function isEventRelevant(eventTitle, symbol) {
   return true; // forex pairs + OILWTI + crypto: always relevant
 }
 
-// Post-event suppression: { symbol: suppressUntilTs }
-const postEventSuppression = {};
-const SUPPRESSION_MS = 30 * 60 * 1000;
+// Post-event state: { symbol: { firedAt, title, actual, forecast, sentiment } }
+const postEventState = {};
+const VOLATILITY_MS = 5 * 60 * 1000;   // 5min hard block
+const OPPORTUNITY_MS = 120 * 60 * 1000; // 2h enhanced scoring
 
 // Feed icon mapping
 const FEED_ICONS = { FF: '📊', EE: '🛢️', MM: '🥇', CC: '₿' };
@@ -275,9 +276,15 @@ async function runCalendarCheck(broadcast) {
           fired++;
           const affectedSymbols = buildAffectedSymbols(e.country, sourcesArr, e.title);
 
-          const suppressUntil = Date.now() + SUPPRESSION_MS;
+          // Set post-event state for all affected symbols
           for (const sym of affectedSymbols) {
-            postEventSuppression[sym] = Math.max(postEventSuppression[sym] || 0, suppressUntil);
+            postEventState[sym] = {
+              firedAt: Date.now(),
+              title: e.title,
+              actual: e.actual || 'Released',
+              forecast: e.forecast,
+              sentiment
+            };
           }
 
           const sentimentLabel = sentiment ? ` | ${sentiment.summary}` : '';
@@ -352,13 +359,41 @@ function isPreEventRisk(symbol, hours = 2) {
   return null;
 }
 
-// ── Post-event suppression check ────────────────────────────────────────────
+// ── Post-event state (3 phases: VOLATILITY → OPPORTUNITY → NORMAL) ──────────
+function getPostEventState(symbol) {
+  const state = postEventState[symbol];
+  if (!state) return { phase: 'NORMAL' };
+
+  const elapsed = Date.now() - state.firedAt;
+
+  if (elapsed < VOLATILITY_MS) {
+    return {
+      phase: 'VOLATILITY',
+      minutesAgo: Math.round(elapsed / 60000),
+      event: state.title,
+      tag: `VOLATILITY — ${state.title} fired ${Math.round(elapsed / 60000)}min ago`
+    };
+  }
+
+  if (elapsed < OPPORTUNITY_MS) {
+    return {
+      phase: 'OPPORTUNITY',
+      minutesAgo: Math.round(elapsed / 60000),
+      event: state.title,
+      sentiment: state.sentiment,
+      actual: state.actual,
+      forecast: state.forecast
+    };
+  }
+
+  // Expired — clean up
+  delete postEventState[symbol];
+  return { phase: 'NORMAL' };
+}
+
+// Backward compat
 function isPostEventSuppressed(symbol) {
-  const until = postEventSuppression[symbol];
-  if (!until) return false;
-  if (Date.now() < until) return true;
-  delete postEventSuppression[symbol];
-  return false;
+  return getPostEventState(symbol).phase === 'VOLATILITY';
 }
 
 // ── Get upcoming HIGH impact events ─────────────────────────────────────────
@@ -379,7 +414,7 @@ function getUpcomingHighImpactEvents(days = 7) {
 
 module.exports = {
   runCalendarCheck, runCalendarFetch,
-  isPreEventRisk, isPostEventSuppressed,
+  isPreEventRisk, isPostEventSuppressed, getPostEventState,
   getUpcomingHighImpactEvents, getEventSentiment,
   calculateEventSentiment, buildAffectedSymbols,
   EVENT_IMPACT_SYMBOLS, FEED_ICONS

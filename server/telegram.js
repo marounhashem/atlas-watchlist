@@ -93,8 +93,11 @@ async function sendEventFiredAlert(event, sentiment, affectedSymbols) {
     sentiment?.summary ? `<b>${sentiment.summary}</b>` : '',
     sentiment?.magnitude ? `Surprise: ${sentiment.magnitude} (${sentiment.pctDelta || '?'}%)` : '',
     ``,
-    `⏸ Signal suppression: 30min`,
-    `Affected: ${affectedSymbols.slice(0, 6).join(', ')}${affectedSymbols.length > 6 ? ` +${affectedSymbols.length - 6} more` : ''}`,
+    `⏸ 5min volatility block — hold signals`,
+    `✅ Opportunity window opens in 5min`,
+    `Enhanced scoring active for 2 hours`,
+    ``,
+    `Watch: ${affectedSymbols.slice(0, 8).join(', ')}${affectedSymbols.length > 8 ? ` +${affectedSymbols.length - 8} more` : ''}`,
   ].filter(Boolean).join('\n');
   return sendMessage(text);
 }
