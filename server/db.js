@@ -522,9 +522,11 @@ function getLatestOpenSignal(symbol, direction) {
 function expireOldVersionSignals(currentVersion) {
   if (!currentVersion) return 0;
   // ONLY touches outcome='OPEN' — never WIN, LOSS, ACTIVE, EXPIRED, REPLACED
+  // 30-minute grace period: recently fired signals survive version bumps
+  const thirtyMinAgo = Date.now() - (30 * 60 * 1000);
   const stale = all(
-    "SELECT id FROM signals WHERE outcome='OPEN' AND (scorer_version IS NULL OR scorer_version != ?)",
-    [currentVersion]
+    "SELECT id FROM signals WHERE outcome='OPEN' AND (scorer_version IS NULL OR scorer_version != ?) AND ts < ?",
+    [currentVersion, thirtyMinAgo]
   );
   if (stale.length === 0) return 0;
   // Safety cap — refuse to expire more than 50 signals at once
