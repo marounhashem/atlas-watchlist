@@ -45,6 +45,7 @@
   @keyframes slideIn{from{transform:translateX(24px);opacity:0}to{transform:translateX(0);opacity:1}}
   @keyframes spin{to{transform:rotate(360deg)}}
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  @keyframes shimmer{0%{left:-100%}100%{left:100%}}
 
   /* ── SCROLLBAR ── */
   /* ── Past Trades grouped view ── */
@@ -1776,20 +1777,26 @@ setInterval(fetchMarketStatus,60000);
 setInterval(updateClock,1000);
 updateClock();
 
-// Instant load — fetch signals via HTTP before WebSocket connects
+// Instant load — skeleton cards → HTTP fetch → WebSocket
 (async function initialLoad() {
+  // Step 1: show skeleton cards immediately
+  const c = document.getElementById('signals-container');
+  if (c) c.innerHTML = Array(3).fill(`<div style="background:var(--surface,#0f0f18);border:1px solid var(--border,#2a2a3a);border-radius:10px;padding:20px;margin-bottom:10px;height:160px;position:relative;overflow:hidden;"><div style="position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,#ffffff08,transparent);animation:shimmer 1.5s infinite;"></div></div>`).join('');
+
+  // Step 2: HTTP fetch (parallel)
   try {
-    const c = document.getElementById('signals-container');
-    if (c) c.innerHTML = '<div style="display:flex;align-items:center;gap:8px;padding:20px;color:var(--txt2,var(--muted));font-size:12px;"><span style="width:6px;height:6px;background:var(--accent,#8866ff);border-radius:50%;animation:pulse 1s infinite;display:inline-block;"></span> Loading signals...</div>';
     const [sigRes, pastRes] = await Promise.all([
       fetch('/api/signals').then(r=>r.json()).catch(()=>[]),
       fetch('/api/past-signals').then(r=>r.json()).catch(()=>[])
     ]);
-    if (sigRes.length > 0) { allSignals = sigRes; renderSignals(); }
-    if (pastRes.length > 0) { pastSignals = pastRes; updatePastCount(); }
+    console.log('[Init] signals:', sigRes?.length, 'past:', pastRes?.length);
+    if (sigRes?.length > 0) { allSignals = sigRes; renderSignals(); }
+    else if (c) c.innerHTML = '<div class="empty">Waiting for signals...<br>Scoring runs every minute.</div>';
+    if (pastRes?.length > 0) { pastSignals = pastRes; updatePastCount(); }
     fetchStats(); fetchLearningLog(); fetchMarketStatus(); fetchRegime();
   } catch(e) { console.error('Initial load error:', e); }
-  // Then connect WebSocket for live updates
+
+  // Step 3: WebSocket for live updates
   connect();
 })();
 

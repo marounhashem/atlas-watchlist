@@ -294,20 +294,23 @@ app.post('/webhook/fxssi', (req, res) => {
 
 // ── REST API ─────────────────────────────────────────────────────────────────
 // Returns saved signals + latest scoring results for immediate dashboard render
-app.get('/api/signals', async (req, res) => {
+// Cache last scoring results for instant HTTP response
+let _lastScoringResults = [];
+
+app.get('/api/signals', (req, res) => {
   try {
     const saved = db.getAllSignals(100);
-    // Also run a fresh score to populate the board on hard refresh
-    if (saved.length === 0) {
-      try {
-        const { scoreAllPriority } = require('./scorer');
-        const results = await scoreAllPriority();
-        // Return scoring results (not saved — just for display)
-        res.json(results || []);
-        return;
-      } catch(e) {}
+    if (saved.length > 0) {
+      console.log(`[/api/signals] returning ${saved.length} saved signals`);
+      return res.json(saved);
     }
-    res.json(saved);
+    // No saved signals — return cached scoring results (populated by cron)
+    if (_lastScoringResults.length > 0) {
+      console.log(`[/api/signals] returning ${_lastScoringResults.length} cached scoring results`);
+      return res.json(_lastScoringResults);
+    }
+    console.log('[/api/signals] no data available yet');
+    res.json([]);
   } catch(e) {
     res.status(500).json({ error: e.message });
   }
@@ -1709,6 +1712,7 @@ cron.schedule('* * * * *', async () => {
   if (!dbReady) return;
   try {
     const results = await scoreAllPriority();
+    _lastScoringResults = results; // cache for instant HTTP response
     const proceeds = results.filter(r => r.verdict === 'PROCEED');
     const watches  = results.filter(r => r.verdict === 'WATCH');
 
