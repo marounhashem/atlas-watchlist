@@ -2009,9 +2009,19 @@ async function runMacroContextFetch(broadcast) {
   for (const [symbol, baseQuery] of Object.entries(symbolQueries)) {
     // Inject active market intel into query
     const intel = global.atlasGetActiveIntel?.(symbol) || [];
-    const query = intel.length > 0
+    let query = intel.length > 0
       ? `${baseQuery}. Known context: ${intel.join('. ')}`
       : baseQuery;
+    // Inject key levels from active intel
+    try {
+      const intelItems = db.getActiveIntel(symbol);
+      const keyLevels = intelItems
+        .flatMap(i => { try { return JSON.parse(i.key_levels || '[]'); } catch(e) { return []; } })
+        .filter(Boolean);
+      if (keyLevels.length > 0) {
+        query += `. Key levels to watch: ${keyLevels.join(', ')}`;
+      }
+    } catch(e) {}
     try {
       // Build context enrichment
       let extraContext = '';

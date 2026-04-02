@@ -157,7 +157,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.12'; // JPY pip calc, Kelly cap, zero SL, WATCH reason badge
+const SCORER_VERSION = '20260401.13'; // Intel key levels in macro fetch queries
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
