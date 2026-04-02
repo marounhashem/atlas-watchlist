@@ -142,7 +142,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.10'; // AUDJPY/EURJPY/GBPJPY direct macro fetch
+const SCORER_VERSION = '20260401.11'; // Nikkei-JPY correlation in scorer
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -975,6 +975,25 @@ function scoreSymbol(symbol) {
       if (dxy && ['US500','COPPER','PLATINUM'].includes(symbol)) {
         if (dxy.trend === 'bearish' && direction === 'LONG') conflictMultiplier *= 1.03;
         if (dxy.trend === 'bullish' && direction === 'SHORT') conflictMultiplier *= 1.03;
+      }
+    } catch(e) {}
+  }
+
+  // ── Nikkei-JPY correlation ──────────────────────────────────────────────────
+  // J225 bullish = risk-on = JPY weakens → JPY pairs LONG favoured
+  // J225 bearish = risk-off = JPY strengthens → JPY pairs SHORT favoured
+  const currencies = SYMBOL_CURRENCIES[symbol] || [];
+  if (currencies.includes('JPY')) {
+    try {
+      const j225Data = getLatestMarketData('J225');
+      if (j225Data && j225Data.bias_score !== undefined) {
+        const j225Bias = j225Data.bias_score;
+        const jpyBullish = j225Bias < -0.2; // J225 falling = JPY strong
+        const jpyBearish = j225Bias > 0.2;  // J225 rising = JPY weak
+        if (jpyBullish && direction === 'LONG') { conflictMultiplier *= 0.93; macroNote += ' · ⚠ Nikkei bearish — JPY strength risk'; }
+        if (jpyBearish && direction === 'SHORT') { conflictMultiplier *= 0.93; macroNote += ' · ⚠ Nikkei bullish — JPY weakness risk'; }
+        if (jpyBullish && direction === 'SHORT') { conflictMultiplier *= 1.04; macroNote += ' · ✓ Nikkei bearish confirms JPY strength'; }
+        if (jpyBearish && direction === 'LONG') { conflictMultiplier *= 1.04; macroNote += ' · ✓ Nikkei bullish confirms JPY weakness'; }
       }
     } catch(e) {}
   }
