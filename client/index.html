@@ -227,13 +227,13 @@
   }
   .card-ts{
     font-family:'JetBrains Mono',monospace;
-    font-size:9px;color:#1e1e30;
+    font-size:9px;color:#484868;
   }
 
   /* ── CARD BODY ── */
   .card-body{
     display:grid;
-    grid-template-columns:200px 110px 1fr;
+    grid-template-columns:185px 130px 1fr;
     border-bottom:1px solid #12121e;
     min-height:88px;
     gap:1px;
@@ -252,17 +252,17 @@
   }
   .dir-long{color:#5bc8a0;}
   .dir-short{color:#d46080;}
-  .card-lvl-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;}
+  .card-lvl-grid{display:flex;flex-direction:column;gap:3px;}
   .card-lvl{
     background:linear-gradient(145deg,#131320,#0f0f1c);
     border:1px solid #1e1e2e;border-radius:4px;
-    padding:5px 8px;
-    display:flex;flex-direction:column;gap:3px;
+    padding:3px 7px;
+    display:grid;grid-template-columns:40px 1fr;align-items:center;gap:4px;
     box-shadow:inset 0 1px 0 rgba(255,255,255,.03),0 1px 3px rgba(0,0,0,.3);
   }
   .card-lvl-name{
     font-size:8px;font-weight:700;
-    letter-spacing:.14em;text-transform:uppercase;color:#555575;
+    letter-spacing:.14em;text-transform:uppercase;color:#555575;text-align:right;
   }
   .card-lvl-val{
     font-family:'JetBrains Mono',monospace;
@@ -291,7 +291,7 @@
   }
   .bar-row{
     display:grid;
-    grid-template-columns:52px 1fr 26px;
+    grid-template-columns:56px 1fr 26px;
     align-items:center;gap:5px;
   }
   .bar-name{font-size:9px;font-weight:700;color:#6868a0;text-align:right;white-space:nowrap;}
