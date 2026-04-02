@@ -1923,10 +1923,17 @@ function scoreSymbol(symbol) {
   // Recalculate RR after SL enforcement (SL may have been widened)
   rr = calcRR(entry, sl, tp, direction) || rr;
 
+  // Diagnostic: catch suspiciously small TP values for indices
+  if (cfg.assetClass === 'index' && tp < 10) {
+    console.error(`[Scorer] ${symbol} suspicious TP=${tp} (entry=${entry}, sl=${sl}) — likely ATR calculation error`);
+  }
+
   return {
     symbol, label: cfg.label, direction, score: macroAdjustedScore, verdict: macroVerdict,
     entry: Math.round(entry * 100) / 100,
-    sl, tp, rr,
+    sl: Math.round(sl * 100) / 100,
+    tp: Math.round(tp * 100) / 100,
+    rr,
     session: getSessionNow(),
     breakdown: { bias: biasSc, fxssi: fxssiSc, ob: obSc, session: sessionSc },
     reasoning: finalReasoning,
