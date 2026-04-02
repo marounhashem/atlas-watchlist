@@ -1909,13 +1909,21 @@ function scoreSymbol(symbol) {
     : reasoning;
   if (eventRiskNote) finalReasoning = eventRiskNote + ' · ' + finalReasoning;
 
+  // ── Round prices for display ────────────────────────────────────────────────
+  // Forex needs more decimals (5dp) to preserve SL distance on low-value pairs
+  // Indices/commodities/crypto round to 2dp
+  const dp = cfg.assetClass === 'forex' ? 100000 : 100;
+  entry = Math.round(entry * dp) / dp;
+  sl    = Math.round(sl * dp) / dp;
+  tp    = Math.round(tp * dp) / dp;
+
   // ── Enforce minimum SL distance ─────────────────────────────────────────────
-  // Must run AFTER all SL calculation paths, BEFORE signal is returned/saved.
-  // Catches Pine sending identical entry/SL (e.g. EURCHF 0.92/0.92)
+  // Must run AFTER rounding — rounding can collapse SL back to entry
+  // (e.g. EURCHF entry 0.92, enforced SL 0.91816 rounds to 0.92 at 2dp)
   sl = enforceMinSL(entry, sl, direction, cfg.assetClass);
 
-  // Hard gate — if SL is still effectively equal to entry, block the signal
-  if (Math.abs(sl - entry) < entry * 0.001) {
+  // Nuclear fallback — if SL still equals entry after enforcement, block signal
+  if (Math.abs(sl - entry) < 0.00001) {
     console.error(`[Scorer] ${symbol} SL === entry after enforcement (entry=${entry}, sl=${sl}) — blocking signal`);
     return null;
   }
@@ -1930,10 +1938,7 @@ function scoreSymbol(symbol) {
 
   return {
     symbol, label: cfg.label, direction, score: macroAdjustedScore, verdict: macroVerdict,
-    entry: Math.round(entry * 100) / 100,
-    sl: Math.round(sl * 100) / 100,
-    tp: Math.round(tp * 100) / 100,
-    rr,
+    entry, sl, tp, rr,
     session: getSessionNow(),
     breakdown: { bias: biasSc, fxssi: fxssiSc, ob: obSc, session: sessionSc },
     reasoning: finalReasoning,

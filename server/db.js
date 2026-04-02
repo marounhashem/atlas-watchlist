@@ -358,6 +358,18 @@ function initSchema() {
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
   try { db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL'); } catch(e) { console.error('[DB] Backfill error:', e.message); }
 
+  // Cleanup zero-SL signals — entry === SL is invalid, auto-expire them
+  try {
+    const cleaned = db.exec("SELECT COUNT(*) FROM signals WHERE outcome IN ('OPEN','ACTIVE') AND ABS(sl - entry) < 0.0001");
+    const count = cleaned[0]?.values?.[0]?.[0] || 0;
+    if (count > 0) {
+      db.run(`UPDATE signals SET outcome='EXPIRED', outcome_ts=?, outcome_category='ZERO_SL',
+              outcome_notes='Signal had SL = entry — invalid, auto-expired'
+              WHERE outcome IN ('OPEN','ACTIVE') AND ABS(sl - entry) < 0.0001`, [Date.now()]);
+      console.warn(`[DB] Cleaned up ${count} zero-SL signals`);
+    }
+  } catch(e) { console.error('[DB] Zero-SL cleanup error:', e.message); }
+
   console.log('[DB] Schema initialised, weights seeded');
 }
 
