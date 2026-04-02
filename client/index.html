@@ -577,6 +577,7 @@
       </div>
       <div id="intel-body" style="display:none;margin-top:6px;">
         <div style="display:flex;gap:4px;margin-bottom:6px;">
+          <input id="intel-symbol" type="text" placeholder="Symbol (blank=global)" style="width:80px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 6px;color:var(--text);font-size:10px;text-transform:uppercase;">
           <input id="intel-input" type="text" placeholder="e.g. Iran ceasefire talks progressing" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:10px;">
           <button onclick="injectIntel()" style="background:var(--accent);color:var(--bg);border:none;border-radius:4px;padding:4px 10px;font-size:9px;font-weight:700;cursor:pointer;">INJECT</button>
         </div>
@@ -1969,8 +1970,9 @@ async function loadIntel() {
     if (badge) badge.textContent = `${data.length} active`;
     if (list) list.innerHTML = data.map(i => {
       const expiresIn = Math.round((i.expires_at - Date.now()) / 3600000);
+      const symTag = i.symbol ? `<span style="color:var(--accent);font-weight:600;margin-right:4px;">[${esc(i.symbol)}]</span>` : '<span style="color:var(--dim);margin-right:4px;">[Global]</span>';
       return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--border);font-size:9px;">
-        <span style="color:var(--text);">${esc(i.content)}</span>
+        <span style="color:var(--text);">${symTag}${esc(i.content)}</span>
         <div style="display:flex;gap:6px;align-items:center;">
           <span style="color:var(--dim);">${expiresIn}h</span>
           <span style="cursor:pointer;color:var(--short);" onclick="deleteIntel(${i.id})">×</span>
@@ -1981,9 +1983,12 @@ async function loadIntel() {
 }
 async function injectIntel() {
   const input = document.getElementById('intel-input');
+  const symInput = document.getElementById('intel-symbol');
   if (!input || !input.value.trim()) return;
-  await fetch('/api/market-intel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: input.value.trim() }) });
+  const sym = symInput?.value?.trim().toUpperCase() || null;
+  await fetch('/api/market-intel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: input.value.trim(), symbol: sym }) });
   input.value = '';
+  if (symInput) symInput.value = '';
   loadIntel();
 }
 async function deleteIntel(id) {

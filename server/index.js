@@ -1189,10 +1189,10 @@ app.get('/api/market-intel', (req, res) => {
 });
 
 app.post('/api/market-intel', (req, res) => {
-  const { content } = req.body;
+  const { content, symbol } = req.body;
   if (!content) return res.status(400).json({ error: 'Need content' });
-  db.insertMarketIntel(content);
-  res.json({ ok: true });
+  db.insertMarketIntel(content, symbol || null);
+  res.json({ ok: true, symbol: symbol || 'global' });
 });
 
 app.delete('/api/market-intel/:id', (req, res) => {
@@ -1390,7 +1390,7 @@ app.post('/api/trade-feedback', (req, res) => {
   try { cot = getLatestCOT(symbol); } catch(e) {}
   try { rateDiff = getRateDifferential(symbol); } catch(e) {}
   try { dxy = global.atlasGetDXY?.(); } catch(e) {}
-  const intel = global.atlasGetActiveIntel?.() || [];
+  const intel = global.atlasGetActiveIntel?.(symbol) || [];
   const latestSignal = db.getAllSignals(10).find(s => s.symbol === symbol && s.outcome !== 'EXPIRED');
   const upcomingEvents = getUpcomingHighImpactEvents(2);
 
@@ -1924,7 +1924,7 @@ async function runMacroContextFetch(broadcast) {
 
   for (const [symbol, baseQuery] of Object.entries(symbolQueries)) {
     // Inject active market intel into query
-    const intel = global.atlasGetActiveIntel?.() || [];
+    const intel = global.atlasGetActiveIntel?.(symbol) || [];
     const query = intel.length > 0
       ? `${baseQuery}. Known context: ${intel.join('. ')}`
       : baseQuery;
@@ -2221,7 +2221,7 @@ server.listen(PORT, () => {
     // Expose macro context globally so scorer.js can access it in-process
     global.atlasGetMacroContext = getMacroContext;
     global.atlasGetDXY = () => db.getLatestDXY();
-    global.atlasGetActiveIntel = () => db.getActiveIntel().map(i => i.content);
+    global.atlasGetActiveIntel = (sym) => db.getActiveIntel(sym).map(i => i.content);
     // Macro fetch runs on schedule (07:00 UTC) only — not on startup to save API costs
   }).catch(e => {
     console.error('[DB] Init failed:', e.message);

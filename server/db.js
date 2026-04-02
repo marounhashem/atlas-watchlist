@@ -201,9 +201,11 @@ function initSchema() {
   db.run(`CREATE TABLE IF NOT EXISTS market_intel (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     content TEXT NOT NULL,
+    symbol TEXT DEFAULT NULL,
     expires_at INTEGER NOT NULL,
     ts INTEGER NOT NULL
   )`);
+  try { db.run('ALTER TABLE market_intel ADD COLUMN symbol TEXT DEFAULT NULL'); } catch(e) {}
 
   // DXY reference — stored but not scored
   db.run(`CREATE TABLE IF NOT EXISTS dxy_reference (
@@ -909,14 +911,17 @@ function updateWatchOutcome(id, outcome, pnlPct) {
 }
 
 // ── Market intel ─────────────────────────────────────────────────────────────
-function insertMarketIntel(content) {
-  const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24h
-  run('INSERT INTO market_intel (content, expires_at, ts) VALUES (?,?,?)',
-    [content, expiresAt, Date.now()]);
+function insertMarketIntel(content, symbol = null) {
+  const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+  run('INSERT INTO market_intel (content, symbol, expires_at, ts) VALUES (?,?,?,?)',
+    [content, symbol || null, expiresAt, Date.now()]);
   persist();
 }
 
-function getActiveIntel() {
+function getActiveIntel(symbol = null) {
+  if (symbol) {
+    return all('SELECT * FROM market_intel WHERE expires_at > ? AND (symbol IS NULL OR symbol = ?) ORDER BY ts DESC', [Date.now(), symbol]);
+  }
   return all('SELECT * FROM market_intel WHERE expires_at > ? ORDER BY ts DESC', [Date.now()]);
 }
 
