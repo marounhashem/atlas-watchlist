@@ -142,7 +142,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.11'; // Nikkei-JPY correlation in scorer
+const SCORER_VERSION = '20260401.11'; // intel key levels scoring — resistance/support proximity
 
 function scoreBias(data) {
   // v2: bias score is now -8 to +8 (emaScore 5TF + vwapDir + rsi×2 + macd + struct4h)
@@ -997,6 +997,38 @@ function scoreSymbol(symbol) {
       }
     } catch(e) {}
   }
+
+  // ─�� Intel key levels scoring ────────────────────────────────────────────────
+  // If active intel has key_levels for this symbol, check price proximity
+  try {
+    const intelItems = require('./db').getActiveIntel(symbol);
+    for (const item of intelItems) {
+      const levels = JSON.parse(item.key_levels || '[]')
+        .map(l => parseFloat(String(l).replace(/,/g, '')))
+        .filter(n => !isNaN(n) && n > 0);
+      if (levels.length === 0) continue;
+
+      const cp = data.close || 0;
+      if (cp <= 0) break;
+      const nearest = levels.reduce((a, b) => Math.abs(b - cp) < Math.abs(a - cp) ? b : a);
+      const distPct = Math.abs(nearest - cp) / cp * 100;
+
+      if (distPct <= 0.3) {
+        // AT the level
+        const isResistance = nearest > cp;
+        if (direction === 'LONG' && isResistance) { conflictMultiplier *= 0.80; macroNote += ` · ⚠ Intel: at resistance ${nearest}`; }
+        else if (direction === 'SHORT' && !isResistance) { conflictMultiplier *= 0.80; macroNote += ` · ⚠ Intel: at support ${nearest}`; }
+        else if (direction === 'LONG' && !isResistance) { conflictMultiplier *= 1.08; macroNote += ` · ✓ Intel: at support ${nearest}`; }
+        else if (direction === 'SHORT' && isResistance) { conflictMultiplier *= 1.08; macroNote += ` · ✓ Intel: at resistance ${nearest}`; }
+        break;
+      } else if (distPct <= 1.0) {
+        // Approaching
+        const approaching = (direction === 'LONG' && nearest > cp) || (direction === 'SHORT' && nearest < cp);
+        if (approaching) { conflictMultiplier *= 0.92; macroNote += ` · ⚠ Intel: approaching ${nearest} (${distPct.toFixed(1)}%)`; }
+        break;
+      }
+    }
+  } catch(e) {}
 
   // ── COT — disabled for spot trading ─────────────────────────────────────────
   // Weekly institutional positioning is not relevant for 2-4h spot entries.
