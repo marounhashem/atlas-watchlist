@@ -206,6 +206,11 @@ function initSchema() {
     ts INTEGER NOT NULL
   )`);
   try { db.run('ALTER TABLE market_intel ADD COLUMN symbol TEXT DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE market_intel ADD COLUMN summary TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE market_intel ADD COLUMN bias TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE market_intel ADD COLUMN affected_symbols TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE market_intel ADD COLUMN key_levels TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE market_intel ADD COLUMN time_horizon TEXT'); } catch(e) {}
 
   // DXY reference — stored but not scored
   db.run(`CREATE TABLE IF NOT EXISTS dxy_reference (
@@ -911,11 +916,18 @@ function updateWatchOutcome(id, outcome, pnlPct) {
 }
 
 // ── Market intel ─────────────────────────────────────────────────────────────
-function insertMarketIntel(content, symbol = null) {
+function insertMarketIntel(content, symbol = null, analysis = null) {
   const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
-  run('INSERT INTO market_intel (content, symbol, expires_at, ts) VALUES (?,?,?,?)',
-    [content, symbol || null, expiresAt, Date.now()]);
+  run(`INSERT INTO market_intel (content, symbol, summary, bias, affected_symbols, key_levels, time_horizon, expires_at, ts)
+    VALUES (?,?,?,?,?,?,?,?,?)`,
+    [content, symbol || null,
+     analysis?.summary || null, analysis?.bias || null,
+     analysis?.affected_symbols ? JSON.stringify(analysis.affected_symbols) : null,
+     analysis?.key_levels ? JSON.stringify(analysis.key_levels) : null,
+     analysis?.time_horizon || null,
+     expiresAt, Date.now()]);
   persist();
+  return get("SELECT last_insert_rowid() as id")?.id;
 }
 
 function getActiveIntel(symbol = null) {

@@ -1047,6 +1047,20 @@ async function buildMorningBrief() {
     }
   } catch(e) {}
 
+  // Active market intel
+  try {
+    const activeIntel = db.getActiveIntel();
+    if (activeIntel.length > 0) {
+      lines.push('<b>📡 ACTIVE MARKET INTEL</b>');
+      for (const item of activeIntel.slice(0, 4)) {
+        const biasIcon = item.bias === 'BULLISH' ? '📈' : item.bias === 'BEARISH' ? '📉' : '➡️';
+        lines.push(`${biasIcon} ${item.summary || item.content?.slice(0, 80)}`);
+        try { const syms = JSON.parse(item.affected_symbols || '[]'); if (syms.length) lines.push(`   Affects: ${syms.join(', ')}`); } catch(e) {}
+      }
+      lines.push('');
+    }
+  } catch(e) {}
+
   // Active signals
   const activeSignals = getCurrentCycleSignals(20).filter(s =>
     s.outcome === 'OPEN' || s.outcome === 'ACTIVE'
@@ -1188,14 +1202,30 @@ app.get('/api/market-intel', (req, res) => {
   res.json(db.getActiveIntel());
 });
 
-app.post('/api/market-intel', (req, res) => {
+app.post('/api/market-intel', async (req, res) => {
   const { content, symbol } = req.body;
   if (!content) return res.status(400).json({ error: 'Need content' });
   const { resolveSymbol } = require('./symbolAliases');
-  // Auto-detect symbol from content if not explicitly provided
   const resolvedSym = symbol || resolveSymbol(content) || null;
-  db.insertMarketIntel(content, resolvedSym);
-  res.json({ ok: true, symbol: resolvedSym || 'global', autoDetected: !symbol && !!resolvedSym });
+
+  // Analyse with Haiku if API key available
+  let analysis = null;
+  try {
+    if (process.env.ANTHROPIC_API_KEY) {
+      const prompt = `Analyse this market research note. Return ONLY valid JSON, no markdown:\n{"summary":"<2 sentences max>","bias":"BULLISH|BEARISH|NEUTRAL|MIXED","affected_symbols":["SYMBOL"],"key_levels":["level"],"time_horizon":"INTRADAY|SWING|LONG_TERM"}\n\nValid symbols: GOLD,SILVER,OILWTI,BTCUSD,ETHUSD,US30,US100,US500,DE40,UK100,J225,HK50,CN50,COPPER,PLATINUM,EURUSD,GBPUSD,USDJPY,USDCHF,USDCAD,AUDUSD,NZDUSD,EURJPY,EURGBP,EURAUD,EURCHF,GBPJPY,GBPCHF,AUDJPY\nAliases: NKD/Nikkei=J225, WTI/Crude=OILWTI, Dow=US30, Nasdaq=US100, SPX=US500, DAX=DE40, FTSE=UK100\n\nResearch:\n${content}`;
+      const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 300, messages: [{ role: 'user', content: prompt }] })
+      });
+      const apiData = await apiRes.json();
+      const text = apiData.content?.[0]?.text || '{}';
+      analysis = JSON.parse(text.replace(/```json|```/g, '').trim());
+      console.log(`[Intel] Haiku analysis: ${analysis.bias} — ${analysis.summary?.slice(0, 80)}`);
+    }
+  } catch(e) { console.error('[Intel] Haiku analysis error:', e.message); }
+
+  const id = db.insertMarketIntel(content, resolvedSym || analysis?.affected_symbols?.[0] || null, analysis);
+  res.json({ ok: true, id, symbol: resolvedSym || 'global', ...analysis });
 });
 
 app.delete('/api/market-intel/:id', (req, res) => {
@@ -2215,7 +2245,14 @@ server.listen(PORT, () => {
     // Expose macro context globally so scorer.js can access it in-process
     global.atlasGetMacroContext = getMacroContext;
     global.atlasGetDXY = () => db.getLatestDXY();
-    global.atlasGetActiveIntel = (sym) => db.getActiveIntel(sym).map(i => i.content);
+    global.atlasGetActiveIntel = (sym) => {
+      const items = db.getActiveIntel();
+      return items.filter(item => {
+        if (!item.affected_symbols && !item.symbol) return true; // global
+        if (item.symbol === sym) return true;
+        try { return JSON.parse(item.affected_symbols || '[]').includes(sym); } catch(e) { return true; }
+      }).map(i => i.summary || i.content);
+    };
     // Macro fetch runs on schedule (07:00 UTC) only — not on startup to save API costs
   }).catch(e => {
     console.error('[DB] Init failed:', e.message);

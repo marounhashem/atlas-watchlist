@@ -554,6 +554,7 @@
     <div class="mtab" id="mtab-forex" onclick="switchMainTab('forex')">FOREX <span id="fx-count" style="font-size:9px;color:var(--dim);font-weight:400;"></span></div>
     <div class="mtab" id="mtab-global" onclick="switchMainTab('global')" style="color:var(--teal)">🌐 GLOBAL</div>
     <div class="mtab" id="mtab-idea" onclick="switchMainTab('idea')">💡 IDEA</div>
+    <div class="mtab" id="mtab-intel" onclick="switchMainTab('intel')" style="color:var(--amber,var(--watch))">📡 INTEL</div>
   </div>
 
   <!-- Signals pane -->
@@ -567,21 +568,6 @@
         <div class="fbtn" onclick="setFilter('LONG')">LONG</div>
         <div class="fbtn" onclick="setFilter('SHORT')">SHORT</div>
         <div class="fbtn" id="past-tab-btn" onclick="setFilter('PAST')">PAST <span id="past-count" style="opacity:.6;font-size:9px;"></span></div>
-      </div>
-    </div>
-    <!-- Intel panel -->
-    <div id="intel-panel" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:8px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;" onclick="document.getElementById('intel-body').style.display=document.getElementById('intel-body').style.display==='none'?'block':'none'">
-        <span style="font-size:10px;font-weight:700;letter-spacing:1px;">📡 MARKET INTEL</span>
-        <span id="intel-badge" style="font-size:9px;color:var(--dim);"></span>
-      </div>
-      <div id="intel-body" style="display:none;margin-top:6px;">
-        <div style="display:flex;gap:4px;margin-bottom:6px;">
-          <input id="intel-symbol" type="text" placeholder="Symbol (blank=global)" style="width:80px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 6px;color:var(--text);font-size:10px;text-transform:uppercase;">
-          <input id="intel-input" type="text" placeholder="e.g. Iran ceasefire talks progressing" style="flex:1;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 8px;color:var(--text);font-size:10px;">
-          <button onclick="injectIntel()" style="background:var(--accent);color:var(--bg);border:none;border-radius:4px;padding:4px 10px;font-size:9px;font-weight:700;cursor:pointer;">INJECT</button>
-        </div>
-        <div id="intel-list"></div>
       </div>
     </div>
     <div id="signals-container"><div class="empty">Waiting for signals...<br>Technical alerts will appear here.</div></div>
@@ -628,6 +614,24 @@
   </div>
 
   <!-- Settings pane -->
+  <!-- Intel pane -->
+  <div class="main-pane" id="pane-intel">
+    <div style="padding:12px 0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div class="sec" style="margin:0;color:var(--amber,var(--watch));">📡 MARKET INTEL</div>
+        <span id="intel-badge" style="font-size:11px;color:var(--amber,var(--watch));"></span>
+      </div>
+      <div style="background:var(--surface,#0f0f18);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px;">
+        <textarea id="intel-input" placeholder="Paste research, analyst notes, breaking news...&#10;Claude Haiku will summarise and detect affected symbols." style="width:100%;min-height:120px;background:var(--bg,#09090f);border:1px solid var(--border);border-radius:6px;padding:10px;color:var(--text);font-size:13px;resize:vertical;font-family:var(--sans,'Inter',sans-serif);line-height:1.5;"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center;">
+          <input id="intel-symbol" type="text" placeholder="Symbol (auto-detected)" style="width:140px;background:var(--bg,#09090f);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-size:12px;text-transform:uppercase;">
+          <button onclick="injectIntel()" id="intel-inject-btn" style="padding:8px 20px;background:var(--amber,var(--watch));border:none;border-radius:6px;color:#000;font-size:12px;font-weight:700;cursor:pointer;">ANALYSE & INJECT</button>
+        </div>
+      </div>
+      <div id="intel-list"></div>
+    </div>
+  </div>
+
   <div class="main-pane" id="pane-settings">
     <div style="padding:12px 0;font-size:10px;">
       <div class="sec" style="margin:0 0 8px;">⚙ TRADING SETTINGS</div>
@@ -1812,6 +1816,7 @@ function switchMainTab(tab) {
   if (pane) pane.classList.add('active');
   if (tab === 'forex') renderForexSignals();
   if (tab === 'global') renderGlobalSignals();
+  if (tab === 'intel') loadIntel();
   if (tab === 'settings') loadSettings();
 }
 
@@ -1963,20 +1968,38 @@ async function loadIntel() {
     const list = document.getElementById('intel-list');
     const badge = document.getElementById('intel-badge');
     if (!Array.isArray(data) || data.length === 0) {
-      if (list) list.innerHTML = '<span style="font-size:9px;color:var(--dim);">No active intel</span>';
+      if (list) list.innerHTML = '<div style="font-size:12px;color:var(--dim);padding:12px;">No active intel. Paste research notes above to inject.</div>';
       if (badge) badge.textContent = '';
       return;
     }
-    if (badge) badge.textContent = `${data.length} active`;
+    if (badge) badge.textContent = `Active: ${data.length} items`;
+    const biasColors = { BULLISH: 'var(--green,var(--proceed))', BEARISH: 'var(--red,var(--short))', NEUTRAL: 'var(--dim)', MIXED: 'var(--amber,var(--watch))' };
+    const horizonColors = { INTRADAY: 'var(--blue,var(--accent))', SWING: 'var(--teal)', LONG_TERM: 'var(--accent,#8866ff)' };
     if (list) list.innerHTML = data.map(i => {
       const expiresIn = Math.round((i.expires_at - Date.now()) / 3600000);
-      const symTag = i.symbol ? `<span style="color:var(--accent);font-weight:600;margin-right:4px;">[${esc(i.symbol)}]</span>` : '<span style="color:var(--dim);margin-right:4px;">[Global]</span>';
-      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid var(--border);font-size:9px;">
-        <span style="color:var(--text);">${symTag}${esc(i.content)}</span>
-        <div style="display:flex;gap:6px;align-items:center;">
-          <span style="color:var(--dim);">${expiresIn}h</span>
-          <span style="cursor:pointer;color:var(--short);" onclick="deleteIntel(${i.id})">×</span>
+      const biasC = biasColors[i.bias] || 'var(--dim)';
+      const horizC = horizonColors[i.time_horizon] || 'var(--dim)';
+      let affectedBadges = '';
+      try {
+        const syms = JSON.parse(i.affected_symbols || '[]');
+        affectedBadges = syms.map(s => `<span style="font-size:10px;padding:1px 6px;border-radius:3px;border:1px solid var(--border);color:var(--txt2,var(--muted));">${s}</span>`).join(' ');
+      } catch(e) {}
+      let levelsStr = '';
+      try { const lvls = JSON.parse(i.key_levels || '[]'); if (lvls.length) levelsStr = `<div style="font-size:11px;color:var(--dim);margin-top:6px;">Key levels: ${lvls.join(' | ')}</div>`; } catch(e) {}
+      return `<div style="background:var(--surface,#0f0f18);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="display:flex;gap:6px;align-items:center;">
+            ${i.bias ? `<span style="font-size:10px;font-weight:700;color:${biasC};border:1px solid ${biasC};border-radius:4px;padding:2px 8px;">${i.bias}</span>` : ''}
+            ${i.time_horizon ? `<span style="font-size:10px;color:${horizC};border:1px solid ${horizC};border-radius:4px;padding:2px 8px;">${i.time_horizon}</span>` : ''}
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <span style="font-size:11px;color:var(--dim);">${expiresIn}h</span>
+            <span style="cursor:pointer;color:var(--red,var(--short));font-size:14px;" onclick="deleteIntel(${i.id})">×</span>
+          </div>
         </div>
+        <div style="font-size:13px;color:var(--txt2,var(--muted));line-height:1.6;margin-bottom:8px;">${esc(i.summary || i.content)}</div>
+        ${affectedBadges ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">${affectedBadges}</div>` : ''}
+        ${levelsStr}
       </div>`;
     }).join('');
   } catch(e) {}
@@ -1984,12 +2007,17 @@ async function loadIntel() {
 async function injectIntel() {
   const input = document.getElementById('intel-input');
   const symInput = document.getElementById('intel-symbol');
+  const btn = document.getElementById('intel-inject-btn');
   if (!input || !input.value.trim()) return;
   const sym = symInput?.value?.trim().toUpperCase() || null;
-  await fetch('/api/market-intel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: input.value.trim(), symbol: sym }) });
-  input.value = '';
-  if (symInput) symInput.value = '';
-  loadIntel();
+  if (btn) { btn.textContent = 'Analysing...'; btn.disabled = true; }
+  try {
+    await fetch('/api/market-intel', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: input.value.trim(), symbol: sym }) });
+    input.value = '';
+    if (symInput) symInput.value = '';
+    loadIntel();
+  } catch(e) {}
+  if (btn) { btn.textContent = 'ANALYSE & INJECT'; btn.disabled = false; }
 }
 async function deleteIntel(id) {
   await fetch(`/api/market-intel/${id}`, { method: 'DELETE' });
