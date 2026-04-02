@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <title>ATLAS // WATCHLIST</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
@@ -164,16 +165,16 @@
 
   /* ── SIGNAL CARD ── */
   .card{
-    background:#0b0b14;
-    border:1px solid #14141f;
+    background:#0c0c17;
     border-radius:6px;
     overflow:hidden;
     position:relative;
+    box-shadow:0 2px 16px rgba(0,0,0,.5);
     margin-bottom:6px;
   }
   .card::before{
     content:'';position:absolute;
-    left:0;top:0;bottom:0;width:3px;
+    left:0;top:0;bottom:0;width:3px;z-index:1;
   }
   .card.proceed::before{background:#00e5a0;}
   .card.watch::before{background:#ffb340;}
@@ -183,7 +184,7 @@
   .card.win{opacity:.6;background:var(--proceed-bg);}
   .card.win::before{background:#00e5a0;}
   .card.loss{opacity:.5;background:var(--short-bg);}
-  .card.loss::before{background:#ff3d6e;}
+  .card.loss::before{background:#d46080;}
   .card.ignored{opacity:.2;filter:grayscale(.7);}
   .card.replaced{opacity:.15;filter:grayscale(.9);}
   .card.skip{opacity:.3;}
@@ -193,117 +194,122 @@
   .card-hd{
     display:flex;align-items:center;gap:10px;
     padding:8px 14px 7px 16px;
-    border-bottom:1px solid #0f0f1a;
+    background:#0e0e1b;
+    border-bottom:1px solid #111120;
   }
   .card-sym{
     font-family:'JetBrains Mono',monospace;
     font-size:15px;font-weight:700;
-    color:#e8e8f5;letter-spacing:.04em;
+    color:#f0f0ff;letter-spacing:.04em;
   }
-  .card-pair{font-size:11px;color:#28283a;font-weight:500;}
+  .card-pair{font-size:11px;color:#2e2e48;font-weight:500;}
   .card-hd-mid{flex:1;display:flex;gap:5px;align-items:center;}
   .card-tag{
-    font-size:9px;font-weight:600;letter-spacing:.1em;
+    font-size:9px;font-weight:700;letter-spacing:.1em;
     padding:2px 7px;border-radius:2px;border:1px solid;
   }
-  .tag-active{color:#4d9eff;border-color:#4d9eff30;background:#4d9eff0a;}
-  .tag-past{color:#2a2a40;border-color:#1e1e2c;background:transparent;}
-  .tag-swing{color:#00d4d4;border-color:#00d4d430;background:#00d4d40a;}
-  .tag-event{color:#ffb340;border-color:#ffb34030;background:#ffb3400a;}
+  .tag-active{color:#4d9eff;border-color:#4d9eff40;background:#4d9eff10;}
+  .tag-past{color:#2e2e48;border-color:#1e1e2c;background:transparent;}
+  .tag-swing{color:#00d4d4;border-color:#00d4d440;background:#00d4d410;}
+  .tag-event{color:#ffb340;border-color:#ffb34040;background:#ffb34010;}
   .card-hd-right{display:flex;align-items:center;gap:10px;}
   .card-verdict{
     font-size:10px;font-weight:700;letter-spacing:.1em;
     padding:3px 11px;border-radius:3px;border:1px solid;
   }
-  .verdict-proceed{color:#00e5a0;border-color:#00e5a040;background:#00e5a008;}
-  .verdict-watch{color:#ffb340;border-color:#ffb34040;background:transparent;}
-  .card-score-wrap{display:flex;align-items:baseline;gap:2px;}
+  .verdict-proceed{color:#00e5a0;border-color:#00e5a050;background:#00e5a010;}
+  .verdict-watch{color:#ffb340;border-color:#ffb34050;background:#ffb34010;}
+  .card-score-wrap{display:flex;align-items:baseline;gap:1px;}
   .card-score-num{
     font-family:'JetBrains Mono',monospace;
     font-size:26px;font-weight:700;line-height:1;
+    color:#e8e8f5 !important;
   }
-  .card-score-num.proceed{color:#e8e8f5;}
-  .card-score-num.watch{color:#ffb340;}
   .card-score-unit{
     font-family:'JetBrains Mono',monospace;
-    font-size:10px;color:#22223a;
+    font-size:12px;color:#44445a;margin-left:1px;
   }
   .card-ts{
     font-family:'JetBrains Mono',monospace;
-    font-size:9px;color:#18182a;
+    font-size:9px;color:#1e1e30;
   }
 
   /* ── CARD BODY ── */
   .card-body{
     display:grid;
-    grid-template-columns:190px 120px 1fr;
-    border-bottom:1px solid #0f0f1a;
-    min-height:84px;
+    grid-template-columns:190px 118px 1fr;
+    border-bottom:1px solid #12121e;
+    min-height:88px;
   }
   .card-levels{
     display:flex;flex-direction:column;
-    justify-content:center;gap:7px;
-    padding:10px 14px 10px 16px;
-    border-right:1px solid #0f0f1a;
+    justify-content:center;gap:8px;
+    padding:10px 12px 10px 16px;
+    border-right:1px solid #12121e;
+    background:#0e0e1a;
   }
   .card-direction{
     font-family:'JetBrains Mono',monospace;
     font-size:19px;font-weight:700;letter-spacing:.06em;
+    margin-bottom:1px;
   }
-  .dir-long{color:#00e5a0;}
-  .dir-short{color:#ff3d6e;}
+  .dir-long{color:#5bc8a0;}
+  .dir-short{color:#d46080;}
   .card-lvl-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;}
   .card-lvl{
-    background:#0f0f1a;border:1px solid #161622;
-    border-radius:4px;padding:5px 7px;
-    display:flex;flex-direction:column;gap:2px;
+    background:linear-gradient(145deg,#131320,#0f0f1c);
+    border:1px solid #1e1e2e;border-radius:4px;
+    padding:5px 7px;
+    display:flex;flex-direction:column;gap:3px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.03),0 1px 3px rgba(0,0,0,.3);
   }
   .card-lvl-name{
-    font-size:7px;font-weight:600;
-    letter-spacing:.12em;text-transform:uppercase;color:#1e1e30;
+    font-size:7px;font-weight:700;
+    letter-spacing:.14em;text-transform:uppercase;color:#44445a;
   }
   .card-lvl-val{
     font-family:'JetBrains Mono',monospace;
-    font-size:11px;font-weight:600;line-height:1.2;
+    font-size:11px;font-weight:700;line-height:1.2;
   }
-  .lv-entry{color:#777794;}
-  .lv-sl{color:#ff3d6e;}
-  .lv-tp{color:#00e5a0;}
+  .lv-entry{color:#9090b0;}
+  .lv-sl{color:#c07080;}
+  .lv-tp{color:#50b890;}
   .card-pills{display:flex;gap:5px;align-items:center;flex-wrap:wrap;}
   .card-pill{
     font-family:'JetBrains Mono',monospace;
-    font-size:9px;color:#2e2e44;
-    background:#0f0f1a;border:1px solid #161622;
-    border-radius:2px;padding:1px 6px;
+    font-size:9px;font-weight:600;
+    color:#7777a0;background:#111120;
+    border:1px solid #22223a;border-radius:2px;padding:2px 6px;
   }
-  .pill-mfe{color:rgba(0,229,160,.6);border-color:rgba(0,229,160,.15);}
-  .pill-exp-s{color:#ffb340;border-color:rgba(255,179,64,.3);}
-  .pill-exp-u{color:#ff3d6e;border-color:rgba(255,61,110,.3);}
+  .pill-mfe{color:rgba(91,200,160,.7);border-color:rgba(91,200,160,.2);}
+  .pill-exp-s{color:#c09040;border-color:rgba(192,144,64,.4);}
+  .pill-exp-u{color:#c06070;border-color:rgba(192,96,112,.4);}
 
   /* ── CARD BARS ── */
   .card-bars{
     display:flex;flex-direction:column;
     justify-content:center;gap:7px;
     padding:10px 10px;
-    border-right:1px solid #0f0f1a;
+    border-right:1px solid #12121e;
+    background:#0d0d19;
   }
   .bar-row{
     display:grid;
-    grid-template-columns:48px 1fr 22px;
+    grid-template-columns:52px 1fr 24px;
     align-items:center;gap:5px;
   }
-  .bar-name{font-size:8px;color:#222232;text-align:right;white-space:nowrap;font-weight:500;}
-  .bar-track{height:3px;background:#0f0f1a;border-radius:2px;overflow:hidden;}
+  .bar-name{font-size:8px;font-weight:600;color:#5a5a7a;text-align:right;white-space:nowrap;}
+  .bar-track{height:4px;background:#111120;border-radius:2px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.4);}
   .bar-fill{height:100%;border-radius:2px;}
-  .bar-hi{background:#00e5a0;}
-  .bar-mid{background:#4d9eff;}
-  .bar-lo{background:#ffb340;}
+  .bar-hi{background:#00c880;box-shadow:0 0 5px rgba(0,200,128,.25);}
+  .bar-mid{background:#4488ee;box-shadow:0 0 5px rgba(68,136,238,.25);}
+  .bar-lo{background:#e0a030;box-shadow:0 0 5px rgba(224,160,48,.25);}
   .bar-pct{
     font-family:'JetBrains Mono',monospace;
-    font-size:8px;color:#222232;text-align:right;
+    font-size:8px;color:#5a5a7a;text-align:right;font-weight:600;
   }
   .no-ob-note{
-    font-size:9px;color:#181828;font-style:italic;
+    font-size:9px;color:#282840;font-style:italic;
     display:flex;align-items:center;justify-content:center;
     height:100%;padding:4px 8px;text-align:center;line-height:1.6;
   }
@@ -311,80 +317,83 @@
   /* ── CARD REASONING ── */
   .card-reasoning{
     padding:10px 14px;
-    font-size:11px;color:#383850;line-height:1.8;
+    font-size:11px;color:#6868a0;line-height:1.85;
     display:-webkit-box;
     -webkit-line-clamp:4;
     -webkit-box-orient:vertical;
     overflow:hidden;
+    background:#0b0b16;
   }
   .card-reasoning.expanded{
     -webkit-line-clamp:unset;
     overflow:visible;
   }
-  .rsn-ok{color:#55556a;}
-  .rsn-ok::before{content:'✓ ';color:#00e5a0;font-weight:700;}
-  .rsn-warn{color:#55556a;}
-  .rsn-warn::before{content:'⚠ ';color:#ffb340;font-weight:700;}
-  .rsn-sep{color:#1a1a2a;margin:0 2px;}
+  .rsn-ok{color:#7070a8;}
+  .rsn-ok::before{content:'✓ ';color:#00c880;font-weight:700;}
+  .rsn-warn{color:#7070a8;}
+  .rsn-warn::before{content:'⚠ ';color:#e0a030;font-weight:700;}
+  .rsn-sep{color:#1e1e30;margin:0 2px;}
 
   /* ── CARD FOOTER ── */
   .card-footer{
     display:flex;align-items:center;
     justify-content:space-between;
     padding:6px 14px 6px 16px;
-    gap:8px;min-height:30px;
+    gap:8px;min-height:32px;
+    background:#0e0e1b;
+    border-top:1px solid #111120;
   }
   .card-footer-left{
     display:flex;align-items:center;gap:6px;
     flex:1;min-width:0;overflow:hidden;
   }
   .rec-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
-  .rec-dot-high{background:#ff3d6e;}
-  .rec-dot-medium{background:#ffb340;}
-  .rec-dot-partial{background:#00d4d4;}
-  .rec-dot-time{background:#a374ff;}
+  .rec-dot-high{background:#d04060;box-shadow:0 0 5px rgba(208,64,96,.5);}
+  .rec-dot-medium{background:#d0902a;box-shadow:0 0 5px rgba(208,144,42,.5);}
+  .rec-dot-partial{background:#00b8b8;}
+  .rec-dot-time{background:#9966dd;}
   .rec-msg{
     font-size:10px;font-weight:500;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
-  .rec-high{color:rgba(255,61,110,.7);}
-  .rec-medium{color:rgba(255,179,64,.7);}
-  .rec-partial{color:rgba(0,212,212,.7);}
-  .rec-time{color:rgba(163,116,255,.7);}
-  .rec-none{color:#1e1e2c;}
+  .rec-high{color:#c05070;}
+  .rec-medium{color:#c08830;}
+  .rec-partial{color:#00b8b8;}
+  .rec-time{color:#9966dd;}
+  .rec-none{color:#252538;}
   .card-footer-right{
     display:flex;align-items:center;gap:5px;flex-shrink:0;
   }
   .btn-more{
-    font-size:8px;color:#1e1e2c;
+    font-size:8px;color:#2a2a44;
     background:none;border:none;cursor:pointer;
     font-family:'JetBrains Mono',monospace;
     letter-spacing:.06em;padding:2px 4px;
     transition:color .15s;white-space:nowrap;
   }
-  .btn-more:hover{color:#44445a;}
+  .btn-more:hover{color:#5555a0;}
   .btn-analyse{
     display:inline-flex;align-items:center;gap:5px;
-    padding:4px 12px;background:transparent;
-    border:1px solid #1e1e2c;border-radius:4px;
-    color:#44445a;
-    font-size:10px;font-weight:600;letter-spacing:.07em;
-    cursor:pointer;font-family:'Space Grotesk',sans-serif;
+    padding:5px 13px;background:transparent;
+    border:1px solid #1e1e30;border-radius:4px;
+    color:#606090;font-size:10px;font-weight:600;
+    letter-spacing:.07em;cursor:pointer;
+    font-family:'Space Grotesk',sans-serif;
     transition:all .2s;white-space:nowrap;
   }
-  .btn-analyse:hover{border-color:#8866ff;color:#a374ff;background:#8866ff08;}
-  .btn-analyse-ico{font-size:9px;opacity:.7;}
+  .btn-analyse:hover{border-color:#6644cc;color:#8866ff;background:#6644cc0a;}
+  .btn-analyse-ico{font-size:9px;opacity:.6;}
   .btn-copy{
-    width:28px;height:28px;
+    width:30px;height:30px;
     display:inline-flex;align-items:center;justify-content:center;
-    background:transparent;border:1px solid #1e1e2c;
-    border-radius:4px;color:#282838;
-    font-size:13px;cursor:pointer;transition:all .2s;flex-shrink:0;
+    background:transparent;border:1px solid #1e1e30;
+    border-radius:4px;color:#303050;font-size:13px;
+    cursor:pointer;transition:all .2s;flex-shrink:0;
   }
-  .btn-copy:hover{border-color:#333348;color:#44445a;}
+  .btn-copy:hover{border-color:#484870;color:#6666a0;}
   .card-ver{
     font-family:'JetBrains Mono',monospace;
-    font-size:8px;color:#111120;
+    font-size:8px;color:#111128;
   }
 
   /* Legacy verdict classes (kept for past-trades/dossier) */
