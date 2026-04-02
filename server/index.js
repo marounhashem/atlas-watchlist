@@ -1870,20 +1870,26 @@ async function callClaudeWithSearch(prompt) {
 async function runMacroContextFetch(broadcast) {
   if (!process.env.ANTHROPIC_API_KEY) return;
 
+  const dateStr = new Date().toISOString().slice(0, 10);
   const symbolQueries = {
-    GOLD:   'gold XAU price macro outlook DXY Fed rates today',
-    SILVER: 'silver XAG price macro outlook industrial demand today',
-    OILWTI:'crude oil WTI price OPEC supply demand outlook today',
-    BTCUSD:'bitcoin BTC macro outlook institutional flows today',
-    US30:  'Dow Jones US30 macro outlook earnings Fed today',
-    US100: 'Nasdaq US100 tech macro outlook Fed rates today',
-    EURUSD:'EURUSD euro dollar macro outlook Fed ECB rates today',
-    GBPUSD:'GBPUSD pound dollar macro outlook BOE Fed rates today',
-    USDJPY:'USDJPY dollar yen macro BOJ rate hike 2026 today',
-    AUDUSD:'AUDUSD aussie dollar macro RBA China commodity today'
+    GOLD:   `GOLD price outlook today ${dateStr} — search for news from last 12 hours including any political speeches, Fed comments, geopolitical developments`,
+    SILVER: `Silver price outlook today ${dateStr} — last 12 hours industrial demand, USD, geopolitics`,
+    OILWTI: `WTI crude oil outlook today ${dateStr} — search for last 12 hours news including Trump Iran statements, OPEC, Hormuz`,
+    BTCUSD: `Bitcoin outlook today ${dateStr} — last 12 hours crypto news, ETF flows, regulation`,
+    US30:   `Dow Jones outlook today ${dateStr} — last 12 hours including Trump trade policy, tariffs, market reaction`,
+    US100:  `Nasdaq outlook today ${dateStr} — last 12 hours including tech policy, tariffs, rate expectations`,
+    EURUSD: `EURUSD outlook today ${dateStr} — last 12 hours Fed ECB USD strength`,
+    GBPUSD: `GBPUSD outlook today ${dateStr} — last 12 hours BOE Fed USD`,
+    USDJPY: `USDJPY outlook today ${dateStr} — last 12 hours BOJ Fed USD strength carry`,
+    AUDUSD: `AUDUSD outlook today ${dateStr} — last 12 hours RBA China commodity`
   };
 
-  for (const [symbol, query] of Object.entries(symbolQueries)) {
+  for (const [symbol, baseQuery] of Object.entries(symbolQueries)) {
+    // Inject active market intel into query
+    const intel = global.atlasGetActiveIntel?.() || [];
+    const query = intel.length > 0
+      ? `${baseQuery}. Known context: ${intel.join('. ')}`
+      : baseQuery;
     try {
       // Build context enrichment
       let extraContext = '';
