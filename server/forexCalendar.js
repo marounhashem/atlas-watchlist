@@ -66,13 +66,38 @@ function isEventRelevant(eventTitle, symbol) {
 function easternToUTC(dateStr, timeStr) {
   if (!timeStr) return '00:00:00';
   const [h, m, s] = timeStr.split(':').map(Number);
-  // Determine DST: approximate — EDT from second Sunday of March to first Sunday of November
-  const month = dateStr ? new Date(dateStr + 'T12:00:00Z').getMonth() + 1 : 1;
-  const offset = (month >= 3 && month <= 10) ? 4 : 5; // EDT=4, EST=5
+  // Determine DST using actual US rules:
+  // EDT starts: second Sunday of March at 2:00 AM
+  // EST starts: first Sunday of November at 2:00 AM
+  const offset = isEDT(dateStr) ? 4 : 5;
   const utcH = h + offset;
-  // Handle day rollover — date stays the same for simplicity (events rarely cross midnight)
   const finalH = utcH % 24;
   return String(finalH).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s || 0).padStart(2, '0');
+}
+
+function isEDT(dateStr) {
+  if (!dateStr) return false;
+  const d = new Date(dateStr + 'T12:00:00Z');
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth(); // 0-indexed
+  const day = d.getUTCDate();
+  if (month < 2 || month > 10) return false;  // Jan-Feb, Dec = EST
+  if (month > 2 && month < 10) return true;    // Apr-Oct = EDT
+  // March: EDT starts second Sunday
+  if (month === 2) {
+    // Find second Sunday: first day that is Sunday, then +7
+    const firstDay = new Date(Date.UTC(year, 2, 1)).getUTCDay();
+    const firstSunday = firstDay === 0 ? 1 : 8 - firstDay;
+    const secondSunday = firstSunday + 7;
+    return day >= secondSunday;
+  }
+  // November: EST starts first Sunday
+  if (month === 10) {
+    const firstDay = new Date(Date.UTC(year, 10, 1)).getUTCDay();
+    const firstSunday = firstDay === 0 ? 1 : 8 - firstDay;
+    return day < firstSunday;
+  }
+  return false;
 }
 
 // Post-event state: { symbol: { firedAt, title, actual, forecast, sentiment } }
@@ -312,7 +337,7 @@ async function runCalendarCheck(broadcast) {
     console.log(`[Calendar] Processing ${highImpact.length} HIGH impact events for storage...`);
 
     for (const { event: e, sources } of highImpact) {
-      // FF dates are in US Eastern time — convert to UTC for storage
+      // All FairEconomy feeds (FF, EE, MM, CC) publish times in US Eastern — convert to UTC
       const eventDate = e.date ? e.date.slice(0, 10) : null;
       const rawTime = e.date ? e.date.slice(11, 19) || null : null;
       if (!eventDate) continue;

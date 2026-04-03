@@ -923,7 +923,7 @@ app.get('/api/data/:symbol', (req, res) => {
 app.get('/api/score-now', async (req, res) => {
   if (!dbReady) return res.json({ error: 'DB not ready' });
   let results;
-  try { results = await scoreAllPriority(); }
+  try { results = scoreAllPriority(); }
   catch(e) { console.error('[Score-now] error:', e); return res.json({ error: 'Scoring failed' }); }
   const proceeds = results.filter(r => r.verdict === 'PROCEED');
   const watches  = results.filter(r => r.verdict === 'WATCH');
@@ -2018,7 +2018,7 @@ app.post('/api/paper-outcome', (req, res) => {
 cron.schedule('* * * * *', async () => {
   if (!dbReady) return;
   try {
-    const results = await scoreAllPriority();
+    const results = scoreAllPriority();
     _lastScoringResults = results; // cache for instant HTTP response
     const proceeds = results.filter(r => r.verdict === 'PROCEED');
     const watches  = results.filter(r => r.verdict === 'WATCH');
