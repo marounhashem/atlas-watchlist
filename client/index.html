@@ -213,6 +213,10 @@
   .tag-swing{color:#00d4d4;border-color:#00d4d440;background:#00d4d410;}
   .tag-event{color:#ffb340;border-color:#ffb34040;background:#ffb34010;}
   .tag-holiday{color:#888;border-color:#333;background:transparent;}
+  .quality-badge{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px;border:1px solid;letter-spacing:.05em;}
+  .quality-a{color:#00c880;border-color:#00c88040;background:#00c88010;}
+  .quality-b{color:#6868a0;border-color:#6868a040;background:transparent;}
+  .quality-c{color:#c07080;border-color:#c0708040;background:#c0708008;}
   .card-hd-right{display:flex;align-items:center;gap:10px;}
   .card-verdict{
     font-size:10px;font-weight:700;letter-spacing:.1em;
@@ -1367,6 +1371,7 @@ function renderCard(sig, isPast) {
     + '<div class="card-score-wrap">'
     + '<span class="card-score-num '+scoreClass+'">'+(sig.score||0)+'</span>'
     + '</div>'
+    + (sig.quality ? '<span class="quality-badge quality-'+sig.quality.toLowerCase()+'">'+sig.quality+'</span>' : '')
     + '<span class="card-ts">'+ts+'</span>'
     + '</div>'
     + '</div>'
@@ -1568,6 +1573,12 @@ function renderResearch(box, raw, sig) {
   const d = parseJSON(raw);
   if(!d) { box.innerHTML=`<div style="font-size:12px;color:var(--muted);line-height:1.7;white-space:pre-wrap;">${raw||'No data'}</div>`; return; }
 
+  // Score trace at top of analyse panel
+  let traceSection = '';
+  if (sig && sig.score_trace) {
+    traceSection = '<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:#444466;padding:6px 0 10px;border-bottom:1px solid #111120;margin-bottom:8px;">📊 ' + esc(sig.score_trace) + '</div>';
+  }
+
   // Position sizing section (moved from card body to analyse panel)
   let sizingSection = '';
   const ps = sig && sig.positionSize;
@@ -1590,6 +1601,7 @@ function renderResearch(box, raw, sig) {
   const bullet = (items, color, bg) => items.map(s => `<div style="font-size:12px;color:var(--txt2,var(--muted));padding:5px 8px;border-radius:4px;margin-bottom:3px;background:${bg};border-left:2px solid ${color};line-height:1.5;">${s}</div>`).join('');
 
   box.innerHTML = `<div style="display:flex;flex-direction:column;gap:12px;">
+    ${traceSection}
     ${sizingSection}
     <div style="display:flex;align-items:center;gap:16px;padding-bottom:10px;border-bottom:1px solid var(--border);">
       <div style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:800;color:${sentColor};letter-spacing:.06em;">${d.sentiment||'NEUTRAL'}</div>

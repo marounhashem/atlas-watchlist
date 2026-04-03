@@ -13,9 +13,10 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260403.4'`
+`SCORER_VERSION = '20260403.5'`
 
 Changes since 20260401.15:
+- **20260403.5** — Quality tier A/B/C (positive vs negative gate count), post-event LARGE cap lift (+5 when beat+trend agree), score trace field (Raw→Cap→Mult→Regime→Post), COT re-enabled with age decay (full <48h, 75% 2-4d, 50% 4-6d, 20% >6d)
 - **20260403.4** — conflictMultiplier floor 0.65, momentum <25% force WATCH gate, macro event-superseded decay (HIGH event after macro → max staleness), DXY direct USD pairs ×1.07/×0.92 (crosses ×1.03/×0.97)
 - **20260403.3** — CRITICAL: NFP Telegram alert fixed — three simultaneous bugs prevented ANY event alerts from ever firing: (1) fired detection used Eastern not UTC timestamp (4h offset), (2) actual field never stored in DB upsert (silently dropped), (3) sentiment used forecast as actual fallback (always beat=0). Added retry mechanism for delayed actuals. Note: no event alerts fired since system launch.
 - **20260403.2** — OPPORTUNITY scoring finally works end-to-end (currency was missing from getPostEventState() return, ×1.10/×0.90 never fired). Opposite-signal expiry filtered to outcome='OPEN' only (previously could auto-expire ACTIVE live trades). WATCH paper tracking removed (queried wrong table). Accurate DST detection using actual US transition rules. All FairEconomy feeds confirmed Eastern timezone.
@@ -75,6 +76,8 @@ Changes since 20260401.7:
 | outcome_notes | TEXT | Auto-generated explanation |
 | partial_closed | INTEGER | 1 if partial close was recommended |
 | breakdown | TEXT | JSON `{bias, fxssi, ob, session}` scores for bar rendering |
+| quality | TEXT | A/B/C quality tier based on positive vs negative gate count |
+| score_trace | TEXT | Score computation path: Raw→Cap→Mult→Regime→Post |
 
 ## Weighted structure scoring
 

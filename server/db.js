@@ -355,6 +355,8 @@ function initSchema() {
   try { db.run('ALTER TABLE watch_signals ADD COLUMN event_risk_tag TEXT DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN macro_context_available INTEGER DEFAULT 0'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN breakdown TEXT DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN quality TEXT DEFAULT NULL'); } catch(e) {}
+  try { db.run('ALTER TABLE signals ADD COLUMN score_trace TEXT DEFAULT NULL'); } catch(e) {}
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
   try { db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL'); } catch(e) { console.error('[DB] Backfill error:', e.message); }
 
@@ -438,13 +440,14 @@ function getLatestMarketData(symbol) {
 
 function insertSignal(signal) {
   const breakdownJson = signal.breakdown ? JSON.stringify(signal.breakdown) : null;
-  run(`INSERT INTO signals (symbol,ts,direction,score,verdict,entry,sl,tp,rr,session,reasoning,scorer_version,macro_context_available,event_risk_tag,weighted_struct_score,is_swing,expires_at,breakdown)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  run(`INSERT INTO signals (symbol,ts,direction,score,verdict,entry,sl,tp,rr,session,reasoning,scorer_version,macro_context_available,event_risk_tag,weighted_struct_score,is_swing,expires_at,breakdown,quality,score_trace)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [signal.symbol, Date.now(), signal.direction, signal.score, signal.verdict,
      signal.entry, signal.sl, signal.tp, signal.rr, signal.session, signal.reasoning,
      signal.scorerVersion || null, signal.macroContextAvailable ? 1 : 0,
      signal.eventRiskTag || null, signal.weightedStructScore || null,
-     signal.isSwing ? 1 : 0, signal.expiresAt || null, breakdownJson]);
+     signal.isSwing ? 1 : 0, signal.expiresAt || null, breakdownJson,
+     signal.quality || 'B', signal.scoreTrace || null]);
   const row = get("SELECT last_insert_rowid() as id");
   persist();
   return row ? row.id : null;

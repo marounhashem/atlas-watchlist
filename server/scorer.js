@@ -153,7 +153,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260403.4'; // Multiplier floor, momentum WATCH, macro event decay, DXY direct pairs
+const SCORER_VERSION = '20260403.5'; // Quality tier, post-event cap lift, score trace, COT age decay
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -1108,13 +1108,28 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
-  // ── COT — disabled for spot trading ─────────────────────────────────────────
-  // Weekly institutional positioning is not relevant for 2-4h spot entries.
-  // COT remains in morning brief and macro context for informational purposes.
-  // try {
-  //   const { getLatestCOT } = getCotFetcher();
-  //   const cot = getLatestCOT(symbol);
-  //   if (cot) { ... COT penalty ... }
+  // ── COT with age decay — re-enabled with fading weight ─────────────────────
+  // Weekly CFTC data: full weight <48h after release, fades over the week
+  try {
+    const { getLatestCOT } = getCotFetcher();
+    const cot = getLatestCOT(symbol);
+    if (cot && cot.netNonComm !== undefined) {
+      const crowded = Math.abs(cot.netNonComm) > 100000;
+      if (crowded) {
+        const isLong = cot.netNonComm > 0;
+        const against = (isLong && direction === 'SHORT') || (!isLong && direction === 'LONG');
+        const withDir = (isLong && direction === 'LONG') || (!isLong && direction === 'SHORT');
+        const rawMult = against ? 0.88 : withDir ? 1.05 : 1.0;
+        // Age decay: full weight <48h, 75% at 2-4d, 50% at 4-6d, 20% at >6d
+        const cotAgeH = cot.ts ? (Date.now() - cot.ts) / 3600000 : 999;
+        const fade = cotAgeH < 48 ? 1.0 : cotAgeH < 96 ? 0.75 : cotAgeH < 144 ? 0.50 : 0.20;
+        const fadedMult = 1 + (rawMult - 1) * fade;
+        conflictMultiplier *= fadedMult;
+        if (against) macroNote += ` · ⚠ COT crowded ${isLong ? 'LONG' : 'SHORT'} (${Math.round(cot.netNonComm/1000)}k)${fade < 1 ? ' [' + Math.round(cotAgeH/24) + 'd old]' : ''}`;
+        else if (withDir) macroNote += ` · ✓ COT confirms ${direction}${fade < 1 ? ' [' + Math.round(cotAgeH/24) + 'd old]' : ''}`;
+      }
+    }
+  } catch(e) {}
 
   // ── Rate differential carry gate ────────────────────────────────────────────
   // Strong carry differentials penalise counter-carry trades, reward with-carry
@@ -1897,6 +1912,14 @@ function scoreSymbol(symbol) {
         if (pairBias === direction) {
           macroAdjustedScore = Math.round(macroAdjustedScore * 1.10);
           macroNote += ` · ✓ ${postState.event} ${sent.beat > 0 ? 'beat' : 'miss'} confirms`;
+          // LARGE confirmed event — lift structure cap by 5 points (beat AND trend agree)
+          if (sent.magnitude === 'LARGE' && sent.beat !== 0 && sent.trend !== 0 && sent.beat === sent.trend) {
+            const liftedCap = Math.min(structureCap + 5, 92);
+            if (liftedCap > structureCap) {
+              macroAdjustedScore = Math.min(liftedCap, Math.min(95, macroAdjustedScore));
+              macroNote += ` · ✓ LARGE confirmed — cap lifted to ${liftedCap}`;
+            }
+          }
         } else if (pairBias && pairBias !== direction) {
           macroAdjustedScore = Math.round(macroAdjustedScore * 0.90);
           macroNote += ` · ⚠ ${postState.event} result contradicts ${direction}`;
@@ -2055,11 +2078,29 @@ function scoreSymbol(symbol) {
     console.error(`[Scorer] ${symbol} suspicious TP=${tp} (entry=${entry}, sl=${sl}) — likely ATR calculation error`);
   }
 
+  // ── Quality tier A/B/C ──────────────────────────────────────────────────────
+  const bd = { bias: biasSc, fxssi: fxssiSc, ob: obSc, session: sessionSc };
+  let qPos = 0, qNeg = 0;
+  if (bd.fxssi > 0.75) qPos++; if (bd.bias > 0.80) qPos++; if (bd.ob > 0.80) qPos++;
+  if (macroContextAvailable) qPos++; if (data.ob_absorption) qPos++;
+  if (bd.fxssi < 0.45) qNeg++; if (bd.ob < 0.40) qNeg++; if (!macroContextAvailable) qNeg++;
+  if (momentumForceWatch) qNeg++; if (bankHolidayFlag) qNeg++;
+  const quality = (qPos - qNeg >= 2) ? 'A' : (qPos - qNeg >= 0) ? 'B' : 'C';
+
+  // ── Score trace ────────────────────────────────────────────────────────────
+  const scoreTrace = [
+    'Raw:' + Math.round(rawScore),
+    'Cap:' + structureCap + '(s:' + absWeightedStruct.toFixed(1) + ')',
+    'x' + conflictMultiplier.toFixed(2) + '→' + score,
+    regimeMultiplier !== 1.0 ? 'Reg:x' + regimeMultiplier.toFixed(2) + '→' + finalScore : null,
+    macroAdjustedScore !== finalScore ? 'Post→' + macroAdjustedScore : null
+  ].filter(Boolean).join(' ');
+
   return {
     symbol, label: cfg.label, direction, score: macroAdjustedScore, verdict: macroVerdict,
     entry, sl, tp, rr,
     session: getSessionNow(),
-    breakdown: { bias: biasSc, fxssi: fxssiSc, ob: obSc, session: sessionSc },
+    breakdown: bd,
     reasoning: finalReasoning,
     entrySource: entrySource || 'price',
     fxssiStale: fxssiStale || false,
@@ -2069,6 +2110,8 @@ function scoreSymbol(symbol) {
     weightedStructScore: Math.round(absWeightedStruct * 10) / 10,
     isSwing: isSwingSignal({ verdict: macroVerdict, session: getSessionNow(), rr, score: macroAdjustedScore, eventRiskTag }, absWeightedStruct),
     positionSize: (entry && sl && cfg.assetClass) ? calculatePositionSize(entry, sl, cfg.assetClass, symbol) : null,
+    quality,
+    scoreTrace,
     ts: Date.now()
   };
 }
