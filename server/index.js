@@ -51,24 +51,30 @@ setInterval(() => {
 let dbReady = false;
 
 // Custom body parser that handles Pine Script's invalid NaN values
-app.use((req, res, next) => {
-  if (req.method !== 'POST') return next();
-  let body = '';
-  req.on('data', chunk => body += chunk.toString());
-  req.on('end', () => {
+// Body parser — express.json for speed, with raw body capture for NaN sanitization fallback
+app.use(express.json({
+  limit: '1mb',
+  verify: (req, res, buf) => { req._rawBody = buf.toString(); } // capture raw for NaN fallback
+}));
+// Fallback: Pine sometimes sends NaN/Infinity which fails JSON.parse — sanitize and re-parse
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.parse.failed' && req._rawBody) {
     try {
-      const sanitized = body
+      const sanitized = req._rawBody
         .replace(/:NaN([,}\]])/g, ':null$1')
         .replace(/: NaN([,}\]])/g, ':null$1')
         .replace(/:NaN$/g, ':null')
         .replace(/:Infinity/g, ':null')
         .replace(/:-Infinity/g, ':null');
       req.body = JSON.parse(sanitized);
-    } catch(e) {
-      req.body = {};
-    }
+      console.log('[Body] NaN sanitized for', req.path);
+    } catch(e) { req.body = {}; }
+    next(); // continue without error
+  } else if (err) {
+    next(err);
+  } else {
     next();
-  });
+  }
 });
 app.use(express.static(path.join(__dirname, '../client')));
 
@@ -114,20 +120,20 @@ wss.on('connection', ws => {
 //   "bias": 2, "biasScore": 0.72, "structure": "bullish",
 //   "fvgPresent": true, "volume": 12400 }
 app.post('/webhook/pine', (req, res) => {
-  // Respond IMMEDIATELY — TradingView times out after 3 seconds
-  // Auth + basic validation before 200 OK
-  if (!dbReady) return res.status(503).json({ error: 'DB initialising, retry in 5s' });
-  const ws = process.env.WEBHOOK_SECRET;
-  if (ws && req.body.secret !== ws) return res.status(401).json({ error: 'Unauthorized' });
-  const rawSym = req.body.symbol || req.body.ticker || null;
-  if (!rawSym) return res.status(400).json({ error: 'Missing symbol' });
-
+  // FIRST LINE — respond 200 before ANY processing
+  const t0 = Date.now();
   res.status(200).json({ ok: true });
+  console.log('[Webhook] 200 sent to', req.body?.symbol || 'unknown', 'in', Date.now() - t0, 'ms');
 
-  // Process asynchronously after response sent
+  // ALL processing happens async after response
   setImmediate(() => {
     try {
-      const data = req.body;
+      if (!dbReady) { console.log('[Webhook] DB not ready, skipping'); return; }
+      const ws = process.env.WEBHOOK_SECRET;
+      if (ws && req.body?.secret !== ws) { console.warn('[Webhook] Auth failed'); return; }
+      const data = req.body || {};
+      const rawSym = data.symbol || data.ticker || null;
+      if (!rawSym) return;
       const sym = rawSym.toUpperCase()
         .replace('XAUUSD','GOLD').replace('XAGUSD','SILVER')
         .replace('USOIL','OILWTI').replace('WTI','OILWTI').replace('OIL_CRUDE','OILWTI')
@@ -241,14 +247,13 @@ app.post('/webhook/pine', (req, res) => {
 
 // ── Webhook: FXSSI manual paste ──────────────────────────────────────────────
 app.post('/webhook/fxssi', (req, res) => {
-  const ws = process.env.WEBHOOK_SECRET;
-  if (ws && req.body.secret !== ws) return res.status(401).json({ error: 'Unauthorized' });
-  const { symbol, longPct, shortPct, trapped } = req.body;
-  if (!symbol) return res.status(400).json({ error: 'Missing symbol' });
-
   res.status(200).json({ ok: true });
 
   setImmediate(() => {
+    const ws = process.env.WEBHOOK_SECRET;
+    if (ws && req.body?.secret !== ws) return;
+    const { symbol, longPct, shortPct, trapped } = req.body || {};
+    if (!symbol) return;
     try {
       const sym = symbol.toUpperCase();
       const latest = require('./db').getLatestMarketData(sym);
