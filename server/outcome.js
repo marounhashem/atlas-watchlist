@@ -139,9 +139,13 @@ function checkOutcomes(broadcast) {
       if (broadcast) broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction, outcome: 'ACTIVE', ts: Date.now() });
 
       // Only expire opposite OPEN signals — ACTIVE signals are real trades, don't auto-close
+      // IMPORTANT: query OPEN-only, NOT getLatestOpenSignal which returns ACTIVE first
       const oppositeDir = direction === 'LONG' ? 'SHORT' : 'LONG';
       const dbMod = require('./db');
-      const oppositeOpen = dbMod.getLatestOpenSignal(sig.symbol, oppositeDir);
+      const allOpen = dbMod.getOpenSignals().filter(s =>
+        s.symbol === sig.symbol && s.direction === oppositeDir && s.outcome === 'OPEN'
+      );
+      const oppositeOpen = allOpen[0] || null;
       if (oppositeOpen) {
         dbMod.updateOutcome(oppositeOpen.id, 'EXPIRED', 0);
         console.log(`[Outcome] ${sig.symbol} — expired opposite ${oppositeDir} OPEN (id:${oppositeOpen.id})`);
@@ -277,29 +281,9 @@ function checkOutcomes(broadcast) {
       }
     }
 
-    // ── WATCH paper trade tracking ────────────────────────────────────────────
-    // Only record paper outcome if entry was actually touched first
-    // Prevents inflated stats from signals that were never realistically enterable
-    if (sig.verdict === 'WATCH' && !sig.paper_outcome && entry && sl && tp) {
-      const watchEntryTouched = direction === 'LONG'
-        ? price <= entry + tolerance
-        : price >= entry - tolerance;
-      if (watchEntryTouched) {
-        let paperOutcome = null;
-        if (direction === 'LONG') {
-          if (price >= tp) paperOutcome = 'WIN';
-          else if (price <= sl) paperOutcome = 'LOSS';
-        } else {
-          if (price <= tp) paperOutcome = 'WIN';
-          else if (price >= sl) paperOutcome = 'LOSS';
-        }
-        if (paperOutcome) {
-          updatePaperOutcome(id, paperOutcome);
-          console.log(`[Outcome] ${sig.symbol} ${direction} WATCH → paper ${paperOutcome}`);
-          if (broadcast) broadcast({ type: 'PAPER_OUTCOME', signalId: id, symbol: sig.symbol, direction, paperOutcome, ts: Date.now() });
-        }
-      }
-    }
+    // WATCH paper trade tracking removed — WATCH signals are stored in watch_signals table
+    // (not the signals table), so this code block was unreachable. Paper tracking for
+    // WATCH signals would need to query watch_signals separately.
   }
 }
 

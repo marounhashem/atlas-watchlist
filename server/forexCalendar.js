@@ -71,6 +71,10 @@ function easternToUTC(dateStr, timeStr) {
   // EST starts: first Sunday of November at 2:00 AM
   const offset = isEDT(dateStr) ? 4 : 5;
   const utcH = h + offset;
+  // Note: if utcH >= 24, the event crosses midnight into the next day.
+  // We return the time portion only — the date is handled by the caller.
+  // HIGH impact events are always during business hours (8:00-17:00 ET)
+  // so utcH will be 12:00-22:00 UTC (EDT) or 13:00-22:00 UTC (EST) — no rollover.
   const finalH = utcH % 24;
   return String(finalH).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s || 0).padStart(2, '0');
 }
@@ -501,6 +505,7 @@ function getPostEventState(symbol) {
       phase: 'OPPORTUNITY',
       minutesAgo: Math.round(elapsed / 60000),
       event: state.title,
+      currency: state.currency,
       sentiment: state.sentiment,
       actual: state.actual,
       forecast: state.forecast
