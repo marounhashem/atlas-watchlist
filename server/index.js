@@ -120,10 +120,9 @@ wss.on('connection', ws => {
 //   "bias": 2, "biasScore": 0.72, "structure": "bullish",
 //   "fvgPresent": true, "volume": 12400 }
 app.post('/webhook/pine', (req, res) => {
-  // FIRST LINE — respond 200 before ANY processing
-  const t0 = Date.now();
+  const sym = req.body?.symbol || req.body?.ticker || 'unknown';
   res.status(200).json({ ok: true });
-  console.log('[Webhook] 200 sent to', req.body?.symbol || 'unknown', 'in', Date.now() - t0, 'ms');
+  console.log(`[Webhook] ${sym} received`);
 
   // ALL processing happens async after response
   setImmediate(() => {
