@@ -1,3 +1,4 @@
+console.log('[Startup] 1 — process started', Date.now());
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
@@ -21,9 +22,23 @@ const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTe
 const { runCalendarCheck, runCalendarFetch, isPreEventRisk, isPostEventSuppressed, getUpcomingHighImpactEvents } = require('./forexCalendar');
 const { SYMBOLS } = require('./config');
 
+console.log('[Startup] 2 — modules loaded', Date.now());
+
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ noServer: true });
+
+// Handle WS upgrade with error protection
+server.on('upgrade', (req, socket, head) => {
+  try {
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req);
+    });
+  } catch(e) {
+    console.error('[WS] Upgrade error:', e.message);
+    socket.destroy();
+  }
+});
 
 // WebSocket keepalive — prevents Railway from dropping idle connections
 setInterval(() => {
@@ -56,6 +71,14 @@ app.use((req, res, next) => {
   });
 });
 app.use(express.static(path.join(__dirname, '../client')));
+
+console.log('[Startup] 3 — Express + WS ready', Date.now());
+
+// Fast health endpoint — no DB calls, responds in <5ms
+// Railway health checks hit this to determine if the service is up
+app.get('/health', (req, res) => {
+  res.json({ ok: true, ts: Date.now(), uptime: process.uptime() });
+});
 
 // ── WebSocket broadcast ──────────────────────────────────────────────────────
 function broadcast(payload) {
@@ -2223,13 +2246,15 @@ cron.schedule('*/30 * * * *', () => {
 });
 // Listen FIRST so healthcheck passes, then init DB in background
 const PORT = process.env.PORT || 3001;
+console.log('[Startup] 4 — crons registered', Date.now());
 server.listen(PORT, () => {
+  console.log('[Startup] 5 — HTTP listening on', PORT, Date.now());
   console.log('ATLAS//WATCHLIST ONLINE — port ' + PORT);
   console.log('Symbols: ' + Object.keys(SYMBOLS).length + ' priority loaded');
   // Init DB after server is accepting connections
   db.init().then(() => {
     dbReady = true;
-    console.log('[DB] Initialised and ready');
+    console.log('[Startup] 6 — DB loaded', Date.now());
     // Force immediate FXSSI scrape on startup — ensures order book data before first scoring cycle
     // Without this, signals fired in first 20min after deploy/restart have no order book
     setTimeout(() => {
