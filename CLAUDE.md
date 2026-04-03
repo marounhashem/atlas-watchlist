@@ -153,6 +153,10 @@ On startup: auto-expire any OPEN/ACTIVE signals with zero SL distance.
 - **Arrow format:** `🟢 USDJPY ↑  USDCHF ↑` / `🔴 EURUSD ↓  GBPUSD ↓` — single lines grouped by direction
 - **Special cases:** GOLD, OIL, indices get context lines for USD events
 
+## Architecture decisions
+
+- **Webhook body parsing**: Uses custom stream-based parser NOT express.json(). TradingView Pine Script sends invalid JSON with NaN literals (e.g. `"bias":NaN`). express.json() silently fails on these, setting req.body to `{}`. The working parser sanitizes NaN before parsing: `body.replace(/:NaN/g, ':null')`. **NEVER replace this with express.json(). NEVER add content-type middleware that bypasses this parser.** This is why webhooks broke when express.json() was added — do not "fix" it again.
+
 ## Webhook architecture
 
 - **Body parser:** Custom stream reader that sanitizes `NaN`/`Infinity` → `null` BEFORE `JSON.parse()`. **Do NOT replace with `express.json()`** — TradingView sends NaN literals which are invalid JSON and will silently fail.
@@ -321,3 +325,4 @@ Auto-categorised on every WIN/LOSS:
 11. **Forex rounds to 5dp, others to 2dp.** Prevents SL enforcement from being destroyed by rounding.
 12. **Eastern → UTC on storage.** FF calendar times converted via `easternToUTC()` before DB write.
 13. **Update CLAUDE.md before closing.** Every session that makes code changes must end with CLAUDE.md updated to reflect all changes. Never close a session without confirming CLAUDE.md matches the actual codebase.
+14. **Never replace the stream body parser with express.json().** Pine Script sends NaN literals which are invalid JSON. The stream parser with NaN sanitisation is intentional and must not be changed.
