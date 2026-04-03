@@ -310,16 +310,176 @@ app.post('/api/reset-cycles', (req, res) => {
 app.get('/api/debug', (req, res) => {
   if (!dbReady) return res.json({ error: 'DB not ready' });
   try {
-    const all = db.getAllSignals(200);
-    const outcomes = {}, cycles = {};
-    for (const s of all) {
-      outcomes[s.outcome] = (outcomes[s.outcome]||0) + 1;
-      const c = s.cycle == null ? 'NULL' : s.cycle === 0 ? '0(current)' : 'retired';
-      cycles[c] = (cycles[c]||0) + 1;
+    const now = Date.now();
+    const report = {};
+
+    // ── 1. PINE DATA FRESHNESS ──
+    const pineCheck = {};
+    for (const sym of Object.keys(SYMBOLS)) {
+      try {
+        const md = db.getLatestMarketData(sym);
+        if (!md) { pineCheck[sym] = 'NO_DATA'; continue; }
+        const ageMin = Math.round((now - md.ts) / 60000);
+        const market = isMarketOpen(sym);
+        pineCheck[sym] = { ageMin, stale: market && ageMin > 5, marketOpen: market };
+      } catch(e) { pineCheck[sym] = 'ERROR'; }
     }
-    res.json({ dbReady, totalSignals: all.length, outcomes, cycles,
-      sample: all.slice(0,5).map(s=>({ id:s.id, symbol:s.symbol, outcome:s.outcome, verdict:s.verdict, cycle:s.cycle })) });
-  } catch(e) { res.json({ error: e.message }); }
+    const staleSyms = Object.entries(pineCheck).filter(([,v]) => v.stale).map(([k]) => k);
+    report.pine = {
+      ok: staleSyms.length === 0,
+      staleCount: staleSyms.length,
+      staleSymbols: staleSyms,
+      maxAgeMin: Math.max(0, ...Object.values(pineCheck).filter(v => typeof v === 'object').map(v => v.ageMin || 0))
+    };
+
+    // ── 2. FXSSI FRESHNESS ──
+    const fxssiStale = [];
+    for (const sym of Object.keys(SYMBOLS)) {
+      if (SYMBOLS[sym].noOrderBook) continue;
+      try {
+        const md = db.getLatestMarketData(sym);
+        if (!md?.fxssi_analysis) continue;
+        const fa = JSON.parse(md.fxssi_analysis);
+        const ageMin = fa.fetchedAt ? Math.round((now - fa.fetchedAt) / 60000) : 999;
+        if (ageMin > 25) fxssiStale.push({ symbol: sym, ageMin });
+      } catch(e) {}
+    }
+    report.fxssi = { ok: fxssiStale.length === 0, staleCount: fxssiStale.length, staleSymbols: fxssiStale };
+
+    // ── 3. SIGNAL QUALITY ──
+    const signals = db.getAllSignals(50).filter(s => ['ACTIVE', 'OPEN'].includes(s.outcome));
+    const zeroSL = signals.filter(s => Math.abs((s.sl || 0) - (s.entry || 0)) < 0.0001);
+    const nullBreakdown = signals.filter(s => !s.breakdown || s.breakdown === 'null');
+    const noMacro = signals.filter(s => !s.macro_context_available);
+    const lowRR = signals.filter(s => s.verdict === 'PROCEED' && (s.rr || 0) < 2.0);
+    const corr = {};
+    signals.filter(s => s.outcome === 'ACTIVE').forEach(s => {
+      corr[s.direction] = corr[s.direction] || [];
+      corr[s.direction].push(s.symbol);
+    });
+    report.signals = {
+      ok: zeroSL.length === 0 && lowRR.length === 0,
+      total: signals.length,
+      active: signals.filter(s => s.outcome === 'ACTIVE').length,
+      zeroSL: zeroSL.map(s => s.symbol),
+      nullBreakdown: nullBreakdown.length,
+      noMacro: noMacro.map(s => s.symbol),
+      lowRR: lowRR.map(s => ({ symbol: s.symbol, rr: s.rr })),
+      correlatedLong: corr['LONG'] || [],
+      correlatedShort: corr['SHORT'] || []
+    };
+
+    // ── 4. MACRO CONTEXT ──
+    const macroCtx = global.atlasGetMacroContext?.() || {};
+    const macroKeys = Object.keys(macroCtx);
+    const macroAge = macroKeys.length ? Math.round((now - macroCtx[macroKeys[0]].ts) / 3600000) : null;
+    report.macro = {
+      ok: macroAge !== null && macroAge < 26,
+      symbolCount: macroKeys.length,
+      ageHours: macroAge,
+      stale: macroAge > 20,
+      symbols: macroKeys.reduce((acc, k) => {
+        acc[k] = { sentiment: macroCtx[k].sentiment, strength: macroCtx[k].strength };
+        return acc;
+      }, {})
+    };
+
+    // ── 5. CALENDAR ──
+    const events = db.all("SELECT * FROM economic_events WHERE event_date >= date('now','-1 day') ORDER BY event_date, event_time LIMIT 20");
+    const pastNotFired = events.filter(e => {
+      const eTs = new Date(e.event_date + 'T' + (e.event_time || '00:00:00') + 'Z').getTime();
+      return eTs < now && !e.fired && !e.actual;
+    });
+    report.calendar = {
+      ok: pastNotFired.length === 0,
+      totalEvents: events.length,
+      pastNotFired: pastNotFired.map(e => ({ title: e.title, time: e.event_time, date: e.event_date })),
+      upcoming: events
+        .filter(e => {
+          const eTs = new Date(e.event_date + 'T' + (e.event_time || '00:00:00') + 'Z').getTime();
+          return eTs > now && !e.fired;
+        })
+        .slice(0, 5)
+        .map(e => {
+          const eTs = new Date(e.event_date + 'T' + (e.event_time || '00:00:00') + 'Z').getTime();
+          const minsUntil = Math.round((eTs - now) / 60000);
+          let uaeTime = '';
+          try { uaeTime = new Date(eTs).toLocaleTimeString('en-GB', { timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit' }); } catch(e) {}
+          return { title: e.title, utcTime: e.event_time, uaeTime, minsUntil, forecast: e.forecast, previous: e.previous };
+        })
+    };
+
+    // ── 6. MARKET INTEL ──
+    const intel = db.getActiveIntel();
+    report.intel = {
+      ok: true, count: intel.length,
+      items: intel.map(i => ({
+        bias: i.bias, horizon: i.time_horizon,
+        summary: (i.summary || '').slice(0, 60),
+        symbols: (() => { try { return JSON.parse(i.affected_symbols || '[]'); } catch(e) { return []; } })(),
+        expiresInHours: Math.round((i.expires_at - now) / 3600000)
+      }))
+    };
+
+    // ── 7. DB HEALTH ──
+    const allSignals = db.getAllSignals(1000);
+    const closedSignals = allSignals.filter(s => ['WIN', 'LOSS'].includes(s.outcome));
+    report.database = {
+      ok: true,
+      totalSignals: allSignals.length,
+      closedSignals: closedSignals.length,
+      wins: closedSignals.filter(s => s.outcome === 'WIN').length,
+      losses: closedSignals.filter(s => s.outcome === 'LOSS').length,
+      nullCategory: closedSignals.filter(s => !s.outcome_category).length,
+      learningReady: closedSignals.length >= 20
+    };
+
+    // ── 8. API COSTS ──
+    const learningLog = db.getLearningLog(5);
+    report.api = {
+      lastLearningCycle: learningLog[0]?.ts ? new Date(learningLog[0].ts).toISOString() : 'never',
+      learningCycles: learningLog.length
+    };
+
+    // ── 9. WEBHOOK HEALTH ──
+    const webhookHealth = {};
+    let timeoutCount = 0;
+    for (const sym of Object.keys(SYMBOLS)) {
+      const md = db.getLatestMarketData(sym);
+      if (md) {
+        const ageMin = Math.round((now - md.ts) / 60000);
+        if (ageMin > 5 && isMarketOpen(sym)) {
+          webhookHealth[sym] = 'STALE_' + ageMin + 'm';
+          timeoutCount++;
+        }
+      }
+    }
+    report.webhooks = { ok: timeoutCount === 0, staleCount: timeoutCount, staleSymbols: webhookHealth };
+
+    // ── OVERALL SCORE ──
+    const checks = [report.pine.ok, report.fxssi.ok, report.signals.ok, report.macro.ok, report.calendar.ok, report.database.ok, report.webhooks.ok];
+    const score = Math.round(checks.filter(Boolean).length / checks.length * 100);
+    report.overall = {
+      score: score + '%',
+      status: score === 100 ? 'HEALTHY' : score >= 70 ? 'DEGRADED' : 'CRITICAL',
+      timestamp: new Date().toISOString(),
+      uptime: Math.round(process.uptime()),
+      issues: [
+        !report.pine.ok && `Pine stale: ${staleSyms.join(', ')}`,
+        !report.fxssi.ok && `FXSSI stale: ${report.fxssi.staleCount} symbols`,
+        zeroSL.length > 0 && `Zero SL: ${zeroSL.map(s => s.symbol).join(', ')}`,
+        lowRR.length > 0 && `Low R:R PROCEEDs: ${lowRR.map(s => s.symbol).join(', ')}`,
+        report.macro.stale && `Macro stale: ${macroAge}h`,
+        !report.calendar.ok && `Events not fired: ${pastNotFired.map(e => e.title).join(', ')}`,
+        (corr['LONG'] || []).length > 3 && `${corr['LONG'].length} correlated LONGs active`,
+      ].filter(Boolean)
+    };
+
+    res.json(report);
+  } catch(e) {
+    console.error('[Debug] Error:', e.message);
+    res.status(500).json({ error: e.message, stack: e.stack?.split('\n').slice(0, 3) });
+  }
 });
 
 app.get('/api/past-signals', (req, res) => {
