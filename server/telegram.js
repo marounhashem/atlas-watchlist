@@ -104,47 +104,32 @@ async function sendHealthAlert(problems) {
 
 // Economic event fired alert with sentiment analysis
 async function sendEventFiredAlert(event, sentiment, affectedSymbols) {
-  const beatIcon = sentiment?.beat > 0 ? '📈' : sentiment?.beat < 0 ? '📉' : '➡️';
-  const trendIcon = sentiment?.trend > 0 ? '📈' : sentiment?.trend < 0 ? '📉' : '➡️';
+  const beat = sentiment?.beat || 0;
+  const biasIcon = beat > 0 ? '📈' : beat < 0 ? '📉' : '➡️';
+  const biasLabel = beat > 0
+    ? `Beat forecast — ${event.currency} bullish signal`
+    : beat < 0
+    ? `Missed forecast — ${event.currency} bearish signal`
+    : `In line with forecast`;
 
-  // Stage 2 — vs forecast
-  let vsLine = '';
-  if (sentiment?.raw?.vsForecast != null) {
-    const vf = sentiment.raw.vsForecast;
-    vsLine = sentiment.beat > 0
-      ? `${beatIcon} Beat forecast by ${Math.abs(vf).toFixed(2)}`
-      : sentiment.beat < 0
-      ? `${beatIcon} Missed forecast by ${Math.abs(vf).toFixed(2)}`
-      : `➡️ In line with forecast`;
-  }
-
-  // Stage 3 — vs previous
-  let trendLine = '';
-  if (sentiment?.raw?.vsPrevious != null) {
-    trendLine = sentiment.trend > 0
-      ? `${trendIcon} Improving from previous ${event.previous}`
-      : sentiment.trend < 0
-      ? `${trendIcon} Deteriorating from previous ${event.previous}`
-      : `➡️ Unchanged from previous`;
-  }
+  // Get directional arrows and special case notes
+  let arrows = '';
+  let special = '';
+  try {
+    const { getEventArrows, getSpecialCaseNote } = require('./forexCalendar');
+    arrows = getEventArrows(event.currency, beat);
+    special = getSpecialCaseNote(event.currency, beat);
+  } catch(e) {}
 
   const text = [
-    `📊 <b>${event.title} — ${event.currency}</b>`,
-    ``,
-    `Actual:   <b>${event.actual || 'Released'}</b>`,
-    `Forecast: ${event.forecast || '—'}`,
-    `Previous: ${event.previous || '—'}`,
-    ``,
-    vsLine,
-    trendLine,
-    ``,
-    `Signal strength: ${sentiment?.magnitude || 'UNKNOWN'}`,
-    sentiment?.trendSummary ? `Context: ${sentiment.trendSummary}` : '',
-    ``,
+    `📊 <b>${event.title}</b>`,
+    `Actual: <b>${event.actual || 'Released'}</b> | Forecast: ${event.forecast || '—'} | Prev: ${event.previous || '—'}`,
+    `${biasIcon} ${biasLabel}`,
+    arrows,
+    special,
+    sentiment?.trendSummary ? `📊 ${sentiment.trendSummary}` : '',
     `⏸ 5min volatility window`,
     `✅ Opportunity window opens in 5min`,
-    ``,
-    `Watch: ${affectedSymbols.slice(0, 8).join(', ')}${affectedSymbols.length > 8 ? ` +${affectedSymbols.length - 8} more` : ''}`,
   ].filter(Boolean).join('\n');
   return sendMessage(text);
 }

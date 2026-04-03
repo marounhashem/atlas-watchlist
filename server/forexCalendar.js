@@ -303,6 +303,16 @@ async function runCalendarCheck(broadcast) {
       const eventId = `${e.country}_${eventDate}_${e.title}`;
       const sourcesArr = Array.from(sources);
 
+      // Check if forecast just appeared (new event or forecast was null before)
+      let forecastJustAppeared = false;
+      try {
+        const dbMod = require('./db');
+        // Use getAllEconomicEvents to find existing record
+        const allEvts = dbMod.getAllEconomicEvents ? dbMod.getAllEconomicEvents() : [];
+        const existing = allEvts.find(ev => ev.event_id === eventId);
+        if (e.forecast && (!existing || !existing.forecast)) forecastJustAppeared = true;
+      } catch(fe) {}
+
       try {
         upsertEconomicEvent({
           eventId, title: e.title, currency: e.country,
@@ -312,6 +322,20 @@ async function runCalendarCheck(broadcast) {
         stored++;
       } catch(ue) {
         console.error(`[Calendar] upsert error for ${e.title}:`, ue.message);
+      }
+
+      // Send forecast alert when forecast first appears on an upcoming event
+      if (forecastJustAppeared && e.forecast) {
+        const eventTsF = new Date(e.date).getTime();
+        if (eventTsF > Date.now()) {
+          try {
+            sendForecastAlert({
+              title: e.title, currency: e.country,
+              forecast: e.forecast, previous: e.previous,
+              event_date: eventDate, event_time: eventTime
+            });
+          } catch(fa) { console.error('[Calendar] Forecast alert error:', fa.message); }
+        }
       }
 
       // Detect fired events
@@ -615,11 +639,101 @@ function calculateForecastBias(event) {
   return null;
 }
 
+// ── Event arrow formatting for Telegram ────────────────────────────────────
+// Groups affected pairs by direction into single-line green/red rows
+function getEventArrows(currency, bias) {
+  // Map: which direction does each pair move when this currency strengthens?
+  const CURRENCY_LONG = {
+    USD: { long: ['USDJPY','USDCHF','USDCAD'], short: ['EURUSD','GBPUSD','AUDUSD','NZDUSD'] },
+    EUR: { long: ['EURUSD','EURJPY','EURGBP','EURAUD','EURCHF'], short: [] },
+    GBP: { long: ['GBPUSD','GBPJPY','GBPCHF'], short: ['EURGBP'] },
+    JPY: { long: [], short: ['USDJPY','EURJPY','GBPJPY','AUDJPY'] },
+    AUD: { long: ['AUDUSD','AUDJPY'], short: ['EURAUD'] },
+    NZD: { long: ['NZDUSD'], short: [] },
+    CAD: { long: [], short: ['USDCAD'] },
+    CHF: { long: [], short: ['USDCHF','EURCHF','GBPCHF'] },
+  };
+
+  const map = CURRENCY_LONG[currency];
+  if (!map) return '';
+
+  let goLong, goShort;
+  if (bias > 0) {
+    // Currency strengthening
+    goLong = map.long;
+    goShort = map.short;
+  } else {
+    // Currency weakening
+    goLong = map.short;
+    goShort = map.long;
+  }
+
+  const lines = [];
+  if (goLong.length) lines.push('🟢 ' + goLong.map(s => s + ' ↑').join('  '));
+  if (goShort.length) lines.push('🔴 ' + goShort.map(s => s + ' ↓').join('  '));
+  return lines.join('\n');
+}
+
+function getSpecialCaseNote(currency, bias) {
+  if (currency !== 'USD') return '';
+  const notes = [];
+  if (bias > 0) {
+    notes.push('📉 GOLD → likely down (USD strong)');
+    notes.push('📉 US30/US100 → mixed (strong data vs rate fears)');
+  } else if (bias < 0) {
+    notes.push('📈 GOLD → likely up (USD weak)');
+    notes.push('📈 US30/US100 → likely up (Fed dovish signal)');
+  }
+  return notes.join('\n');
+}
+
+// ── Forecast appears alert ─────────────────────────────────────────────────
+function sendForecastAlert(event) {
+  try {
+    const fb = calculateForecastBias(event);
+    const bias = fb ? fb.direction : 0;
+    const biasSummary = fb ? fb.summary : '';
+
+    const eventTs = new Date(
+      event.event_date + 'T' + (event.event_time || '00:00:00') + 'Z'
+    ).getTime();
+    const minsUntil = Math.round((eventTs - Date.now()) / 60000);
+    const timeLabel = minsUntil > 60
+      ? Math.floor(minsUntil / 60) + 'h ' + (minsUntil % 60) + 'min'
+      : minsUntil + 'min';
+
+    const biasLine = bias > 0
+      ? `📈 Forecast bullish for ${event.currency}`
+      : bias < 0
+      ? `📉 Forecast bearish for ${event.currency}`
+      : '';
+
+    const arrows = bias !== 0 ? getEventArrows(event.currency, bias) : '';
+    const special = bias !== 0 ? getSpecialCaseNote(event.currency, bias) : '';
+
+    const text = [
+      `📅 <b>${event.title}</b>`,
+      `Forecast: <b>${event.forecast}</b> | Previous: ${event.previous || '—'} | Fires in: ${timeLabel}`,
+      biasLine,
+      biasSummary ? `Pre-release bias: ${biasSummary}` : '',
+      arrows,
+      special,
+      `⏳ Waiting for actual — pre-positioning window`,
+    ].filter(Boolean).join('\n');
+
+    const { sendMessage } = require('./telegram');
+    sendMessage(text).catch(() => {});
+    console.log(`[Calendar] Forecast alert sent: ${event.title} (${event.currency}) forecast=${event.forecast}`);
+  } catch(e) {
+    console.error('[Calendar] sendForecastAlert error:', e.message);
+  }
+}
+
 module.exports = {
   runCalendarCheck, runCalendarFetch,
   isPreEventRisk, isPostEventSuppressed, getPostEventState,
   getUpcomingHighImpactEvents, getEventSentiment,
   calculateEventSentiment, buildAffectedSymbols,
-  getForecastBias,
+  getForecastBias, getEventArrows, getSpecialCaseNote,
   EVENT_IMPACT_SYMBOLS, FEED_ICONS
 };
