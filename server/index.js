@@ -370,7 +370,7 @@ app.get('/api/debug', (req, res) => {
     };
 
     // ── 4. MACRO CONTEXT ──
-    const macroCtx = global.atlasGetMacroContext?.() || {};
+    const macroCtx = db.getStoredMacroContext() || {};
     const macroKeys = Object.keys(macroCtx);
     const macroAge = macroKeys.length ? Math.round((now - macroCtx[macroKeys[0]].ts) / 3600000) : null;
     report.macro = {
