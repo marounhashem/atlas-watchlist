@@ -153,7 +153,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260403.1'; // Fix dead multipliers, FXSSI order, session exhaustion, eventRiskNote
+const SCORER_VERSION = '20260403.2'; // Three review rounds — 18 bugs fixed, scoring correct end-to-end
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
