@@ -120,13 +120,12 @@ wss.on('connection', ws => {
 //   "bias": 2, "biasScore": 0.72, "structure": "bullish",
 //   "fvgPresent": true, "volume": 12400 }
 app.post('/webhook/pine', (req, res) => {
-  const sym = req.body?.symbol || req.body?.ticker || 'unknown';
   res.status(200).json({ ok: true });
-  console.log(`[Webhook] ${sym} received`);
 
-  // ALL processing happens async after response
+  // ALL processing happens async after response — body is parsed by now
   setImmediate(() => {
     try {
+      console.log(`[Webhook] ${req.body?.symbol || 'unknown'} received`);
       if (!dbReady) { console.log('[Webhook] DB not ready, skipping'); return; }
       const ws = process.env.WEBHOOK_SECRET;
       if (ws && req.body?.secret !== ws) {
