@@ -52,10 +52,30 @@ let dbReady = false;
 
 // Custom body parser that handles Pine Script's invalid NaN values
 // Body parser — sanitize NaN/Infinity BEFORE JSON.parse (TradingView sends these)
-// This is the original working parser. express.json() cannot handle NaN literals
-// and silently drops the payload. This stream reader sanitizes first, then parses.
+// This is the original working parser. express.json() cannot handle NaN literals.
+// IMPORTANT: Webhook routes respond 200 BEFORE this runs — see below.
+function parseBodyWithNaN(req, callback) {
+  let body = '';
+  req.on('data', chunk => body += chunk.toString());
+  req.on('end', () => {
+    try {
+      const sanitized = body
+        .replace(/:NaN([,}\]])/g, ':null$1')
+        .replace(/: NaN([,}\]])/g, ':null$1')
+        .replace(/:NaN$/g, ':null')
+        .replace(/:Infinity/g, ':null')
+        .replace(/:-Infinity/g, ':null');
+      callback(JSON.parse(sanitized));
+    } catch(e) {
+      callback({});
+    }
+  });
+}
+// Standard body parser for non-webhook POST routes (settings, intel, etc)
 app.use((req, res, next) => {
   if (req.method !== 'POST') return next();
+  // Webhook routes handle their own body parsing — skip middleware
+  if (req.url.startsWith('/webhook/')) return next();
   let body = '';
   req.on('data', chunk => body += chunk.toString());
   req.on('end', () => {
@@ -111,11 +131,12 @@ wss.on('connection', ws => {
 });
 
 // ── Webhook: TradingView Pine Script alerts ──────────────────────────────────
+// Response goes out BEFORE body is parsed — guaranteed instant 200 OK
 app.post('/webhook/pine', (req, res) => {
   res.status(200).json({ ok: true });
-  setImmediate(() => {
+  parseBodyWithNaN(req, (data) => {
     try {
-      processPineWebhook(req.body);
+      processPineWebhook(data);
     } catch(e) {
       console.error('[Webhook] Error:', e.message);
     }
@@ -227,13 +248,12 @@ function processPineWebhook(data) {
 // ── Webhook: FXSSI manual paste ──────────────────────────────────────────────
 app.post('/webhook/fxssi', (req, res) => {
   res.status(200).json({ ok: true });
-
-  setImmediate(() => {
-    const ws = process.env.WEBHOOK_SECRET;
-    if (ws && req.body?.secret !== ws) return;
-    const { symbol, longPct, shortPct, trapped } = req.body || {};
-    if (!symbol) return;
+  parseBodyWithNaN(req, (data) => {
     try {
+      const ws = process.env.WEBHOOK_SECRET;
+      if (ws && data?.secret !== ws) return;
+      const { symbol, longPct, shortPct, trapped } = data || {};
+      if (!symbol) return;
       const sym = symbol.toUpperCase();
       const latest = require('./db').getLatestMarketData(sym);
       if (latest) {
@@ -830,12 +850,17 @@ app.get('/api/fxssi-test', async (req, res) => {
 
 // FXSSI Rich webhook — accepts payload from browser extension as backup
 app.post('/webhook/fxssi-rich', (req, res) => {
-  const payload = req.body;
-  if (!payload || !payload.fxssi) return res.status(400).json({ error: 'Missing fxssi data' });
-  const result = processBridgePayload(payload);
-  if (!result) return res.status(400).json({ error: 'Symbol not recognised or no market data' });
-  broadcast({ type: 'FXSSI_UPDATE', symbol: result.symbol, analysed: result.analysed, ts: Date.now() });
-  res.json({ ok: true, symbol: result.symbol });
+  res.status(200).json({ ok: true });
+  parseBodyWithNaN(req, (payload) => {
+    try {
+      if (!payload || !payload.fxssi) return;
+      const result = processBridgePayload(payload);
+      if (!result) return;
+      broadcast({ type: 'FXSSI_UPDATE', symbol: result.symbol, analysed: result.analysed, ts: Date.now() });
+    } catch(e) {
+      console.error('[Webhook] FXSSI-rich error:', e.message);
+    }
+  });
 });
 
 // FXSSI status — check what's cached
