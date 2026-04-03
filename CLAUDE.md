@@ -13,33 +13,34 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260401.7'`
+`SCORER_VERSION = '20260401.15'`
 
-Changes in 20260401.7:
-- Partial TP at 1:1 R:R — new PARTIAL_CLOSE recommendation type
-- Time stop on dead trades — new TIME_STOP recommendation type
-- Loss/Win taxonomy — auto-categorisation on every outcome
-- Selective event impact — indices/metals NOT penalised for irrelevant events
-- Trump/political speech routes to all precious metals + indices
-- PLATINUM + COPPER added to macro context (12 symbols total)
-- Pre-event window: 2h → 10 minutes
-- Post-event: 30min suppression → 5min volatility block + 2h opportunity window
-- Commodity CFD lot sizing (gold=100oz, silver=5000oz, oil=1000bbls per lot)
-- FF calendar timezone fix (Eastern → UTC)
-- Dynamic minScore floor by weighted structure
-- noOrderBook minScore: +3 additive penalty
-- WS keepalive (30s ping), sidebar market hours fix
-- Signal card UI redesign (3-column, collapsible reasoning)
-- SKIP signals hidden from main view (collapsible section)
-- HTTP prefetch on page load (no blank screen)
-- 5-layer DB race condition protection + daily backup
+Changes since 20260401.7:
+- **20260401.15** — Forecast-based pre-release scoring (getForecastBias), three-stage event sentiment (beat/miss + trend context)
+- **20260401.14** — Zero SL hard gate + enforceMinSL with forex 5dp rounding, DB cleanup of zero-SL signals
+- **20260401.13** — Intel key levels in macro fetch queries
+- **20260401.12** — JPY pip calc, Kelly cap for insufficient data, zero SL guard, WATCH reason badge
+- **20260401.8–11** — Nikkei-JPY correlation, intel key levels scoring, symbol alias mapping, Haiku intel summarisation
+
+## Dashboard UI
+
+- **Fonts:** Space Grotesk (body) + JetBrains Mono (monospace values)
+- **Card layout:** 3-column body — levels (185px) | bars (130px) | reasoning (1fr)
+- **Left accent bar:** 4px `::before` pseudo-element (green=PROCEED, amber=WATCH, blue=ACTIVE)
+- **Level boxes:** vertical stack (Entry/Stop/Target), each row `grid: 40px 1fr`
+- **Breakdown bars:** Technical, Sentiment, OB Levels, Session — color-coded hi/mid/lo
+- **Reasoning:** always visible, 4-line clamp, expandable via "more" button, color-coded ✓/⚠ prefixes
+- **Score:** large JetBrains Mono number, always white, no % symbol
+- **Position sizing:** moved to ANALYSE panel (not shown on card)
+- **Breakdown fallback:** when DB signals have null breakdown, bars show score-based estimates
+- **noOB detection:** hardcoded `NO_OB_SYMBOLS` set + reasoning text fallback
 
 ## Database tables
 
 | Table | Purpose |
 |-------|---------|
 | market_data | Latest OHLCV + Pine indicators + FXSSI analysis per symbol |
-| signals | Live + retired trade signals with outcome tracking |
+| signals | Live + retired trade signals with outcome tracking + breakdown JSON |
 | weights | Scoring weights per symbol (learner-adjusted) |
 | learning_log | Historical weight optimization cycles |
 | watch_signals | Non-tradeable WATCH signals for pattern learning |
@@ -49,7 +50,7 @@ Changes in 20260401.7:
 | cb_consensus | Market expectations for upcoming CB meetings |
 | cot_data | Weekly CFTC institutional positioning per currency |
 | rate_data | Central bank interest rates per currency |
-| market_intel | Short-lived user-injected context (24h TTL) |
+| market_intel | Short-lived user-injected context (24h TTL) with Haiku analysis |
 | dxy_reference | DXY reference data (never traded, used for correlation) |
 
 ### Key columns on signals table
@@ -64,6 +65,7 @@ Changes in 20260401.7:
 | outcome_category | TEXT | Loss/win taxonomy category |
 | outcome_notes | TEXT | Auto-generated explanation |
 | partial_closed | INTEGER | 1 if partial close was recommended |
+| breakdown | TEXT | JSON `{bias, fxssi, ob, session}` scores for bar rendering |
 
 ## Weighted structure scoring
 
@@ -103,15 +105,68 @@ Dynamic minScore floor:
 | Carry with | >300bps with | ×1.05 |
 | Forward guidance | CB consensus confirms | ×1.08 |
 | Forward guidance | CB consensus contradicts | ×0.88 |
+| Forecast bias | Pre-release confirms (strength 3) | ×1.12 |
+| Forecast bias | Pre-release confirms (strength 2) | ×1.07 |
+| Forecast bias | Pre-release contradicts | ×0.88–0.97 |
+| Event sentiment | Beat confirms + trend confirms | ×1.10–1.20 (+5% trend bonus) |
+| Event sentiment | Miss contradicts direction | ×0.85–0.95 |
 | noOrderBook | No FXSSI data | ×0.92 |
 | Pre-event | HIGH impact within 10min | ×0.75 + cap WATCH |
 | Post-event VOLATILITY | 0-5min after fire | Hard block (null) |
 | Post-event OPPORTUNITY | 5-120min after fire | ×1.10 confirms / ×0.90 against |
-| Event sentiment | Beat confirms direction | ×1.05 to ×1.15 |
-| Event sentiment | Miss contradicts direction | ×0.85 to ×0.95 |
 | FXSSI stale | OB data >25min old | ×0.82 |
 | Gravity against | Gravity pulls against direction | ×0.88 |
 | Cluster proximity | Losing cluster within 0.3% of entry | ×0.85 |
+| Intel key levels | Price at resistance vs LONG | ×0.80 |
+| Intel key levels | Price at support confirms LONG | ×1.08 |
+| Intel approaching | Price approaching key level | ×0.92 |
+| Bank holiday | Symbol affected by bank holiday | session ×0.5 + force WATCH |
+| Nikkei-JPY | J225 bearish + JPY LONG | ×0.93 |
+
+## Minimum SL enforcement
+
+`enforceMinSL()` runs after price rounding, before signal return:
+
+| Asset class | Min SL distance | Rounding |
+|-------------|----------------|----------|
+| forex | 0.20% of entry | 5 decimal places |
+| index | 0.30% of entry | 2 decimal places |
+| commodity | 0.50% of entry | 2 decimal places |
+| crypto | 0.80% of entry | 2 decimal places |
+
+Nuclear fallback: if `abs(sl - entry) < 0.00001` after enforcement, signal is blocked.
+On startup: auto-expire any OPEN/ACTIVE signals with zero SL distance.
+
+## Three-stage event scoring
+
+1. **Stage 1 — Forecast bias (pre-release):** `getForecastBias()` uses forecast vs previous to generate directional bias before event fires. Applies multiplier when >10min from event.
+2. **Stage 2 — Beat/miss (at release):** `calculateEventSentiment()` computes actual vs forecast with commodity-aware rules.
+3. **Stage 3 — Trend context:** actual vs previous — NFP, CPI, unemployment, GDP, earnings pattern-matched. Combined strength upgrades when beat+trend agree, downgrades when they conflict.
+
+## Telegram alerts
+
+- **Forecast appears:** sent when FF scrape detects new forecast on upcoming HIGH event
+- **Event fired:** compact format — actual|forecast|prev on one line, directional arrows grouped by direction
+- **Signal alert:** PROCEED signals pushed to spot channel
+- **Swing alert:** pushed to swing channel when criteria met
+- **Recommendations:** PARTIAL_CLOSE, TIME_STOP, MOVE_SL, CLOSE
+- **Arrow format:** `🟢 USDJPY ↑  USDCHF ↑` / `🔴 EURUSD ↓  GBPUSD ↓` — single lines grouped by direction
+- **Special cases:** GOLD, OIL, indices get context lines for USD events
+
+## Webhook architecture
+
+- **Pattern:** `res.status(200).json({ok:true})` fires immediately, processing via `setImmediate()`
+- **TradingView timeout:** guaranteed <10ms response regardless of server load
+- **WebSocket:** `noServer: true` mode with try/catch upgrade handler
+- **Startup:** `server.listen()` first, DB init async in callback via setTimeout chains
+
+## Bank holiday awareness
+
+`BANK_HOLIDAYS` map in `marketHours.js` with 2026 dates:
+- Good Friday, Easter Monday, Labour Day, UK bank holidays, US Independence Day, Thanksgiving, Christmas, Boxing Day, New Year
+- `isBankHoliday(symbol)` + `getBankHolidayName()` exported
+- Scorer: session score halved, force WATCH, macroNote warning
+- Card: 🏦 Bank Holiday tag in header
 
 ## Recommendation types
 
@@ -154,32 +209,33 @@ Auto-categorised on every WIN/LOSS:
 
 **CFD lot sizes (configurable):** Gold=100oz, Silver=5000oz, Oil=1000bbls, Copper=25000lbs, Platinum=50oz, Forex=100k units
 
-**Portal only — never included in Telegram messages.**
+**Portal only — never included in Telegram messages.** Shown in ANALYSE panel only.
 
 ## Event calendar architecture
 
 - **4 feeds polled every 5 minutes:** FF (forex), EE (energy), MM (metals), CC (crypto)
-- **Timezone:** FF dates in US Eastern converted to UTC on storage
+- **Timezone:** FF dates in US Eastern converted to UTC via `easternToUTC()` on storage (EDT +4h, EST +5h)
 - **Selective routing:** Indices only penalised for macro-moving events (NFP, CPI, FOMC, Trump). NOT penalised for Natural Gas, EIA, Crude Inventories, Unemployment Claims, Housing.
 - **Pre-event:** 10-minute window, ×0.75 + cap WATCH
 - **Post-event VOLATILITY:** 0-5min, hard block (null)
 - **Post-event OPPORTUNITY:** 5-120min, ×1.10 confirms / ×0.90 contradicts
-- **Sentiment:** calculateEventSentiment() — beat/miss based on actual vs forecast
+- **Three-stage sentiment:** forecast bias → beat/miss → trend context (see above)
 - **Trump/Fed speech routing:** automatically affects all precious metals + all indices
+- **Forecast alert:** Telegram alert when FF scrape detects new forecast on upcoming event
 
 ## Daily schedule (UTC)
 
 | Time | Action |
 |------|--------|
 | 00:00 | Daily DB backup (3 rolling) |
-| 05:00 | Morning brief → Telegram |
+| 05:00 | Morning brief → Telegram (includes forecast signals section) |
 | :05 hourly | Market intel cleanup (expired) |
 | :05 hourly | Mark past events as fired |
 | 06:50 | Rate scrape (Trading Economics) |
-| 07:00 | Macro context fetch (Claude web search) + CB consensus |
+| 07:00 | Macro context fetch (Claude web search + intel key levels) + CB consensus |
 | Every min | Score all symbols → PROCEED signals → Telegram |
 | Every min | Outcome check + PARTIAL_CLOSE + TIME_STOP + MOVE_SL |
-| */5 min | Economic calendar poll (4 feeds) + fire detection |
+| */5 min | Economic calendar poll (4 feeds) + fire detection + forecast alerts |
 | :01/:21/:41 | FXSSI 20-min order book scrape |
 | :02/:22/:42 | Signal retirement cycle |
 | Hourly | Learning cycle (if thresholds met) |
@@ -193,6 +249,7 @@ Auto-categorised on every WIN/LOSS:
 | GET | /api/signals | Active/open signals (scores if DB empty) |
 | GET | /api/past-signals | WIN/LOSS/EXPIRED signals |
 | GET | /api/taxonomy | Loss/win category breakdown + insight |
+| GET | /api/debug | Comprehensive 9-section health + quality report |
 | POST | /api/trade-feedback | System analysis (no API call) |
 | GET/POST | /api/market-intel | Active intel items / inject intel |
 | DELETE | /api/market-intel/:id | Remove intel item |
@@ -200,15 +257,18 @@ Auto-categorised on every WIN/LOSS:
 | GET | /api/macro-context | All macro sentiment data |
 | GET | /api/macro-debug | DB vs in-memory macro state |
 | GET | /api/macro-force | Trigger macro fetch |
-| GET | /api/calendar-status | Upcoming HIGH impact events |
+| GET | /api/calendar-status | Upcoming HIGH impact events (with debug timing) |
 | GET | /api/calendar-force | Trigger immediate FF fetch |
+| POST | /api/calendar-force-fired | Mark all past unfired events as fired |
+| POST | /api/calendar-fix | Manual event time correction |
 | GET | /api/settings | All settings with defaults |
 | POST | /api/settings | Update single setting |
 | POST | /api/settings/bulk | Update multiple settings |
 | GET | /api/rate-status | Rates + pair differentials |
 | GET | /api/cot-status | COT currencies + pair summaries |
 | GET | /api/cb-calendar | CB meetings + consensus |
-| GET | /api/health | System health per symbol |
+| GET | /api/health | System health per symbol (full DB scan) |
+| GET | /health | Fast health check (no DB, <5ms) for Railway |
 | GET | /api/db-status | DB file sizes + signal count |
 | GET | /api/db-recover | Restore from .bak if needed |
 | GET | /api/db-verify | Test persist protection |
@@ -232,6 +292,16 @@ Auto-categorised on every WIN/LOSS:
 | WEBHOOK_SECRET | No | Body secret for webhook auth |
 | DB_PATH | No | SQLite file path (default: ./data/atlas.db) |
 
+## Startup sequence
+
+1. Process started → module imports
+2. Express + WS ready (noServer mode with try/catch upgrade)
+3. Static files + `/health` endpoint (fast, no DB)
+4. Crons registered
+5. `server.listen()` — HTTP accepting connections
+6. DB init (async in callback) → schema + migrations + zero-SL cleanup
+7. Background tasks via setTimeout chain: FXSSI (2s), COT seed (5s), rates (8s), calendar (9s), macro from DB (10s)
+
 ## Rules
 
 1. **Never auto-execute trades.** Signal-only system. No broker API, no order placement.
@@ -243,3 +313,6 @@ Auto-categorised on every WIN/LOSS:
 7. **Background tasks use Haiku only.** Sonnet only on explicit user-triggered analysis.
 8. **Position sizing is portal-only.** Never include lot sizes or position sizes in Telegram messages.
 9. **CLAUDE.md must be updated** with every scorer version bump and every new feature.
+10. **Webhook responds immediately.** `res.status(200)` before any processing, `setImmediate()` for async work.
+11. **Forex rounds to 5dp, others to 2dp.** Prevents SL enforcement from being destroyed by rounding.
+12. **Eastern → UTC on storage.** FF calendar times converted via `easternToUTC()` before DB write.
