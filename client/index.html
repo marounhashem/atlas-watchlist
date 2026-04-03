@@ -333,34 +333,32 @@
 
   /* ── CARD FOOTER ── */
   .card-footer{
-    display:flex;align-items:center;
-    justify-content:space-between;
-    padding:6px 14px 6px 16px;
-    gap:8px;min-height:32px;
-    background:#0e0e1b;
-    border-top:1px solid #111120;
+    display:flex;align-items:center;justify-content:space-between;
+    padding:6px 14px;gap:8px;min-height:32px;
+    background:#0e0e1b;border-top:1px solid #111120;
   }
-  .card-footer-left{
-    display:flex;align-items:center;gap:6px;
-    flex:1;min-width:0;overflow:hidden;
-  }
+  .footer-left{display:flex;align-items:center;gap:6px;flex:1;min-width:0;overflow:hidden;}
+  .footer-right{display:flex;align-items:center;gap:5px;flex-shrink:0;}
   .rec-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
-  .rec-dot-high{background:#d04060;box-shadow:0 0 5px rgba(208,64,96,.5);}
-  .rec-dot-medium{background:#d0902a;box-shadow:0 0 5px rgba(208,144,42,.5);}
-  .rec-dot-partial{background:#00b8b8;}
-  .rec-dot-time{background:#9966dd;}
-  .rec-msg{
-    font-size:10px;font-weight:500;
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  }
-  .rec-high{color:#cc5570;}
-  .rec-medium{color:#cc8830;}
-  .rec-partial{color:#00b8b8;}
-  .rec-time{color:#9966dd;}
-  .rec-none{color:#333358;}
-  .card-footer-right{
-    display:flex;align-items:center;gap:5px;flex-shrink:0;
-  }
+  .rec-dot.high{background:#d04060;box-shadow:0 0 5px rgba(208,64,96,.5);}
+  .rec-dot.medium{background:#d0902a;box-shadow:0 0 5px rgba(208,144,42,.5);}
+  .rec-dot.partial{background:#00b8b8;}
+  .rec-dot.time{background:#9966dd;}
+  .rec-msg{font-size:10px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .rec-msg.high{color:#c05070;}
+  .rec-msg.medium{color:#c08830;}
+  .rec-msg.partial{color:#00b8b8;}
+  .rec-msg.time{color:#9966dd;}
+  .rec-msg.none{color:#333358;}
+  .tp-progress{display:flex;align-items:center;gap:5px;}
+  .prog-track{width:44px;height:3px;background:#111120;border-radius:2px;overflow:hidden;}
+  .prog-fill{height:100%;border-radius:2px;}
+  .prog-fill.positive{background:#00c880;}
+  .prog-fill.negative{background:#c07080;}
+  .prog-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:#5a5a7a;white-space:nowrap;}
+  .mfe-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:rgba(80,184,144,.55);white-space:nowrap;}
+  .btn-action{font-size:9px;color:#444466;border:1px solid #222238;border-radius:3px;padding:3px 8px;background:transparent;cursor:pointer;font-family:'Space Grotesk',sans-serif;transition:all .15s;white-space:nowrap;}
+  .btn-action:hover{border-color:#666688;color:#8888aa;}
   .btn-more{
     font-size:8px;color:#2a2a44;
     background:none;border:none;cursor:pointer;
@@ -1306,38 +1304,42 @@ function renderCard(sig, isPast) {
   })();
   const activeRec = recs.find(function(r) { return !r.resolved; });
 
+  // LEFT ZONE — rec message
   let footerLeft = '';
   if (activeRec) {
-    const type = activeRec.type || '';
-    const urgency = activeRec.urgency || '';
-    const dotCls = type === 'PARTIAL_CLOSE' ? 'rec-dot-partial'
-                 : type === 'TIME_STOP' ? 'rec-dot-time'
-                 : urgency === 'HIGH' ? 'rec-dot-high' : 'rec-dot-medium';
-    const txtCls = type === 'PARTIAL_CLOSE' ? 'rec-partial'
-                 : type === 'TIME_STOP' ? 'rec-time'
-                 : urgency === 'HIGH' ? 'rec-high' : 'rec-medium';
-    footerLeft = '<div class="rec-dot '+dotCls+'"></div>'
-      + '<span class="rec-msg '+txtCls+'">'
-      + esc(type) + ' — ' + esc((activeRec.reason||'').slice(0,80))
+    const urg = (activeRec.urgency || 'medium').toLowerCase();
+    const dotCls = activeRec.type === 'PARTIAL_CLOSE' ? 'partial' : activeRec.type === 'TIME_STOP' ? 'time' : urg;
+    const txtCls = dotCls;
+    footerLeft = '<div class="rec-dot ' + dotCls + '"></div>'
+      + '<span class="rec-msg ' + txtCls + '">'
+      + esc(activeRec.type) + ' — ' + esc((activeRec.reason || '').slice(0, 80))
       + '</span>';
-  } else if (sig.outcome === 'ACTIVE') {
-    // Show progress toward TP
-    const e = sig.entry || 0, t = sig.tp || 0;
-    let prog = 0;
-    if (t !== e) prog = sig.direction === 'LONG'
-      ? Math.max(0, Math.min(100, ((sig.mfe_pct || 0) / (Math.abs(t - e) / e * 100)) * 100))
-      : Math.max(0, Math.min(100, ((sig.mfe_pct || 0) / (Math.abs(e - t) / e * 100)) * 100));
-    const progPct = Math.round(prog);
-    const progColor = progPct > 0 ? '#00c880' : '#c07080';
-    const mfeStr = sig.mfe_pct > 0 ? ' | MFE +' + sig.mfe_pct + '%' : '';
-    footerLeft = '<div style="display:flex;align-items:center;gap:8px;">'
-      + '<div style="width:120px;height:4px;background:#111120;border-radius:2px;overflow:hidden;">'
-      + '<div style="width:' + progPct + '%;height:100%;background:' + progColor + ';border-radius:2px;"></div></div>'
-      + '<span class="rec-msg" style="color:#6868a0;">' + progPct + '% to TP' + mfeStr + '</span></div>';
-  } else if (sig.outcome === 'OPEN') {
-    footerLeft = '<span class="rec-msg" style="color:#484868;">⏳ Monitoring — entry not touched</span>';
   } else {
-    footerLeft = '<span class="rec-msg rec-none">No active recommendations</span>';
+    footerLeft = '<span class="rec-msg none">No active recommendations</span>';
+  }
+
+  // RIGHT ZONE — progress + MFE + action button
+  let progHTML = '';
+  if (sig.outcome === 'ACTIVE' || sig.outcome === 'OPEN') {
+    const mfe = sig.mfe_pct || 0;
+    let pct = 0;
+    if (sig.outcome === 'ACTIVE' && sig.tp && sig.entry && sig.tp !== sig.entry) {
+      const tpDist = Math.abs(sig.tp - sig.entry);
+      pct = Math.round(Math.max(0, Math.min(100, (mfe / (tpDist / sig.entry * 100)) * 100)));
+    }
+    const fillCls = pct > 0 ? 'positive' : 'negative';
+    progHTML = '<div class="tp-progress">'
+      + '<div class="prog-track"><div class="prog-fill ' + fillCls + '" style="width:' + pct + '%"></div></div>'
+      + '<span class="prog-label">' + pct + '%</span>'
+      + (mfe > 0 ? '<span class="mfe-label">+' + mfe + '%</span>' : '')
+      + '</div>';
+  }
+
+  let btnHTML = '';
+  if (sig.outcome === 'ACTIVE') {
+    btnHTML = '<button class="btn-action" onclick="forceCloseSignal(\'' + cardId + '\')" title="Force close at current price">Close</button>';
+  } else if (sig.outcome === 'OPEN') {
+    btnHTML = '<button class="btn-action" onclick="ignoreSignal(\'' + cardId + '\')" title="Signal not taken — remove">Ignore</button>';
   }
 
   // Timestamp
@@ -1399,18 +1401,17 @@ function renderCard(sig, isPast) {
 
     + '</div>' // end card-body
 
-    // FOOTER
+    // FOOTER — single row: left=rec, right=progress+button+analyse+copy
     + '<div class="card-footer">'
-    + '<div class="card-footer-left">'
+    + '<div class="footer-left">'
     + footerLeft
     + '</div>'
-    + '<div class="card-footer-right">'
-    + (isActive ? '<button style="font-size:9px;color:#444466;border:1px solid #222238;border-radius:3px;padding:3px 8px;background:transparent;cursor:pointer;" onclick="forceCloseSignal(\''+cardId+'\')" title="Force close at current price">Close</button>' : '')
-    + (isActive ? '<button style="font-size:9px;color:#444466;border:1px solid #222238;border-radius:3px;padding:3px 8px;background:transparent;cursor:pointer;" onclick="ignoreSignal(\''+cardId+'\')" title="Signal not taken — remove">Ignore</button>' : '')
+    + '<div class="footer-right">'
+    + progHTML
+    + btnHTML
     + '<button class="btn-more" onclick="(function(){var r=document.getElementById(\'rsn-'+cardId+'\');r.classList.toggle(\'expanded\');this.textContent=r.classList.contains(\'expanded\')?\'▲ less\':\'▼ more\';}).call(this)">▼ more</button>'
     + '<button class="btn-analyse" onclick="toggleAgents(\''+cardId+'\',this)"><span class="btn-analyse-ico">▼</span> ANALYSE</button>'
     + '<button class="btn-copy" onclick="copyTradeDossier(\''+cardId+'\')" title="Copy signal">⊞</button>'
-    + '<span class="card-ver">'+(sig.scorer_version||'')+'</span>'
     + '</div>'
     + '</div>'
 
