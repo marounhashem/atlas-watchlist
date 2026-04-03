@@ -13,9 +13,10 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260403.2'`
+`SCORER_VERSION = '20260403.3'`
 
-Changes since 20260401.15 (three review rounds, 18 bugs fixed):
+Changes since 20260401.15 (three review rounds + NFP debug, 21 bugs fixed):
+- **20260403.3** — CRITICAL: NFP Telegram alert fixed — three simultaneous bugs prevented ANY event alerts from ever firing: (1) fired detection used Eastern not UTC timestamp (4h offset), (2) actual field never stored in DB upsert (silently dropped), (3) sentiment used forecast as actual fallback (always beat=0). Added retry mechanism for delayed actuals. Note: no event alerts fired since system launch.
 - **20260403.2** — OPPORTUNITY scoring finally works end-to-end (currency was missing from getPostEventState() return, ×1.10/×0.90 never fired). Opposite-signal expiry filtered to outcome='OPEN' only (previously could auto-expire ACTIVE live trades). WATCH paper tracking removed (queried wrong table). Accurate DST detection using actual US transition rules. All FairEconomy feeds confirmed Eastern timezone.
 - **20260403.1** — Fix dead multipliers (post-event OPPORTUNITY + forecast bias applied after score consumed), FXSSI scoring order bug (70% branch unreachable), session exhaustion used undefined `close`, eventRiskNote used before declaration, pre-event suppression over-applied to unrelated symbols, US500 hours aligned
 
