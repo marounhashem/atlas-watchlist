@@ -24,7 +24,7 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
   const symLower = (symbol || '').toLowerCase();
 
   // Asset-class-specific sizing
-  let displayUnit, unitsRaw, sizeFixed;
+  let displayUnit, unitsRaw, sizeFixed, positionValue;
   const COMMODITY_UNITS = { GOLD: 'oz', SILVER: 'oz', OILWTI: 'bbls', COPPER: 'lbs', PLATINUM: 'oz' };
 
   if (assetClass === 'forex') {
@@ -37,29 +37,28 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
     const pipValueUSD = (pipSize / entry) * contractSize;
     unitsRaw = riskAmount / (slPips * pipValueUSD); // lots
     sizeFixed = Math.max(parseFloat(getSetting('min_lot_forex') || '0.01'), Math.round(unitsRaw * 100) / 100);
-    var positionValue = sizeFixed * contractSize * entry;
+    positionValue = sizeFixed * contractSize * entry;
   } else if (assetClass === 'index') {
     displayUnit = 'contracts';
     const pointValue = parseFloat(getSetting(`point_value_${symLower}`) || '1');
     unitsRaw = riskAmount / (slDistance * pointValue);
     sizeFixed = Math.max(1, Math.round(unitsRaw * 100) / 100);
-    var positionValue = sizeFixed * entry;
+    positionValue = sizeFixed * entry;
   } else if (assetClass === 'commodity') {
     displayUnit = 'lots';
     const tickValue = parseFloat(getSetting(`tick_value_${symLower}`) || '1');
-    unitsRaw = riskAmount / (slDistance * tickValue); // raw units (oz, bbls, lbs)
+    unitsRaw = riskAmount / (slDistance * tickValue);
     const cfdLotSize = parseFloat(getSetting(`cfd_lot_${symLower}`) || '1');
-    sizeFixed = Math.round((unitsRaw / cfdLotSize) * 100) / 100; // convert to lots
-    var positionValue = unitsRaw * entry;
-    console.log(`[Sizing commodity] ${symbol} tickValue=${tickValue} cfdLotSize=${cfdLotSize} slDist=${slDistance} unitsRaw=${unitsRaw} sizeFixed=${sizeFixed}`);
+    sizeFixed = Math.round((unitsRaw / cfdLotSize) * 100) / 100;
+    positionValue = sizeFixed * cfdLotSize * entry; // use lot-based value, not raw units
     // If lot size is 1 (not configured), show raw units instead
-    if (cfdLotSize <= 1) { displayUnit = COMMODITY_UNITS[symbol] || 'units'; sizeFixed = Math.round(unitsRaw * 100) / 100; }
+    if (cfdLotSize <= 1) { displayUnit = COMMODITY_UNITS[symbol] || 'units'; sizeFixed = Math.round(unitsRaw * 100) / 100; positionValue = unitsRaw * entry; }
   } else {
     // Crypto
     displayUnit = (symbol || '').replace('USD', '') || 'units';
     unitsRaw = riskAmount / slDistance;
     sizeFixed = Math.max(parseFloat(getSetting('min_size_crypto') || '0.001'), Math.round(unitsRaw * 1000) / 1000);
-    var positionValue = sizeFixed * entry;
+    positionValue = sizeFixed * entry;
   }
 
   const marginRequired = Math.round(positionValue / leverage);
@@ -90,9 +89,6 @@ function calculatePositionSize(entry, sl, assetClass, symbol) {
   const fullKelly = ((winRate * avgRR) - (1 - winRate)) / avgRR;
   const fractionalKelly = Math.max(0, fullKelly * kellyFraction);
   const kellyRiskAmount = balance * fractionalKelly;
-  const unitsKelly = kellyRiskAmount / slDistance;
-
-  // Kelly uses same logic as fixed but with kellyRiskAmount
   const kellyUnits = kellyRiskAmount / slDistance;
   let sizeKelly;
   if (assetClass === 'forex') {
@@ -1826,18 +1822,25 @@ function scoreSymbol(symbol) {
     }
 
     if (postState.phase === 'OPPORTUNITY') {
-      // Enhanced scoring with event result — apply to macroAdjustedScore (not conflictMultiplier which is already consumed)
+      // Enhanced scoring with event result — apply to macroAdjustedScore
       const sent = postState.sentiment;
-      if (sent && sent.beat !== 0) {
+      if (sent && sent.beat !== 0 && postState.currency) {
         const currencies = SYMBOL_CURRENCIES[symbol] || [];
-        const isBase = currencies.length > 0;
-        const pairBias = isBase && sent.beat > 0 ? 'LONG' : isBase && sent.beat < 0 ? 'SHORT' : null;
+        // Correctly determine if event currency is base or quote of this pair
+        const isBase = currencies.length >= 2 && currencies[0] === postState.currency;
+        const isQuote = currencies.length >= 2 && currencies[1] === postState.currency;
+        const isSingle = currencies.length === 1 && currencies[0] === postState.currency;
+        // Base currency beat = pair goes up (LONG), quote currency beat = pair goes down (SHORT)
+        let pairBias = null;
+        if (isBase) pairBias = sent.beat > 0 ? 'LONG' : 'SHORT';
+        else if (isQuote) pairBias = sent.beat > 0 ? 'SHORT' : 'LONG';
+        else if (isSingle) pairBias = sent.beat > 0 ? 'SHORT' : 'LONG'; // USD-denominated (GOLD, indices) — USD beat = bearish
         if (pairBias === direction) {
           macroAdjustedScore = Math.round(macroAdjustedScore * 1.10);
-          macroNote += macroNote ? ` · ✓ ${postState.event} ${sent.beat > 0 ? 'beat' : 'miss'} confirms` : `✓ ${postState.event} ${sent.beat > 0 ? 'beat' : 'miss'} confirms`;
+          macroNote += ` · ✓ ${postState.event} ${sent.beat > 0 ? 'beat' : 'miss'} confirms`;
         } else if (pairBias && pairBias !== direction) {
           macroAdjustedScore = Math.round(macroAdjustedScore * 0.90);
-          macroNote += macroNote ? ` · ⚠ ${postState.event} result contradicts ${direction}` : `⚠ ${postState.event} result contradicts ${direction}`;
+          macroNote += ` · ⚠ ${postState.event} result contradicts ${direction}`;
         }
       }
     }
@@ -2267,10 +2270,6 @@ function saveSignal(scored) {
   if (scored.session === 'offHours') {
     if (scored.fxssiStale) {
       console.log(`[Scorer] ${scored.symbol} ${scored.direction} blocked — off-hours + FXSSI stale`);
-      return null;
-    }
-    if (scored.verdict === 'WATCH') {
-      console.log(`[Scorer] ${scored.symbol} ${scored.direction} blocked — WATCH signals not saved during off-hours`);
       return null;
     }
   }

@@ -140,14 +140,10 @@ function checkOutcomes(broadcast) {
 
       // Only expire opposite OPEN signals — ACTIVE signals are real trades, don't auto-close
       const oppositeDir = direction === 'LONG' ? 'SHORT' : 'LONG';
-      const { run: dbRun, persist: dbPersist, get: dbGet } = require('./db');
-      const oppositeOpen = dbGet(
-        "SELECT id FROM signals WHERE symbol=? AND direction=? AND outcome='OPEN' AND (cycle IS NULL OR cycle=0) ORDER BY ts DESC LIMIT 1",
-        [sig.symbol, oppositeDir]
-      );
+      const dbMod = require('./db');
+      const oppositeOpen = dbMod.getLatestOpenSignal(sig.symbol, oppositeDir);
       if (oppositeOpen) {
-        dbRun("UPDATE signals SET outcome='EXPIRED', outcome_ts=? WHERE id=?", [Date.now(), oppositeOpen.id]);
-        dbPersist();
+        dbMod.updateOutcome(oppositeOpen.id, 'EXPIRED', 0);
         console.log(`[Outcome] ${sig.symbol} — expired opposite ${oppositeDir} OPEN (id:${oppositeOpen.id})`);
         if (broadcast) broadcast({ type: 'OUTCOME', signalId: oppositeOpen.id, symbol: sig.symbol, direction: oppositeDir, outcome: 'EXPIRED', ts: Date.now() });
       }

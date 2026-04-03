@@ -379,6 +379,7 @@ async function runCalendarCheck(broadcast) {
             postEventState[sym] = {
               firedAt: Date.now(),
               title: e.title,
+              currency: e.country,
               actual: e.actual || 'Released',
               forecast: e.forecast,
               sentiment

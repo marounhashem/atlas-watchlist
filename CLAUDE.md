@@ -188,7 +188,7 @@ On startup: auto-expire any OPEN/ACTIVE signals with zero SL distance.
 | CLOSE | RSI extreme / structure flip | HIGH | Always | 20min |
 | TIME_STOP | Low MFE after hours | MEDIUM | Always | Once per signal |
 
-Time stop thresholds: forex 6h/0.2%, index 4h/0.3%, commodity 8h/0.3%, crypto 12h/0.5%
+Time stop thresholds (spot-focused): forex 4h/0.15%, index 3h/0.20%, commodity 6h/0.25%, crypto 8h/0.30%
 
 ## Swing signal criteria
 
