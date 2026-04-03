@@ -53,29 +53,10 @@ let dbReady = false;
 // Custom body parser that handles Pine Script's invalid NaN values
 // Body parser — sanitize NaN/Infinity BEFORE JSON.parse (TradingView sends these)
 // This is the original working parser. express.json() cannot handle NaN literals.
-// IMPORTANT: Webhook routes respond 200 BEFORE this runs — see below.
-function parseBodyWithNaN(req, callback) {
-  let body = '';
-  req.on('data', chunk => body += chunk.toString());
-  req.on('end', () => {
-    try {
-      const sanitized = body
-        .replace(/:NaN([,}\]])/g, ':null$1')
-        .replace(/: NaN([,}\]])/g, ':null$1')
-        .replace(/:NaN$/g, ':null')
-        .replace(/:Infinity/g, ':null')
-        .replace(/:-Infinity/g, ':null');
-      callback(JSON.parse(sanitized));
-    } catch(e) {
-      callback({});
-    }
-  });
-}
-// Standard body parser for non-webhook POST routes (settings, intel, etc)
+// Parses body for ALL POST routes including webhooks. Webhook handlers respond
+// 200 OK immediately after parsing completes (~5ms), then process async.
 app.use((req, res, next) => {
   if (req.method !== 'POST') return next();
-  // Webhook routes handle their own body parsing — skip middleware
-  if (req.url.startsWith('/webhook/')) return next();
   let body = '';
   req.on('data', chunk => body += chunk.toString());
   req.on('end', () => {
@@ -131,30 +112,28 @@ wss.on('connection', ws => {
 });
 
 // ── Webhook: TradingView Pine Script alerts ──────────────────────────────────
-// Response goes out BEFORE body is parsed — guaranteed instant 200 OK
+// Body is already parsed by middleware above. Respond 200 immediately, process async.
+// TradingView timeout is 3s — body parsing takes <10ms, so 200 goes out fast.
 app.post('/webhook/pine', (req, res) => {
   res.status(200).json({ ok: true });
-  parseBodyWithNaN(req, (data) => {
-    try {
-      processPineWebhook(data);
-    } catch(e) {
-      console.error('[Webhook] Error:', e.message);
-    }
+  setImmediate(() => {
+    try { processPineWebhook(req.body); }
+    catch(e) { console.error('[Webhook] Error:', e.message); }
   });
 });
 
 function processPineWebhook(data) {
-  if (!data) return;
+  if (!data || !Object.keys(data).length) { console.log('[Webhook] Empty body — skipping'); return; }
   const sym0 = data.symbol || data.ticker || 'unknown';
   console.log(`[Webhook] ${sym0} received`);
-  if (!dbReady) { console.log('[Webhook] DB not ready, skipping'); return; }
+  if (!dbReady) { console.log(`[Webhook] ${sym0} — DB not ready, skipping`); return; }
   const ws = process.env.WEBHOOK_SECRET;
   if (ws && data.secret !== ws) {
-    console.warn(`[Webhook] Auth failed for ${sym0} — clear WEBHOOK_SECRET env var to disable`);
+    console.warn(`[Webhook] ${sym0} — Auth failed. WEBHOOK_SECRET is set but payload secret=${data.secret ? 'wrong' : 'missing'}. Clear env var to disable.`);
     return;
   }
   const rawSym = data.symbol || data.ticker || null;
-  if (!rawSym) return;
+  if (!rawSym) { console.log('[Webhook] No symbol field in body'); return; }
   const sym = rawSym.toUpperCase()
     .replace('XAUUSD','GOLD').replace('XAGUSD','SILVER')
     .replace('USOIL','OILWTI').replace('WTI','OILWTI').replace('OIL_CRUDE','OILWTI')
@@ -174,7 +153,7 @@ function processPineWebhook(data) {
   }
 
   if (!SYMBOLS[sym]) { console.log('[Webhook] Not in priority list:', sym); return; }
-  if (!isMarketOpen(sym)) return;
+  if (!isMarketOpen(sym)) { console.log(`[Webhook] ${sym} — market closed, skipping`); return; }
 
   // Map ATLAS//FIVE fields → watchlist fields
   const price   = data.price  || data.close;
@@ -248,11 +227,12 @@ function processPineWebhook(data) {
 // ── Webhook: FXSSI manual paste ──────────────────────────────────────────────
 app.post('/webhook/fxssi', (req, res) => {
   res.status(200).json({ ok: true });
-  parseBodyWithNaN(req, (data) => {
+  setImmediate(() => {
     try {
+      const data = req.body || {};
       const ws = process.env.WEBHOOK_SECRET;
-      if (ws && data?.secret !== ws) return;
-      const { symbol, longPct, shortPct, trapped } = data || {};
+      if (ws && data.secret !== ws) return;
+      const { symbol, longPct, shortPct, trapped } = data;
       if (!symbol) return;
       const sym = symbol.toUpperCase();
       const latest = require('./db').getLatestMarketData(sym);
@@ -851,9 +831,10 @@ app.get('/api/fxssi-test', async (req, res) => {
 // FXSSI Rich webhook — accepts payload from browser extension as backup
 app.post('/webhook/fxssi-rich', (req, res) => {
   res.status(200).json({ ok: true });
-  parseBodyWithNaN(req, (payload) => {
+  setImmediate(() => {
     try {
-      if (!payload || !payload.fxssi) return;
+      const payload = req.body || {};
+      if (!payload.fxssi) return;
       const result = processBridgePayload(payload);
       if (!result) return;
       broadcast({ type: 'FXSSI_UPDATE', symbol: result.symbol, analysed: result.analysed, ts: Date.now() });
