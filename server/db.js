@@ -131,7 +131,7 @@ function run(sql, params) {
   try {
     db.run(sql, params || []);
   } catch(e) {
-    console.error('[DB] Run error:', e.message, '| SQL:', sql.slice(0,80));
+    console.error('[DB] Run error:', e?.message || JSON.stringify(e) || 'unknown', '| SQL:', sql.slice(0,80));
     throw e;
   }
 }
@@ -145,7 +145,7 @@ function get(sql, params) {
     stmt.free();
     return undefined;
   } catch(e) {
-    console.error('[DB] Get error:', e.message, '| SQL:', sql.slice(0,80));
+    console.error('[DB] Get error:', e?.message || JSON.stringify(e) || 'unknown', '| SQL:', sql.slice(0,80));
     return undefined;
   }
 }
@@ -160,7 +160,7 @@ function all(sql, params) {
     stmt.free();
     return rows;
   } catch(e) {
-    console.error('[DB] All error:', e.message, '| SQL:', sql.slice(0,80));
+    console.error('[DB] All error:', e?.message || JSON.stringify(e) || 'unknown', '| SQL:', sql.slice(0,80));
     return [];
   }
 }
@@ -215,7 +215,7 @@ function initSchema() {
   // DXY reference — stored but not scored
   db.run(`CREATE TABLE IF NOT EXISTS dxy_reference (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    close REAL, bias INTEGER, ema_score INTEGER,
+    close REAL, bias TEXT, ema_score REAL,
     trend TEXT, ts INTEGER NOT NULL
   )`);
 
@@ -963,10 +963,18 @@ function clearExpiredIntel() {
 
 // ── DXY reference ────────────────────────────────────────────────────────────
 function upsertDXY(data) {
-  run('DELETE FROM dxy_reference WHERE 1=1');
-  run('INSERT INTO dxy_reference (close, bias, ema_score, trend, ts) VALUES (?,?,?,?,?)',
-    [data.close, data.bias || 0, data.ema_score || 0, data.trend || 'neutral', Date.now()]);
-  persist();
+  if (!data || data.close == null) {
+    console.warn('[DB] upsertDXY called with invalid data:', JSON.stringify(data));
+    return;
+  }
+  try {
+    run('DELETE FROM dxy_reference WHERE 1=1');
+    run('INSERT INTO dxy_reference (close, bias, ema_score, trend, ts) VALUES (?,?,?,?,?)',
+      [data.close, String(data.bias || '0'), data.ema_score || 0, data.trend || 'neutral', Date.now()]);
+    persist();
+  } catch(e) {
+    console.error('[DB] upsertDXY error:', e?.message || e);
+  }
 }
 
 function getLatestDXY() {
