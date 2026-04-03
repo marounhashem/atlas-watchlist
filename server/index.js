@@ -51,26 +51,30 @@ setInterval(() => {
 let dbReady = false;
 
 // Custom body parser that handles Pine Script's invalid NaN values
-// TradingView sends Content-Type: text/plain — rewrite to application/json so express.json() parses it
+// TradingView sends Content-Type: text/plain — rewrite so express.json() parses it
 app.use((req, res, next) => {
   if (req.headers['content-type']?.includes('text/plain')) {
     req.headers['content-type'] = 'application/json';
   }
   next();
 });
-// Body parser with NaN/Infinity sanitization fallback
-app.use(express.json({ limit: '1mb', verify: (req, res, buf) => { req._rawBody = buf.toString(); } }));
+// Body parser — lean, no verify overhead
+app.use(express.json({ limit: '1mb' }));
+// NaN/Infinity fallback — Pine sometimes sends invalid JSON literals
 app.use((err, req, res, next) => {
-  if (err.type === 'entity.parse.failed' && req._rawBody) {
-    try {
-      const sanitized = req._rawBody
-        .replace(/:NaN([,}\]])/g, ':null$1')
-        .replace(/: NaN([,}\]])/g, ':null$1')
-        .replace(/:NaN$/g, ':null')
-        .replace(/:Infinity/g, ':null')
-        .replace(/:-Infinity/g, ':null');
-      req.body = JSON.parse(sanitized);
-    } catch(e) { req.body = {}; }
+  if (err.type === 'entity.parse.failed') {
+    // Re-read body from raw — express already consumed the stream
+    let raw = '';
+    try { raw = err.body || ''; } catch(e) {}
+    if (raw) {
+      try {
+        req.body = JSON.parse(raw
+          .replace(/:NaN([,}\]])/g, ':null$1').replace(/: NaN([,}\]])/g, ':null$1')
+          .replace(/:NaN$/g, ':null').replace(/:Infinity/g, ':null').replace(/:-Infinity/g, ':null'));
+      } catch(e) { req.body = {}; }
+    } else {
+      req.body = {};
+    }
     next();
   } else if (err) {
     next(err);
