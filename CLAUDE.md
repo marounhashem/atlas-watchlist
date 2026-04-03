@@ -263,6 +263,8 @@ Auto-categorised on every WIN/LOSS:
 | GET | /api/past-signals | WIN/LOSS/EXPIRED signals |
 | GET | /api/taxonomy | Loss/win category breakdown + insight |
 | GET | /api/debug | Comprehensive 9-section health + quality report |
+| POST | /api/signal-force-close | Force close ACTIVE signal at current price |
+| POST | /api/signal-ignore | Mark signal as not taken (IGNORED) |
 | POST | /api/trade-feedback | System analysis (no API call) |
 | GET/POST | /api/market-intel | Active intel items / inject intel |
 | DELETE | /api/market-intel/:id | Remove intel item |
