@@ -976,6 +976,25 @@ async function buildMorningBrief() {
   if (carryCount === 0) lines.push('No extreme carry differentials');
   lines.push('');
 
+  // Forecast bias signals — directional pre-release analysis
+  try {
+    const { getForecastBias } = require('./forexCalendar');
+    const forecastSignals = [];
+    for (const sym of ['EURUSD','GBPUSD','USDJPY','AUDUSD','GOLD','SILVER','US30','US100','OILWTI','BTCUSD']) {
+      const fb = getForecastBias(sym);
+      if (fb) forecastSignals.push({ symbol: sym, ...fb });
+    }
+    if (forecastSignals.length > 0) {
+      lines.push('<b>📊 FORECAST SIGNALS</b>');
+      for (const f of forecastSignals) {
+        const icon = f.bias > 0 ? '📈' : f.bias < 0 ? '📉' : '➡️';
+        lines.push(`${icon} <b>${f.symbol}</b> — ${f.summary}`);
+        lines.push(`   Fires in: ${f.firesIn}`);
+      }
+      lines.push('');
+    }
+  } catch(e) {}
+
   // Merged events: CB meetings + Forex Factory HIGH impact
   const cbMeetings = getUpcomingMeetings(14).map(m => ({
     label: m.isEconomicEvent ? m.bank : `🏦 ${m.bank}`,

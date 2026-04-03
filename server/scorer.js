@@ -157,7 +157,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.14'; // Zero SL hard gate + enforceMinSL
+const SCORER_VERSION = '20260401.15'; // Forecast-based pre-release scoring
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -1887,6 +1887,44 @@ function scoreSymbol(symbol) {
       } else if (consensus.impact === 'CONTRADICTS') {
         macroAdjustedScore = Math.round(macroAdjustedScore * 0.88);
         eventRiskNote += (eventRiskNote ? ' · ' : '') + `${consensus.bank} ${consensus.decision} expected — contradicts ${direction}`;
+      }
+    }
+  } catch(e) {}
+
+  // ── Forecast-based pre-release bias ─────────────────────────────────────────
+  // Uses forecast vs previous for upcoming HIGH impact events to nudge score
+  // Only applies when event is >10min away (inside 10min = pre-event suppression)
+  try {
+    const { getForecastBias } = require('./forexCalendar');
+    const forecastBias = getForecastBias(symbol);
+    if (forecastBias && forecastBias.firesInMin > 10) {
+      // Determine if forecast bias confirms or contradicts our direction
+      // Use CURRENCY_DIRECTION from centralBankCalendar to map currency strength → pair direction
+      const { PAIR_CURRENCIES } = getCbCalendar();
+      const currencies = PAIR_CURRENCIES?.[symbol] || [];
+      const eventCcy = forecastBias.currency;
+
+      // For the event currency: bias=1 means currency strengthens
+      // Map to pair direction: if currency strengthening favours LONG, confirms LONG
+      let pairBias = 0;
+      if (currencies.length >= 2) {
+        const isBase = currencies[0] === eventCcy;
+        pairBias = isBase ? forecastBias.bias : -forecastBias.bias;
+      } else if (currencies.includes(eventCcy)) {
+        // Single-currency symbols (GOLD, US30) — USD bullish = bearish for GOLD/indices
+        pairBias = symbol === 'OILWTI' ? -forecastBias.bias : -forecastBias.bias;
+      }
+
+      const mult = forecastBias.strength === 3 ? 0.12 : forecastBias.strength === 2 ? 0.07 : 0.03;
+      const confirms = (pairBias === 1 && direction === 'LONG') || (pairBias === -1 && direction === 'SHORT');
+      const contradicts = (pairBias === 1 && direction === 'SHORT') || (pairBias === -1 && direction === 'LONG');
+
+      if (confirms) {
+        conflictMultiplier *= (1 + mult);
+        macroNote += ` · ✓ Forecast: ${forecastBias.summary}`;
+      } else if (contradicts) {
+        conflictMultiplier *= (1 - mult);
+        macroNote += ` · ⚠ Forecast: ${forecastBias.summary}`;
       }
     }
   } catch(e) {}

@@ -411,10 +411,160 @@ function getUpcomingHighImpactEvents(days = 7) {
   } catch(e) { return []; }
 }
 
+// ── Forecast-based pre-release bias ────────────────────────────────────────
+// Uses forecast vs previous to generate directional bias BEFORE event fires.
+// Only applies when event is >10min away (inside 10min = pre-event suppression).
+
+function getForecastBias(symbol) {
+  const db = require('./db');
+  const now = Date.now();
+  const currencies = EVENT_IMPACT_SYMBOLS;
+
+  // Which currencies affect this symbol?
+  const symCurrencies = [];
+  for (const [ccy, syms] of Object.entries(currencies)) {
+    if (syms.includes(symbol)) symCurrencies.push(ccy);
+  }
+  if (symCurrencies.length === 0) return null;
+
+  try {
+    const nowISO = new Date(now).toISOString().slice(0, 19) + 'Z';
+    const futISO = new Date(now + 24 * 3600000).toISOString().slice(0, 19) + 'Z';
+    const upcoming = db.all(
+      `SELECT * FROM economic_events
+       WHERE fired = 0 AND impact = 'High'
+       AND forecast IS NOT NULL AND forecast != ''
+       AND previous IS NOT NULL AND previous != ''
+       ORDER BY event_date, event_time`, []);
+
+    for (const event of upcoming) {
+      if (!symCurrencies.includes(event.currency)) continue;
+      if (!isEventRelevant(event.title, symbol)) continue;
+
+      // Parse event time
+      let eventMs;
+      try {
+        const timeStr = event.event_time || '00:00:00';
+        eventMs = new Date(event.event_date + 'T' + timeStr.slice(0, 8) + 'Z').getTime();
+      } catch(e) { continue; }
+
+      if (isNaN(eventMs) || eventMs < now || eventMs > now + 24 * 3600000) continue;
+
+      const bias = calculateForecastBias(event);
+      if (!bias) continue;
+
+      const firesInMin = Math.round((eventMs - now) / 60000);
+      return {
+        event: event.title,
+        currency: event.currency,
+        forecast: event.forecast,
+        previous: event.previous,
+        bias: bias.direction,
+        strength: bias.strength,
+        firesInMin,
+        firesIn: firesInMin > 60 ? Math.round(firesInMin / 60) + 'h' : firesInMin + 'min',
+        summary: bias.summary
+      };
+    }
+  } catch(e) {
+    console.error('[Calendar] getForecastBias error:', e.message);
+  }
+  return null;
+}
+
+function calculateForecastBias(event) {
+  const title = event.title.toLowerCase();
+  const forecast = parseFloat(String(event.forecast).replace(/[%,K]/gi, ''));
+  const previous = parseFloat(String(event.previous).replace(/[%,K]/gi, ''));
+
+  if (isNaN(forecast) || isNaN(previous)) return null;
+
+  const change = forecast - previous;
+  const changePct = previous !== 0 ? Math.abs(change / previous * 100) : 0;
+
+  // NFP / Non-Farm Employment
+  if (title.includes('non-farm') || title.includes('nfp')) {
+    if (forecast > previous * 1.5)
+      return { direction: 1, strength: 3, summary: `NFP forecast ${event.forecast} vs prev ${event.previous} — strong USD expected` };
+    if (forecast > previous)
+      return { direction: 1, strength: 2, summary: `NFP forecast ${event.forecast} vs prev ${event.previous} — mild USD bullish` };
+    if (forecast < previous * 0.5)
+      return { direction: -1, strength: 3, summary: `NFP forecast ${event.forecast} vs prev ${event.previous} — weak USD expected` };
+    if (forecast < previous)
+      return { direction: -1, strength: 2, summary: `NFP forecast ${event.forecast} vs prev ${event.previous} — mild USD bearish` };
+    return { direction: 0, strength: 1, summary: `NFP in line with previous — muted reaction expected` };
+  }
+
+  // CPI / Inflation
+  if (title.includes('cpi') || title.includes('inflation')) {
+    if (changePct > 0.2 && change > 0)
+      return { direction: 1, strength: 2, summary: `CPI forecast ${event.forecast} vs prev ${event.previous} — hawkish signal` };
+    if (changePct > 0.2 && change < 0)
+      return { direction: -1, strength: 2, summary: `CPI forecast cooling — dovish signal` };
+  }
+
+  // Unemployment Rate
+  if (title.includes('unemployment rate')) {
+    if (forecast < previous)
+      return { direction: 1, strength: 1, summary: `Unemployment forecast lower — mild positive` };
+    if (forecast > previous)
+      return { direction: -1, strength: 1, summary: `Unemployment forecast higher — mild negative` };
+  }
+
+  // Average Hourly Earnings
+  if (title.includes('hourly earnings')) {
+    if (forecast > previous)
+      return { direction: 1, strength: 2, summary: `Earnings forecast ${event.forecast} vs prev ${event.previous} — wage inflation signal` };
+    if (forecast < previous)
+      return { direction: -1, strength: 1, summary: `Earnings forecast softer — mild dovish signal` };
+  }
+
+  // GDP
+  if (title.includes('gdp')) {
+    if (change > 0)
+      return { direction: 1, strength: 2, summary: `GDP forecast improving — growth signal` };
+    if (change < 0)
+      return { direction: -1, strength: 2, summary: `GDP forecast deteriorating — weakness signal` };
+  }
+
+  // ISM / PMI
+  if (title.includes('ism') || title.includes('pmi')) {
+    const isExpansion = forecast > 50;
+    const wasExpansion = previous > 50;
+    if (isExpansion && !wasExpansion)
+      return { direction: 1, strength: 2, summary: `${event.title} crossing into expansion — bullish` };
+    if (!isExpansion && wasExpansion)
+      return { direction: -1, strength: 2, summary: `${event.title} falling into contraction — bearish` };
+    if (change > 2)
+      return { direction: 1, strength: 1, summary: `${event.title} improving — mild bullish` };
+    if (change < -2)
+      return { direction: -1, strength: 1, summary: `${event.title} deteriorating — mild bearish` };
+  }
+
+  // Retail Sales
+  if (title.includes('retail sales')) {
+    if (change > 0)
+      return { direction: 1, strength: 1, summary: `Retail Sales forecast higher — consumer strength` };
+    if (change < 0)
+      return { direction: -1, strength: 1, summary: `Retail Sales forecast lower — consumer weakness` };
+  }
+
+  // Rate Decision
+  if (title.includes('rate decision') || title.includes('interest rate')) {
+    if (change > 0)
+      return { direction: 1, strength: 3, summary: `Rate hike expected (${event.forecast} vs ${event.previous}) — hawkish` };
+    if (change < 0)
+      return { direction: -1, strength: 3, summary: `Rate cut expected (${event.forecast} vs ${event.previous}) — dovish` };
+  }
+
+  return null;
+}
+
 module.exports = {
   runCalendarCheck, runCalendarFetch,
   isPreEventRisk, isPostEventSuppressed, getPostEventState,
   getUpcomingHighImpactEvents, getEventSentiment,
   calculateEventSentiment, buildAffectedSymbols,
+  getForecastBias,
   EVENT_IMPACT_SYMBOLS, FEED_ICONS
 };
