@@ -989,13 +989,17 @@ function upsertEconomicEvent(event) {
   if (event.eventId) {
     const existing = get('SELECT id, fired FROM economic_events WHERE event_id=?', [event.eventId]);
     if (existing) {
-      run('UPDATE economic_events SET event_time=?, impact=?, forecast=?, previous=?, ts=? WHERE id=?',
-        [event.eventTime, event.impact, event.forecast, event.previous, Date.now(), existing.id]);
+      // Update actual if provided, preserve existing actual if not
+      const actualClause = event.actual ? ', actual=?' : '';
+      const params = [event.eventTime, event.impact, event.forecast, event.previous, Date.now()];
+      if (event.actual) params.push(event.actual);
+      params.push(existing.id);
+      run(`UPDATE economic_events SET event_time=?, impact=?, forecast=?, previous=?, ts=?${actualClause} WHERE id=?`, params);
     } else {
-      run(`INSERT INTO economic_events (event_id, title, currency, event_date, event_time, impact, forecast, previous, ts)
-        VALUES (?,?,?,?,?,?,?,?,?)`,
+      run(`INSERT INTO economic_events (event_id, title, currency, event_date, event_time, impact, forecast, previous, actual, ts)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`,
         [event.eventId, event.title, event.currency, event.eventDate, event.eventTime,
-         event.impact, event.forecast, event.previous, Date.now()]);
+         event.impact, event.forecast, event.previous, event.actual || null, Date.now()]);
     }
   } else {
     // Legacy path without event_id

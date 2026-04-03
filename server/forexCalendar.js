@@ -366,7 +366,8 @@ async function runCalendarCheck(broadcast) {
         upsertEconomicEvent({
           eventId, title: e.title, currency: e.country,
           eventDate, eventTime, impact: e.impact,
-          forecast: e.forecast || null, previous: e.previous || null
+          forecast: e.forecast || null, previous: e.previous || null,
+          actual: e.actual || null
         });
         stored++;
       } catch(ue) {
@@ -387,16 +388,19 @@ async function runCalendarCheck(broadcast) {
         }
       }
 
-      // Detect fired events
-      const eventTs = new Date(e.date);
-      const minutesSince = (Date.now() - eventTs) / 60000;
+      // Detect fired events — use UTC-converted time, not raw Eastern
+      const eventTsUTC = new Date(eventDate + 'T' + (eventTime || '00:00:00') + 'Z');
+      const minutesSince = (Date.now() - eventTsUTC) / 60000;
 
       if (minutesSince >= 0 && minutesSince <= 120) {
-        const sentiment = calculateEventSentiment({
+        // Only calculate sentiment if actual data exists — don't use forecast as fallback
+        const hasActual = e.actual && e.actual !== '' && e.actual !== 'null';
+        const sentiment = hasActual ? calculateEventSentiment({
           title: e.title, currency: e.country,
-          actual: e.actual || e.forecast,
-          forecast: e.forecast, previous: e.previous
-        });
+          actual: e.actual, forecast: e.forecast, previous: e.previous
+        }) : null;
+
+        console.log(`[Calendar] Fire check: ${e.title} actual=${e.actual || 'NONE'} forecast=${e.forecast} minutesSince=${Math.round(minutesSince)}`);
 
         const wasFired = markEventFired(eventId, sentiment);
         if (wasFired) {
@@ -440,6 +444,40 @@ async function runCalendarCheck(broadcast) {
   } catch(e) {
     console.error('[Calendar] Fetch error:', e.message);
   }
+
+  // Retry: check fired events that had no actual — send Telegram when actual appears
+  try {
+    const dbMod = require('./db');
+    const allEvts = dbMod.getAllEconomicEvents() || [];
+    const now = Date.now();
+    for (const evt of allEvts) {
+      if (!evt.fired) continue;
+      if (!evt.actual || evt.actual === 'Released') continue; // still no actual
+      if (evt.sentiment_summary) continue; // already processed with actual
+      const eTs = new Date(evt.event_date + 'T' + (evt.event_time || '00:00:00') + 'Z').getTime();
+      if (now - eTs > 2 * 3600000) continue; // older than 2h, skip
+
+      // Actual just appeared on a fired event — recalculate sentiment and send alert
+      const sentiment = calculateEventSentiment({
+        title: evt.title, currency: evt.currency,
+        actual: evt.actual, forecast: evt.forecast, previous: evt.previous
+      });
+      if (sentiment) {
+        dbMod.run("UPDATE economic_events SET sentiment=?, sentiment_magnitude=?, sentiment_summary=? WHERE id=?",
+          [sentiment.beat || 0, sentiment.magnitude || null, sentiment.summary || null, evt.id]);
+        dbMod.persist();
+        const affectedSymbols = buildAffectedSymbols(evt.currency, [], evt.title);
+        console.log(`[Calendar] RETRY: ${evt.title} actual=${evt.actual} — sending Telegram alert`);
+        try {
+          const { sendEventFiredAlert } = require('./telegram');
+          sendEventFiredAlert({
+            title: evt.title, currency: evt.currency,
+            actual: evt.actual, forecast: evt.forecast, previous: evt.previous
+          }, sentiment, affectedSymbols).catch(() => {});
+        } catch(te) {}
+      }
+    }
+  } catch(e) {}
 
   if (stored > 0 || fired > 0) {
     console.log(`[Calendar] Complete — ${stored} stored, ${fired} fired`);
