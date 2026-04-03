@@ -157,7 +157,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260401.15'; // Forecast-based pre-release scoring
+const SCORER_VERSION = '20260403.1'; // Fix dead multipliers, FXSSI order, session exhaustion, eventRiskNote
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -305,13 +305,13 @@ function scoreFXSSI(data, direction) {
   if (direction === 'LONG') {
     if (shortPct >= 70) score += 0.30;
     else if (shortPct >= 60) score += 0.20;
-    else if (longPct >= 65) score -= 0.20;
     else if (longPct >= 70) score -= 0.30;
+    else if (longPct >= 65) score -= 0.20;
   } else {
     if (longPct >= 70) score += 0.30;
     else if (longPct >= 60) score += 0.20;
-    else if (shortPct >= 65) score -= 0.20;
     else if (shortPct >= 70) score -= 0.30;
+    else if (shortPct >= 65) score -= 0.20;
   }
 
   // 2. In profit ratio
@@ -723,7 +723,7 @@ function scoreSymbol(symbol) {
 
     if (rRatio && rRatio > 3.5 && rangeHigh && rangeLow) {
       const rangeSize  = rangeHigh - rangeLow;
-      const posInRange = rangeSize > 0 ? (close - rangeLow) / rangeSize : 0.5;
+      const posInRange = rangeSize > 0 ? (data.close - rangeLow) / rangeSize : 0.5;
 
       // Price in bottom 25% of a large range = down move exhaustion = no LONG
       if (posInRange < 0.25 && direction === 'LONG') {
@@ -1804,15 +1804,15 @@ function scoreSymbol(symbol) {
   const macroRawVerdict = macroAdjustedScore >= macroEffectiveMin ? 'PROCEED'
     : macroAdjustedScore >= macroEffectiveMin - 12 ? 'WATCH' : 'SKIP';
   let macroVerdict = structureZero && macroRawVerdict === 'PROCEED' ? 'WATCH' : macroRawVerdict;
+
+  // ── Event risk tags ──────────────────────────────────────────────────────────
+  let eventRiskNote = '';
+
   // R:R < 2.0 forces WATCH regardless of score
   if (rrForcedWatch && macroVerdict === 'PROCEED') {
     macroVerdict = 'WATCH';
-    eventRiskNote += (eventRiskNote ? ' · ' : '') + `⚠ R:R ${rr} below 2.0 — reduced to WATCH`;
+    eventRiskNote += `⚠ R:R ${rr} below 2.0 — reduced to WATCH`;
   }
-
-  // ── Event risk tags ──────────────────────────────────────────────────────────
-  // Tags surface risk in dashboard/Telegram instead of silently blocking
-  let eventRiskNote = '';
 
   // Post-event 3-phase system: VOLATILITY (5min block) → OPPORTUNITY (2h boost) → NORMAL
   try {
@@ -1826,18 +1826,17 @@ function scoreSymbol(symbol) {
     }
 
     if (postState.phase === 'OPPORTUNITY') {
-      // Enhanced scoring with event result — no penalty
+      // Enhanced scoring with event result — apply to macroAdjustedScore (not conflictMultiplier which is already consumed)
       const sent = postState.sentiment;
       if (sent && sent.beat !== 0) {
-        // Determine if event result helps or hurts this signal direction
         const currencies = SYMBOL_CURRENCIES[symbol] || [];
         const isBase = currencies.length > 0;
         const pairBias = isBase && sent.beat > 0 ? 'LONG' : isBase && sent.beat < 0 ? 'SHORT' : null;
         if (pairBias === direction) {
-          conflictMultiplier *= 1.10;
+          macroAdjustedScore = Math.round(macroAdjustedScore * 1.10);
           macroNote += macroNote ? ` · ✓ ${postState.event} ${sent.beat > 0 ? 'beat' : 'miss'} confirms` : `✓ ${postState.event} ${sent.beat > 0 ? 'beat' : 'miss'} confirms`;
         } else if (pairBias && pairBias !== direction) {
-          conflictMultiplier *= 0.90;
+          macroAdjustedScore = Math.round(macroAdjustedScore * 0.90);
           macroNote += macroNote ? ` · ⚠ ${postState.event} result contradicts ${direction}` : `⚠ ${postState.event} result contradicts ${direction}`;
         }
       }
@@ -1923,10 +1922,10 @@ function scoreSymbol(symbol) {
       const contradicts = (pairBias === 1 && direction === 'SHORT') || (pairBias === -1 && direction === 'LONG');
 
       if (confirms) {
-        conflictMultiplier *= (1 + mult);
+        macroAdjustedScore = Math.round(macroAdjustedScore * (1 + mult));
         macroNote += ` · ✓ Forecast: ${forecastBias.summary}`;
       } else if (contradicts) {
-        conflictMultiplier *= (1 - mult);
+        macroAdjustedScore = Math.round(macroAdjustedScore * (1 - mult));
         macroNote += ` · ⚠ Forecast: ${forecastBias.summary}`;
       }
     }

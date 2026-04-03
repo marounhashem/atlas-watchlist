@@ -429,11 +429,8 @@ function isPreEventRisk(symbol, hours = 10/60) { // 10 minutes default
     const now = new Date();
 
     for (const r of rows) {
-      // Build affected symbols list from currency + feed-specific
+      // Build affected symbols list from currency mapping
       const affected = new Set(EVENT_IMPACT_SYMBOLS[r.currency] || []);
-      for (const f of FEEDS) {
-        if (f.symbols) f.symbols.forEach(s => affected.add(s));
-      }
       // Political/Fed speeches also affect precious metals
       const title = (r.title || '').toLowerCase();
       if (title.includes('trump') || title.includes('president') || title.includes('fed chair') || title.includes('powell')) {
