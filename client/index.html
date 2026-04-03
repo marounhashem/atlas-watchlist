@@ -1335,6 +1335,8 @@ function renderCard(sig, isPast) {
       + '</div>';
   }
 
+  const cardId = sig.id || sig.symbol;
+
   let btnHTML = '';
   if (sig.outcome === 'ACTIVE') {
     btnHTML = '<button class="btn-action" onclick="forceCloseSignal(\'' + cardId + '\')" title="Force close at current price">Close</button>';
@@ -1346,8 +1348,6 @@ function renderCard(sig, isPast) {
   const ts = sig.ts
     ? new Date(sig.ts).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})
     : '';
-
-  const cardId = sig.id || sig.symbol;
 
   return '<div class="'+cardClass+'" id="card-'+cardId+'">'
 
