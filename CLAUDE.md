@@ -155,10 +155,14 @@ On startup: auto-expire any OPEN/ACTIVE signals with zero SL distance.
 
 ## Webhook architecture
 
-- **Pattern:** `res.status(200).json({ok:true})` fires immediately, processing via `setImmediate()`
+- **Body parser:** Custom stream reader that sanitizes `NaN`/`Infinity` → `null` BEFORE `JSON.parse()`. **Do NOT replace with `express.json()`** — TradingView sends NaN literals which are invalid JSON and will silently fail.
+- **Pattern:** `res.status(200).json({ok:true})` fires immediately, processing via `setImmediate()` + `processPineWebhook()`
 - **TradingView timeout:** guaranteed <10ms response regardless of server load
+- **Content-type:** TradingView sends `text/plain` — the stream parser handles all content types (no rewrite needed)
+- **Auth:** Optional `WEBHOOK_SECRET` env var — if set, payload must include matching `secret` field. Clear the env var to disable.
 - **WebSocket:** `noServer: true` mode with try/catch upgrade handler
 - **Startup:** `server.listen()` first, DB init async in callback via setTimeout chains
+- **Railway region:** `us-west1` (set in railway.toml) for lowest latency to TradingView servers
 
 ## Bank holiday awareness
 
@@ -313,7 +317,7 @@ Auto-categorised on every WIN/LOSS:
 7. **Background tasks use Haiku only.** Sonnet only on explicit user-triggered analysis.
 8. **Position sizing is portal-only.** Never include lot sizes or position sizes in Telegram messages.
 9. **CLAUDE.md must be updated** with every scorer version bump and every new feature.
-10. **Webhook responds immediately.** `res.status(200)` before any processing, `setImmediate()` for async work.
+10. **Webhook responds immediately.** `res.status(200)` before any processing, `setImmediate()` for async work. **Never replace the stream body parser with `express.json()`** — TradingView sends NaN literals that break standard JSON parsing.
 11. **Forex rounds to 5dp, others to 2dp.** Prevents SL enforcement from being destroyed by rounding.
 12. **Eastern → UTC on storage.** FF calendar times converted via `easternToUTC()` before DB write.
 13. **Update CLAUDE.md before closing.** Every session that makes code changes must end with CLAUDE.md updated to reflect all changes. Never close a session without confirming CLAUDE.md matches the actual codebase.
