@@ -2348,6 +2348,49 @@ async function runMacroContextFetch(broadcast) {
     }
   }
 
+  // ── Derived macro for cross pairs and indices without direct macro fetch ────
+  const derivedSymbols = {
+    EURGBP: (m) => {
+      const eur = m['EURUSD'], gbp = m['GBPUSD'];
+      if (!eur || !gbp) return null;
+      const net = (eur.supports_long ? eur.strength : -eur.strength) - (gbp.supports_long ? gbp.strength : -gbp.strength);
+      return { sentiment: net > 1 ? 'BULLISH' : net < -1 ? 'BEARISH' : 'NEUTRAL', strength: Math.min(10, Math.round(Math.abs(net) * 1.2)), supports_long: net > 1, supports_short: net < -1, summary: `Derived: EUR ${eur.sentiment} vs GBP ${gbp.sentiment}`, derived: true };
+    },
+    GBPCHF: (m) => {
+      const gbp = m['GBPUSD'], usdchf = m['USDCHF'];
+      if (!gbp || !usdchf) return null;
+      const net = ((gbp.supports_long ? gbp.strength : -gbp.strength) + (usdchf.supports_long ? usdchf.strength : -usdchf.strength)) / 2;
+      return { sentiment: net > 1 ? 'BULLISH' : net < -1 ? 'BEARISH' : 'NEUTRAL', strength: Math.min(10, Math.round(Math.abs(net) * 1.2)), supports_long: net > 1, supports_short: net < -1, summary: `Derived: GBP ${gbp.sentiment} + CHF via USDCHF`, derived: true };
+    },
+    UK100: (m) => {
+      const gbp = m['GBPUSD'], us = m['US30'] || m['US100'];
+      if (!gbp && !us) return null;
+      const usScore = us ? (us.supports_long ? us.strength : -us.strength) : 0;
+      const gbpScore = gbp ? (gbp.supports_long ? gbp.strength : -gbp.strength) : 0;
+      const net = usScore * 0.7 + gbpScore * 0.3;
+      return { sentiment: net > 1 ? 'BULLISH' : net < -1 ? 'BEARISH' : 'NEUTRAL', strength: Math.min(10, Math.round(Math.abs(net))), supports_long: net > 1, supports_short: net < -1, summary: `Derived: US risk ${us?.sentiment||'?'} + GBP ${gbp?.sentiment||'?'}`, derived: true };
+    },
+    US500: (m) => {
+      const us30 = m['US30'], us100 = m['US100'];
+      if (!us30 && !us100) return null;
+      const s30 = us30 ? (us30.supports_long ? us30.strength : -us30.strength) : 0;
+      const s100 = us100 ? (us100.supports_long ? us100.strength : -us100.strength) : 0;
+      const count = (us30 ? 1 : 0) + (us100 ? 1 : 0);
+      const net = count > 0 ? (s30 + s100) / count : 0;
+      return { sentiment: net > 1 ? 'BULLISH' : net < -1 ? 'BEARISH' : 'NEUTRAL', strength: Math.min(10, Math.round(Math.abs(net))), supports_long: net > 1, supports_short: net < -1, summary: `Derived: US30 ${us30?.sentiment||'?'} + US100 ${us100?.sentiment||'?'}`, derived: true };
+    }
+  };
+  for (const [sym, deriveFn] of Object.entries(derivedSymbols)) {
+    try {
+      const derived = deriveFn(macroContext);
+      if (derived) {
+        macroContext[sym] = { ...derived, ts: Date.now() };
+        db.upsertMacroContext(sym, macroContext[sym]);
+        console.log(`[Macro] ${sym}: ${derived.sentiment} (derived) — ${derived.summary}`);
+      }
+    } catch(e) {}
+  }
+
   console.log(`[Macro] Context refresh complete for ${Object.keys(macroContext).length} symbols`);
 
   // ── Consensus fetch for upcoming meetings (within 21 days) ────────────────
@@ -2617,6 +2660,11 @@ server.listen(PORT, () => {
       }
       if (cleared > 0) { db.persist(); console.log(`[Startup] Cleared ${cleared} past unfired events`); }
     } catch(e) { console.error('[Startup] Event cleanup error:', e.message); }
+    // Fix null outcome_category on expired signals
+    try {
+      db.run("UPDATE signals SET outcome_category='MFE_CAPTURE_FAILURE', outcome_notes='MFE achieved but recs not followed, expired' WHERE outcome IN ('EXPIRED','LOSS') AND outcome_category IS NULL AND mfe_pct > 0.10");
+      db.persist();
+    } catch(e) {}
     // Expose macro context globally so scorer.js can access it in-process
     global.atlasGetMacroContext = getMacroContext;
     global.atlasGetDXY = () => db.getLatestDXY();

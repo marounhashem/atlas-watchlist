@@ -770,23 +770,43 @@ function addRecommendation(signalId, rec) {
     }
   } catch(e) {}
 
-  // Don't duplicate — skip if same type issued within last 10 minutes
-  const tenMinAgo = Date.now() - 10 * 60 * 1000;
-  const recentSame = existing.find(r => r.type === rec.type && r.ts > tenMinAgo);
-  if (recentSame) return false; // already issued recently
-
-  // MOVE_SL dedup: never re-issue if the recommended new_sl target is identical
-  // to the most recent unresolved MOVE_SL rec. Prevents the id:2795 pattern where
-  // 100 identical recs fire because price freezes at a level for hours.
-  if (rec.type === 'MOVE_SL' && rec.new_sl != null) {
-    const threeHoursAgo = Date.now() - 3 * 60 * 60 * 1000;
-    const recentMoveSL = existing
-      .filter(r => r.type === 'MOVE_SL' && !r.resolved && !r.dismissed && r.ts > threeHoursAgo)
-      .sort((a, b) => b.ts - a.ts)[0];
-    if (recentMoveSL && recentMoveSL.new_sl != null) {
-      // Dedup if new_sl within 0.1% of previous — prevents near-identical recs
-      const diff = Math.abs(recentMoveSL.new_sl - rec.new_sl) / rec.new_sl;
-      if (diff <= 0.001) return false;
+  // Dedup — check for identical rec within 6h
+  const sixHoursAgo = Date.now() - 6 * 60 * 60 * 1000;
+  const recent = existing.filter(r => r.type === rec.type && !r.resolved && r.ts > sixHoursAgo);
+  if (recent.length > 0) {
+    // MOVE_SL: duplicate if same new_sl target
+    if (rec.type === 'MOVE_SL' && rec.new_sl != null) {
+      if (recent.some(r => r.new_sl != null && Math.abs(r.new_sl - rec.new_sl) / rec.new_sl <= 0.001)) return false;
+    }
+    // CLOSE: not duplicate if urgency increased
+    else if (rec.type === 'CLOSE') {
+      const urgVal = { HIGH: 2, MEDIUM: 1, LOW: 0 };
+      const maxExisting = recent.reduce((m, r) => Math.max(m, urgVal[r.urgency] || 0), -1);
+      if ((urgVal[rec.urgency] || 0) <= maxExisting) {
+        // Same or lower urgency — check if same reason type
+        const isRSI = (r) => r.reason?.includes('RSI');
+        const isSLP = (r) => r.reason?.includes('way to SL');
+        if (isRSI(rec) && recent.some(isRSI)) return false;
+        if (isSLP(rec) && recent.some(isSLP)) return false;
+      }
+      // Higher urgency — allow through (escalation)
+    }
+    // PARTIAL_CLOSE / TIME_STOP: one-time only
+    else if (rec.type === 'PARTIAL_CLOSE' || rec.type === 'TIME_STOP') {
+      // TIME_STOP can re-fire if urgency escalated
+      if (rec.type === 'TIME_STOP') {
+        const urgVal = { HIGH: 2, MEDIUM: 1, LOW: 0 };
+        const maxExisting = recent.reduce((m, r) => Math.max(m, urgVal[r.urgency] || 0), -1);
+        if ((urgVal[rec.urgency] || 0) > maxExisting) { /* escalation — allow */ }
+        else return false;
+      } else {
+        return false; // PARTIAL_CLOSE is truly one-time
+      }
+    }
+    // Other types: 10min dedup window
+    else {
+      const tenMinAgo = Date.now() - 10 * 60 * 1000;
+      if (recent.some(r => r.ts > tenMinAgo)) return false;
     }
   }
 
@@ -880,6 +900,13 @@ function resolveStaleRecommendations(signalId, currentRsi, direction) {
         }
         return r;
       }
+
+      // SL proximity recs — never auto-expire (trader needs to see these)
+      if (r.reason && r.reason.includes('way to SL')) return r;
+      // TIME_STOP HIGH urgency — never auto-expire
+      if (r.type === 'TIME_STOP' && r.urgency === 'HIGH') return r;
+      // PARTIAL_CLOSE — never auto-expire (one-time rec)
+      if (r.type === 'PARTIAL_CLOSE') return r;
 
       // All other rec types: original 20min timer
       if ((now - r.ts) > staleMs) {

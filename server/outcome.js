@@ -40,28 +40,45 @@ function checkTimeStop(sig) {
   const cfg = getSymbols()[sig.symbol];
   if (!cfg) return null;
 
-  const recs = JSON.parse(sig.recommendations || '[]');
-  if (recs.some(r => r.type === 'TIME_STOP')) return null;
-
   const activeTs = sig.outcome_ts || sig.ts;
   const hoursActive = (Date.now() - activeTs) / 3600000;
   const mfePct = sig.mfe_pct || 0;
 
-  // Spot-focused time stops — tighter than swing
-  const thresholds = { forex: { hours: 4, minMfe: 0.15 }, index: { hours: 3, minMfe: 0.20 }, commodity: { hours: 6, minMfe: 0.25 }, crypto: { hours: 8, minMfe: 0.30 } };
-  const t = thresholds[cfg.assetClass] || thresholds.forex;
+  // Don't fire if trade is progressing well
+  if (mfePct > 0.20) return null;
 
-  if (hoursActive >= t.hours && mfePct < t.minMfe) {
-    return {
-      type: 'TIME_STOP',
-      reason: `${Math.round(hoursActive)}h active with only +${mfePct}% MFE — dead trade, consider closing`,
-      urgency: 'MEDIUM',
-      hours_active: Math.round(hoursActive),
-      mfe_pct: mfePct,
-      price: null
-    };
+  // Check last TIME_STOP — re-fire every 2h if MFE hasn't improved
+  const recs = JSON.parse(sig.recommendations || '[]');
+  const lastTS = recs.filter(r => r.type === 'TIME_STOP').sort((a, b) => b.ts - a.ts)[0];
+  if (lastTS) {
+    const hoursSinceLast = (Date.now() - lastTS.ts) / 3600000;
+    const mfeImproved = mfePct > (lastTS.mfe_pct || 0) + 0.05;
+    if (hoursSinceLast < 2 || mfeImproved) return null;
   }
-  return null;
+
+  // Escalate urgency with time
+  let urgency, reason;
+  if (hoursActive >= 12 && mfePct < 0.20) {
+    urgency = 'HIGH';
+    reason = `${Math.round(hoursActive)}h active, MFE only +${mfePct}% — strongly consider closing`;
+  } else if (hoursActive >= 8 && mfePct < 0.15) {
+    urgency = 'HIGH';
+    reason = `${Math.round(hoursActive)}h active, MFE +${mfePct}% — trade is stagnating`;
+  } else if (hoursActive >= 4 && mfePct < 0.10) {
+    urgency = 'MEDIUM';
+    reason = `${Math.round(hoursActive)}h active with only +${mfePct}% MFE — dead trade, consider closing`;
+  } else {
+    return null;
+  }
+
+  return {
+    type: 'TIME_STOP',
+    reason,
+    urgency,
+    hours_active: Math.round(hoursActive),
+    mfe_pct: mfePct,
+    price: null
+  };
 }
 
 // ── Loss/Win taxonomy ───────────────────────────────────────────────────────
@@ -414,8 +431,9 @@ function generateRecommendations(sig, data, price) {
   // Raised from 40% → 60%: below 60% is normal oscillation on a 2:1 RR trade.
   // The RSI HIGH rec already covers early momentum reversals.
   // MEDIUM fires only when you're genuinely close to the SL.
+  // SL proximity — escalating urgency, never auto-expires
   const maeProgress = slDist > 0 ? Math.round((-priceDist / slDist) * 100) : 0;
-  if (maeProgress > 70) {
+  if (maeProgress > 85) {
     recs.push({
       type: 'CLOSE',
       reason: `Price ${maeProgress}% of the way to SL — urgent, cut now`,
@@ -424,11 +442,29 @@ function generateRecommendations(sig, data, price) {
       mfe_pct: mfePct,
       progress_pct: progressPct
     });
-  } else if (maeProgress > 60) {
+    // 95%+ to SL — immediate Telegram push
+    if (maeProgress > 95 && _sendRecAlert) {
+      try {
+        _sendRecAlert(sig, {
+          type: 'CLOSE', urgency: 'HIGH',
+          reason: `🚨 ${sig.symbol} ${direction} — price ${maeProgress}% to SL · Entry: ${entry} · SL: ${sl} · Current: ${price}`
+        }).catch(() => {});
+      } catch(e) {}
+    }
+  } else if (maeProgress > 70) {
     recs.push({
       type: 'CLOSE',
       reason: `Price ${maeProgress}% of the way to SL — consider cutting early`,
       urgency: 'MEDIUM',
+      price,
+      mfe_pct: mfePct,
+      progress_pct: progressPct
+    });
+  } else if (maeProgress > 50) {
+    recs.push({
+      type: 'CLOSE',
+      reason: `Price ${maeProgress}% of the way to SL — monitor closely`,
+      urgency: 'LOW',
       price,
       mfe_pct: mfePct,
       progress_pct: progressPct
