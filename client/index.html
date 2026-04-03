@@ -728,8 +728,8 @@
         <div class="fbtn on" onclick="setFilter('ALL')">ALL</div>
         <div class="fbtn" onclick="setFilter('PROCEED')">PROCEED</div>
         <div class="fbtn" onclick="setFilter('WATCH')">WATCH</div>
-        <div class="fbtn" onclick="setFilter('LONG')">LONG</div>
-        <div class="fbtn" onclick="setFilter('SHORT')">SHORT</div>
+        <div class="fbtn" onclick="setFilter('ACTIVE')">ACTIVE</div>
+        <div class="fbtn" onclick="setFilter('OPEN')">OPEN</div>
         <div class="fbtn" id="past-tab-btn" onclick="setFilter('PAST')">PAST <span id="past-count" style="opacity:.6;font-size:9px;"></span></div>
       </div>
     </div>
@@ -1130,8 +1130,8 @@ function renderSignals() {
     if(s.verdict==='SKIP' || s.verdict==='CLOSED') return false;
     if(activeFilter==='PROCEED') return s.verdict==='PROCEED';
     if(activeFilter==='WATCH')   return s.verdict==='WATCH';
-    if(activeFilter==='LONG')    return s.direction==='LONG';
-    if(activeFilter==='SHORT')   return s.direction==='SHORT';
+    if(activeFilter==='ACTIVE')  return s.outcome==='ACTIVE';
+    if(activeFilter==='OPEN')    return s.outcome==='OPEN';
     return true;
   }).sort((a,b)=>{
     const stateO = {ACTIVE:0,OPEN:1};
@@ -1877,30 +1877,56 @@ function copyTradeDossier(cardId) {
   document.body.appendChild(modal);
 }
 
-async function forceCloseSignal(cardId) {
-  const sig = allSignals.find(s => String(s.id||s.symbol) === String(cardId));
-  if (!sig) return;
-  try {
-    const res = await fetch('/api/signal-force-close', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:sig.id})});
-    const data = await res.json();
-    if (data.ok) {
-      const color = data.outcome === 'WIN' ? '#00c880' : '#c07080';
-      showToast('Closed: ' + data.outcome + ' ' + (data.pnl_pct > 0 ? '+' : '') + data.pnl_pct + '%', data.outcome === 'WIN' ? 'win' : 'loss');
-      sig.outcome = data.outcome; sig.pnl_pct = data.pnl_pct;
-      setTimeout(renderSignals, 2000);
-    }
-  } catch(e) { showToast('Close failed: ' + e.message); }
+function showActionModal(title, subtitle, confirmFn) {
+  const modal = document.getElementById('action-modal');
+  document.getElementById('modal-title').textContent = title;
+  document.getElementById('modal-subtitle').textContent = subtitle;
+  document.getElementById('modal-reason').value = '';
+  document.getElementById('modal-confirm').onclick = () => {
+    const reason = document.getElementById('modal-reason').value.trim();
+    closeModal();
+    confirmFn(reason);
+  };
+  modal.style.display = 'flex';
+  setTimeout(() => document.getElementById('modal-reason').focus(), 50);
+  modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+  document.onkeydown = (e) => { if (e.key === 'Escape') closeModal(); };
 }
 
-async function ignoreSignal(cardId) {
+function closeModal() {
+  document.getElementById('action-modal').style.display = 'none';
+  document.onkeydown = null;
+}
+
+function forceCloseSignal(cardId) {
   const sig = allSignals.find(s => String(s.id||s.symbol) === String(cardId));
   if (!sig) return;
-  try {
-    await fetch('/api/signal-ignore', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:sig.id})});
-    sig.outcome = 'EXPIRED';
-    renderSignals();
-    showToast('Signal ignored — removed from view');
-  } catch(e) {}
+  const label = sig.symbol ? sig.symbol + ' ' + sig.direction : 'Signal #' + cardId;
+  showActionModal('Force Close — ' + label, 'Close trade at current price. Records as WIN or LOSS.', async (reason) => {
+    try {
+      const res = await fetch('/api/signal-force-close', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:sig.id,reason})});
+      const data = await res.json();
+      if (data.ok) {
+        showToast('Closed: ' + data.outcome + ' ' + (data.pnl_pct > 0 ? '+' : '') + data.pnl_pct + '%', data.outcome === 'WIN' ? 'win' : 'loss');
+        sig.outcome = data.outcome; sig.pnl_pct = data.pnl_pct;
+        setTimeout(renderSignals, 2000);
+      }
+    } catch(e) { showToast('Close failed: ' + e.message); }
+  });
+}
+
+function ignoreSignal(cardId) {
+  const sig = allSignals.find(s => String(s.id||s.symbol) === String(cardId));
+  if (!sig) return;
+  const label = sig.symbol ? sig.symbol + ' ' + (sig.direction||'') : 'Signal #' + cardId;
+  showActionModal('Ignore — ' + label, 'Signal marked as not taken. Removed from dashboard. Does not affect win rate.', async (reason) => {
+    try {
+      await fetch('/api/signal-ignore', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:sig.id,reason})});
+      sig.outcome = 'EXPIRED';
+      renderSignals();
+      showToast('Signal ignored — removed from view');
+    } catch(e) {}
+  });
 }
 
 async function logOutcome(signalId, outcome) {
@@ -2457,5 +2483,18 @@ function copyIdeaExport() {
 }
 
 </script>
+
+<div id="action-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#0e0e1b;border:1px solid #2a2a3a;border-radius:8px;padding:24px;width:360px;display:flex;flex-direction:column;gap:14px;box-shadow:0 8px 40px rgba(0,0,0,0.8);">
+    <div style="font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;color:#e8e8f0;" id="modal-title">Close Signal</div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#444466;" id="modal-subtitle"></div>
+    <textarea id="modal-reason" placeholder="Reason (optional)..." style="background:#111120;border:1px solid #2a2a3a;border-radius:5px;color:#8080b8;font-family:'Space Grotesk',sans-serif;font-size:12px;padding:10px 12px;resize:none;height:80px;outline:none;" onfocus="this.style.borderColor='#6644cc'" onblur="this.style.borderColor='#2a2a3a'"></textarea>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button onclick="closeModal()" style="font-size:11px;color:#444466;border:1px solid #222238;border-radius:4px;padding:6px 16px;background:transparent;cursor:pointer;font-family:'Space Grotesk',sans-serif;">Cancel</button>
+      <button id="modal-confirm" style="font-size:11px;color:#e8e8f0;border:1px solid #6644cc;border-radius:4px;padding:6px 16px;background:#6644cc22;cursor:pointer;font-family:'Space Grotesk',sans-serif;">Confirm</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

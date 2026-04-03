@@ -535,7 +535,7 @@ app.post('/api/outcome', (req, res) => {
 
 // Force close signal at current price — calculates real P&L
 app.post('/api/signal-force-close', (req, res) => {
-  const { id } = req.body || {};
+  const { id, reason } = req.body || {};
   if (!id) return res.status(400).json({ error: 'Missing id' });
   const sig = db.getAllSignals(500).find(s => s.id === id);
   if (!sig) return res.status(404).json({ error: 'Signal not found' });
@@ -546,8 +546,9 @@ app.post('/api/signal-force-close', (req, res) => {
     : (sig.entry - currentPrice) / sig.entry * 100;
   const outcome = pnl_pct >= 0 ? 'WIN' : 'LOSS';
   const rounded = Math.round(pnl_pct * 100) / 100;
+  const notes = 'Force closed at ' + currentPrice + (reason ? ' — ' + reason : '');
   db.run("UPDATE signals SET outcome=?, outcome_ts=?, pnl_pct=?, outcome_category='FORCE_CLOSE', outcome_notes=? WHERE id=?",
-    [outcome, Date.now(), rounded, 'Force closed by trader at ' + currentPrice, id]);
+    [outcome, Date.now(), rounded, notes, id]);
   db.persist();
   console.log(`[Signal] Force closed: ${sig.symbol} ${sig.direction} ${outcome} ${rounded}% at ${currentPrice}`);
   broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction: sig.direction, outcome, pnlPct: rounded, ts: Date.now() });
@@ -556,10 +557,11 @@ app.post('/api/signal-force-close', (req, res) => {
 
 // Ignore signal — not taken by trader, remove from dashboard
 app.post('/api/signal-ignore', (req, res) => {
-  const { id } = req.body || {};
+  const { id, reason } = req.body || {};
   if (!id) return res.status(400).json({ error: 'Missing id' });
-  db.run("UPDATE signals SET outcome='EXPIRED', outcome_ts=?, outcome_category='IGNORED', outcome_notes='Not taken by trader' WHERE id=?",
-    [Date.now(), id]);
+  const notes = 'Not taken by trader' + (reason ? ' — ' + reason : '');
+  db.run("UPDATE signals SET outcome='EXPIRED', outcome_ts=?, outcome_category='IGNORED', outcome_notes=? WHERE id=?",
+    [Date.now(), notes, id]);
   db.persist();
   broadcast({ type: 'OUTCOME', signalId: id, outcome: 'EXPIRED', ts: Date.now() });
   res.json({ ok: true });
