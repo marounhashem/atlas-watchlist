@@ -193,6 +193,9 @@ const SYMBOLS = {
     peakSession: 'asia', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
     macroEvents: [], minScoreProceed: 82, noOrderBook: true, group: 'global'
   },
+  // ⚠ COPPER and PLATINUM have no Pine alerts configured in TradingView.
+  // Action required: Add both symbols to the ATLAS_WATCHLIST_BRIDGE alert.
+  // Until fixed: scorer runs on FXSSI data only — no Pine structure/bias.
   COPPER: {
     label: 'Copper', capitalTicker: 'COPPER', pineTicker: 'COPPER',
     assetClass: 'commodity', sessions: { london: true, newYork: true, asia: false },

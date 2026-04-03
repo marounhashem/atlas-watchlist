@@ -69,20 +69,21 @@ const MARKET_HOURS = {
 
 // ── Bank holidays — thin liquidity or closed markets ────────────────────────
 // Affects scoring (session penalty) and morning brief warnings
-// Only equity indices and commodities close for bank holidays
-// Forex pairs trade 24/5 regardless — NEVER list forex here
+// Market holidays — commodities (GOLD/SILVER/OIL) also close on major holidays
+// Forex pairs with affected currencies may have thin liquidity on Easter Monday
 const BANK_HOLIDAYS = {
-  '2026-04-03': ['UK100','DE40','COPPER','PLATINUM'], // Good Friday
-  '2026-04-06': ['UK100','DE40'], // Easter Monday
+  '2026-04-03': ['GOLD','SILVER','OILWTI','COPPER','PLATINUM','UK100','DE40'], // Good Friday
+  '2026-04-06': ['GOLD','SILVER','OILWTI','COPPER','PLATINUM','UK100','DE40',
+                 'EURGBP','GBPJPY','GBPCHF','GBPUSD','EURUSD','EURJPY','EURCHF','EURAUD'], // Easter Monday
   '2026-05-01': ['DE40'], // Labour Day EU
   '2026-05-25': ['UK100'], // Spring Bank Holiday UK
   '2026-07-04': ['US30','US100','US500'], // Independence Day US
   '2026-08-31': ['UK100'], // Summer Bank Holiday UK
   '2026-11-26': ['US30','US100','US500'], // Thanksgiving US
-  '2026-12-25': ['UK100','DE40','US30','US100','US500','COPPER','PLATINUM'], // Christmas
+  '2026-12-25': ['GOLD','SILVER','OILWTI','COPPER','PLATINUM','UK100','DE40','US30','US100','US500'], // Christmas
   '2026-12-26': ['UK100','DE40','COPPER','PLATINUM'], // Boxing Day
   '2026-12-28': ['UK100','DE40'], // Boxing Day observed
-  '2027-01-01': ['UK100','DE40','US30','US100','US500','J225','COPPER','PLATINUM'], // New Year
+  '2027-01-01': ['GOLD','SILVER','OILWTI','COPPER','PLATINUM','UK100','DE40','US30','US100','US500','J225'], // New Year
 };
 
 function isBankHoliday(symbol) {
@@ -105,6 +106,7 @@ function getBankHolidayName() {
 }
 
 function isMarketOpen(symbol) {
+  if (isBankHoliday(symbol)) return false;
   const cfg = MARKET_HOURS[symbol];
   if (!cfg) return true;
   if (cfg.alwaysOpen) return true;

@@ -1320,6 +1320,22 @@ function renderCard(sig, isPast) {
       + '<span class="rec-msg '+txtCls+'">'
       + esc(type) + ' — ' + esc((activeRec.reason||'').slice(0,80))
       + '</span>';
+  } else if (sig.outcome === 'ACTIVE') {
+    // Show progress toward TP
+    const e = sig.entry || 0, t = sig.tp || 0;
+    let prog = 0;
+    if (t !== e) prog = sig.direction === 'LONG'
+      ? Math.max(0, Math.min(100, ((sig.mfe_pct || 0) / (Math.abs(t - e) / e * 100)) * 100))
+      : Math.max(0, Math.min(100, ((sig.mfe_pct || 0) / (Math.abs(e - t) / e * 100)) * 100));
+    const progPct = Math.round(prog);
+    const progColor = progPct > 0 ? '#00c880' : '#c07080';
+    const mfeStr = sig.mfe_pct > 0 ? ' | MFE +' + sig.mfe_pct + '%' : '';
+    footerLeft = '<div style="display:flex;align-items:center;gap:8px;">'
+      + '<div style="width:120px;height:4px;background:#111120;border-radius:2px;overflow:hidden;">'
+      + '<div style="width:' + progPct + '%;height:100%;background:' + progColor + ';border-radius:2px;"></div></div>'
+      + '<span class="rec-msg" style="color:#6868a0;">' + progPct + '% to TP' + mfeStr + '</span></div>';
+  } else if (sig.outcome === 'OPEN') {
+    footerLeft = '<span class="rec-msg" style="color:#484868;">⏳ Monitoring — entry not touched</span>';
   } else {
     footerLeft = '<span class="rec-msg rec-none">No active recommendations</span>';
   }
@@ -1389,6 +1405,8 @@ function renderCard(sig, isPast) {
     + footerLeft
     + '</div>'
     + '<div class="card-footer-right">'
+    + (isActive ? '<button style="font-size:9px;color:#444466;border:1px solid #222238;border-radius:3px;padding:3px 8px;background:transparent;cursor:pointer;" onclick="forceCloseSignal(\''+cardId+'\')" title="Force close at current price">Close</button>' : '')
+    + (isActive ? '<button style="font-size:9px;color:#444466;border:1px solid #222238;border-radius:3px;padding:3px 8px;background:transparent;cursor:pointer;" onclick="ignoreSignal(\''+cardId+'\')" title="Signal not taken — remove">Ignore</button>' : '')
     + '<button class="btn-more" onclick="(function(){var r=document.getElementById(\'rsn-'+cardId+'\');r.classList.toggle(\'expanded\');this.textContent=r.classList.contains(\'expanded\')?\'▲ less\':\'▼ more\';}).call(this)">▼ more</button>'
     + '<button class="btn-analyse" onclick="toggleAgents(\''+cardId+'\',this)"><span class="btn-analyse-ico">▼</span> ANALYSE</button>'
     + '<button class="btn-copy" onclick="copyTradeDossier(\''+cardId+'\')" title="Copy signal">⊞</button>'
@@ -1844,6 +1862,32 @@ function copyTradeDossier(cardId) {
   box.appendChild(hint);
   modal.appendChild(box);
   document.body.appendChild(modal);
+}
+
+async function forceCloseSignal(cardId) {
+  const sig = allSignals.find(s => String(s.id||s.symbol) === String(cardId));
+  if (!sig) return;
+  try {
+    const res = await fetch('/api/signal-force-close', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:sig.id})});
+    const data = await res.json();
+    if (data.ok) {
+      const color = data.outcome === 'WIN' ? '#00c880' : '#c07080';
+      showToast('Closed: ' + data.outcome + ' ' + (data.pnl_pct > 0 ? '+' : '') + data.pnl_pct + '%', data.outcome === 'WIN' ? 'win' : 'loss');
+      sig.outcome = data.outcome; sig.pnl_pct = data.pnl_pct;
+      setTimeout(renderSignals, 2000);
+    }
+  } catch(e) { showToast('Close failed: ' + e.message); }
+}
+
+async function ignoreSignal(cardId) {
+  const sig = allSignals.find(s => String(s.id||s.symbol) === String(cardId));
+  if (!sig) return;
+  try {
+    await fetch('/api/signal-ignore', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:sig.id})});
+    sig.outcome = 'EXPIRED';
+    renderSignals();
+    showToast('Signal ignored — removed from view');
+  } catch(e) {}
 }
 
 async function logOutcome(signalId, outcome) {

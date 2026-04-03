@@ -358,17 +358,24 @@ function initSchema() {
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
   try { db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL'); } catch(e) { console.error('[DB] Backfill error:', e.message); }
 
-  // Cleanup zero-SL signals — entry === SL is invalid, auto-expire them
+  // Fix zero-SL signals — widen SL to minimum instead of expiring
   try {
-    const cleaned = db.exec("SELECT COUNT(*) FROM signals WHERE outcome IN ('OPEN','ACTIVE') AND ABS(sl - entry) < 0.0001");
-    const count = cleaned[0]?.values?.[0]?.[0] || 0;
-    if (count > 0) {
-      db.run(`UPDATE signals SET outcome='EXPIRED', outcome_ts=?, outcome_category='ZERO_SL',
-              outcome_notes='Signal had SL = entry — invalid, auto-expired'
-              WHERE outcome IN ('OPEN','ACTIVE') AND ABS(sl - entry) < 0.0001`, [Date.now()]);
-      console.warn(`[DB] Cleaned up ${count} zero-SL signals`);
+    const { SYMBOLS } = require('./config');
+    const stmt = db.prepare("SELECT * FROM signals WHERE outcome IN ('OPEN','ACTIVE') AND ABS(sl - entry) < 0.0001");
+    const zeroSL = [];
+    while (stmt.step()) zeroSL.push(stmt.getAsObject());
+    stmt.free();
+    for (const sig of zeroSL) {
+      const cfg = SYMBOLS[sig.symbol] || {};
+      const minPct = { forex: 0.002, index: 0.003, commodity: 0.005, crypto: 0.008 }[cfg.assetClass] || 0.002;
+      const minDist = sig.entry * minPct;
+      const newSL = sig.direction === 'LONG' ? sig.entry - minDist : sig.entry + minDist;
+      const rounded = Math.round(newSL * 100000) / 100000;
+      db.run('UPDATE signals SET sl=? WHERE id=?', [rounded, sig.id]);
+      console.log(`[DB] Fixed zero SL: ${sig.symbol} ${sig.direction} entry=${sig.entry} → sl=${rounded}`);
     }
-  } catch(e) { console.error('[DB] Zero-SL cleanup error:', e.message); }
+    if (zeroSL.length > 0) persist();
+  } catch(e) { console.error('[DB] Zero-SL fix error:', e.message); }
 
   // Eastern→UTC fix is now handled at fetch time in forexCalendar.js easternToUTC()
   // Next calendar scrape (every 5min) will re-upsert all events with correct UTC times

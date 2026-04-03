@@ -339,11 +339,15 @@ app.get('/api/debug', (req, res) => {
     }
     const staleSyms = Object.entries(pineCheck).filter(([,v]) => v.stale).map(([k]) => k);
     const holidaySyms = Object.entries(pineCheck).filter(([,v]) => typeof v === 'object' && v.holiday).map(([k]) => k);
+    const missingPine = Object.entries(pineCheck)
+      .filter(([,v]) => typeof v === 'object' && v.ageMin > 500 && !v.holiday)
+      .map(([k]) => k);
     report.pine = {
       ok: staleSyms.length === 0,
       staleCount: staleSyms.length,
       staleSymbols: staleSyms,
       holidaySymbols: holidaySyms,
+      missingPineAlerts: missingPine,
       maxAgeMin: Math.max(0, ...Object.values(pineCheck).filter(v => typeof v === 'object').map(v => v.ageMin || 0))
     };
 
@@ -526,6 +530,38 @@ app.post('/api/outcome', (req, res) => {
   if (!signalId || !outcome) return res.status(400).json({ error: 'Missing signalId or outcome' });
   updateOutcome(signalId, outcome, req.body.pnlPct || 0);
   broadcast({ type: 'OUTCOME_MANUAL', signalId, outcome, ts: Date.now() });
+  res.json({ ok: true });
+});
+
+// Force close signal at current price — calculates real P&L
+app.post('/api/signal-force-close', (req, res) => {
+  const { id } = req.body || {};
+  if (!id) return res.status(400).json({ error: 'Missing id' });
+  const sig = db.getAllSignals(500).find(s => s.id === id);
+  if (!sig) return res.status(404).json({ error: 'Signal not found' });
+  const md = db.getLatestMarketData(sig.symbol);
+  const currentPrice = md?.close || sig.entry;
+  let pnl_pct = sig.direction === 'LONG'
+    ? (currentPrice - sig.entry) / sig.entry * 100
+    : (sig.entry - currentPrice) / sig.entry * 100;
+  const outcome = pnl_pct >= 0 ? 'WIN' : 'LOSS';
+  const rounded = Math.round(pnl_pct * 100) / 100;
+  db.run("UPDATE signals SET outcome=?, outcome_ts=?, pnl_pct=?, outcome_category='FORCE_CLOSE', outcome_notes=? WHERE id=?",
+    [outcome, Date.now(), rounded, 'Force closed by trader at ' + currentPrice, id]);
+  db.persist();
+  console.log(`[Signal] Force closed: ${sig.symbol} ${sig.direction} ${outcome} ${rounded}% at ${currentPrice}`);
+  broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction: sig.direction, outcome, pnlPct: rounded, ts: Date.now() });
+  res.json({ ok: true, outcome, pnl_pct: rounded, price: currentPrice });
+});
+
+// Ignore signal — not taken by trader, remove from dashboard
+app.post('/api/signal-ignore', (req, res) => {
+  const { id } = req.body || {};
+  if (!id) return res.status(400).json({ error: 'Missing id' });
+  db.run("UPDATE signals SET outcome='EXPIRED', outcome_ts=?, outcome_category='IGNORED', outcome_notes='Not taken by trader' WHERE id=?",
+    [Date.now(), id]);
+  db.persist();
+  broadcast({ type: 'OUTCOME', signalId: id, outcome: 'EXPIRED', ts: Date.now() });
   res.json({ ok: true });
 });
 
@@ -1251,12 +1287,45 @@ async function buildMorningBrief() {
     lines.push('<b>📋 ACTIVE POSITIONS</b>');
     for (const s of activeSignals) {
       const dir = s.direction === 'LONG' ? '🟢' : '🔴';
-      const mfe = s.mfe_pct ? ` MFE:+${s.mfe_pct}%` : '';
-      lines.push(`${dir} <b>${s.symbol}</b> ${s.direction} @ ${s.entry} | SL:${s.sl} | TP:${s.tp}${mfe}`);
+      const mfe = s.mfe_pct ? ` | MFE:+${s.mfe_pct}%` : '';
+      const state = s.outcome === 'ACTIVE' ? '● ACTIVE' : '○ OPEN';
+      lines.push(`${dir} <b>${s.symbol}</b> ${s.direction} @ ${s.entry} | SL:${s.sl} | TP:${s.tp}${mfe} [${state}]`);
+      // Show pending recommendations
+      try {
+        const recs = JSON.parse(s.recommendations || '[]');
+        const pending = recs.find(r => !r.resolved);
+        if (pending) lines.push(`   ⚠ ${pending.type} — ${(pending.reason || '').slice(0, 60)}`);
+      } catch(e) {}
     }
   } else {
     lines.push('<b>📋 No active positions</b>');
   }
+
+  // Today's HIGH impact events
+  try {
+    const todayEvents = (db.getAllEconomicEvents() || []).filter(e => {
+      const today = new Date().toISOString().slice(0, 10);
+      return e.event_date === today && e.impact === 'High' && !e.fired;
+    });
+    if (todayEvents.length > 0) {
+      lines.push('');
+      lines.push('<b>📅 TODAY\'S EVENTS</b>');
+      const { getForecastBias } = require('./forexCalendar');
+      for (const e of todayEvents) {
+        const utcH = parseInt(e.event_time || '0');
+        const uaeH = (utcH + 4) % 24;
+        const uaeTime = String(uaeH).padStart(2, '0') + ':' + (e.event_time || '00:00').slice(3, 5) + ' UAE';
+        let icon = '📊';
+        try {
+          const fb = getForecastBias ? getForecastBias(e.currency) : null;
+          if (fb?.bias > 0) icon = '📈';
+          else if (fb?.bias < 0) icon = '📉';
+        } catch(fe) {}
+        lines.push(`${icon} ${uaeTime} — <b>${e.title}</b>`);
+        if (e.forecast && e.previous) lines.push(`   Forecast: ${e.forecast} | Prev: ${e.previous}`);
+      }
+    }
+  } catch(e) {}
 
   return lines.join('\n');
 }
