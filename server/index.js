@@ -385,7 +385,7 @@ app.get('/api/debug', (req, res) => {
     };
 
     // ── 5. CALENDAR ──
-    const events = db.all("SELECT * FROM economic_events WHERE event_date >= date('now','-1 day') ORDER BY event_date, event_time LIMIT 20");
+    const events = (db.getAllEconomicEvents() || []).filter(e => e.event_date >= new Date(now - 86400000).toISOString().slice(0, 10)).slice(0, 20);
     const pastNotFired = events.filter(e => {
       const eTs = new Date(e.event_date + 'T' + (e.event_time || '00:00:00') + 'Z').getTime();
       return eTs < now && !e.fired && !e.actual;
