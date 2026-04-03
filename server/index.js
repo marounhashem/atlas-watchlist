@@ -119,138 +119,136 @@ wss.on('connection', ws => {
   sendInit();
 });
 
+// ── Webhook queue — serialise processing to prevent event loop competition ──
+const webhookQueue = [];
+let webhookProcessing = false;
+
+function enqueueWebhook(body) {
+  webhookQueue.push(body);
+  if (!webhookProcessing) processWebhookQueue();
+}
+
+function processWebhookQueue() {
+  if (webhookProcessing) return;
+  webhookProcessing = true;
+  while (webhookQueue.length > 0) {
+    const body = webhookQueue.shift();
+    try {
+      processPineWebhook(body);
+    } catch(e) {
+      console.error('[Webhook] Queue error:', e.message);
+    }
+  }
+  webhookProcessing = false;
+}
+
 // ── Webhook: TradingView Pine Script alerts ──────────────────────────────────
-// Pine Script alert message format (JSON):
-// { "symbol": "GOLD", "close": 3285, "high": 3292, "low": 3278,
-//   "ema200": 3240, "vwap": 3281, "rsi": 62, "macdHist": 0.45,
-//   "bias": 2, "biasScore": 0.72, "structure": "bullish",
-//   "fvgPresent": true, "volume": 12400 }
 app.post('/webhook/pine', (req, res) => {
   res.status(200).json({ ok: true });
+  enqueueWebhook(req.body);
+});
 
-  // ALL processing happens async after response — body is parsed by now
-  setImmediate(() => {
+function processPineWebhook(data) {
+  if (!data) return;
+  const sym0 = data.symbol || data.ticker || 'unknown';
+  console.log(`[Webhook] ${sym0} received`);
+  if (!dbReady) { console.log('[Webhook] DB not ready, skipping'); return; }
+  const ws = process.env.WEBHOOK_SECRET;
+  if (ws && data.secret !== ws) {
+    console.warn(`[Webhook] Auth failed for ${sym0} — clear WEBHOOK_SECRET env var to disable`);
+    return;
+  }
+  const rawSym = data.symbol || data.ticker || null;
+  if (!rawSym) return;
+  const sym = rawSym.toUpperCase()
+    .replace('XAUUSD','GOLD').replace('XAGUSD','SILVER')
+    .replace('USOIL','OILWTI').replace('WTI','OILWTI').replace('OIL_CRUDE','OILWTI')
+    .replace('SPX500USD','US500').replace('ETHUSDT','ETHUSD')
+    .replace('NAS100USD','US100').replace('DE30EUR','DE40')
+    .replace('UK100GBP','UK100').replace('JP225USD','J225')
+    .replace('HK50USD','HK50').replace('CN50USD','CN50');
+
+  // DXY — reference signal only, do not score
+  if (sym === 'DXY') {
     try {
-      console.log(`[Webhook] ${req.body?.symbol || 'unknown'} received`);
-      if (!dbReady) { console.log('[Webhook] DB not ready, skipping'); return; }
-      const ws = process.env.WEBHOOK_SECRET;
-      if (ws && req.body?.secret !== ws) {
-        console.warn(`[Webhook] Auth failed for ${req.body?.symbol || 'unknown'} — WEBHOOK_SECRET is set but payload secret=${req.body?.secret ? 'present(wrong)' : 'missing'}. Clear WEBHOOK_SECRET env var to disable auth.`);
-        return;
-      }
-      const data = req.body || {};
-      const rawSym = data.symbol || data.ticker || null;
-      if (!rawSym) return;
-      const sym = rawSym.toUpperCase()
-        .replace('XAUUSD','GOLD').replace('XAGUSD','SILVER')
-        .replace('USOIL','OILWTI').replace('WTI','OILWTI').replace('OIL_CRUDE','OILWTI')
-        .replace('SPX500USD','US500').replace('ETHUSDT','ETHUSD')
-        .replace('NAS100USD','US100').replace('DE30EUR','DE40')
-        .replace('UK100GBP','UK100').replace('JP225USD','J225')
-        .replace('HK50USD','HK50').replace('CN50USD','CN50');
+      const trend = data.bias > 0 ? 'bullish' : data.bias < 0 ? 'bearish' : 'neutral';
+      db.upsertDXY({ close: data.close, bias: data.bias, ema_score: data.biasScore, trend });
+      console.log(`[Webhook] DXY reference updated: ${data.close} trend:${trend}`);
+    } catch(e) { console.error('[Webhook] DXY error:', e.message); }
+    return;
+  }
 
-      // DXY — reference signal only, do not score
-      if (sym === 'DXY') {
-        try {
-          const trend = data.bias > 0 ? 'bullish' : data.bias < 0 ? 'bearish' : 'neutral';
-          db.upsertDXY({ close: data.close, bias: data.bias, ema_score: data.biasScore, trend });
-          console.log(`[Webhook] DXY reference updated: ${data.close} trend:${trend}`);
-        } catch(e) { console.error('[Webhook] DXY error:', e.message); }
-        return;
-      }
+  if (!SYMBOLS[sym]) { console.log('[Webhook] Not in priority list:', sym); return; }
+  if (!isMarketOpen(sym)) return;
 
-      if (!SYMBOLS[sym]) {
-        console.log('[Webhook] Not in priority list:', sym);
-        return;
-      }
+  // Map ATLAS//FIVE fields → watchlist fields
+  const price   = data.price  || data.close;
+  const ema200  = data.ema200 ? (typeof data.ema200 === 'object' ? data.ema200['1d'] || data.ema200['4h'] || data.ema200['1h'] : data.ema200) : null;
+  const rsi     = data.rsi    ? (typeof data.rsi    === 'object' ? data.rsi['5m']   || data.rsi['1h']   : data.rsi)    : null;
+  const vwap    = data.vwap   ? (typeof data.vwap   === 'object' ? data.vwap.mid    || data.vwap.upper1  : data.vwap)   : null;
 
-      if (!isMarketOpen(sym)) return;
+  let bias = 0;
+  if (data.bias !== null && data.bias !== undefined) {
+    if (typeof data.bias === 'object') {
+      bias = data.bias.score || (data.bias.bear ? -3 : data.bias.bull ? 3 : 0);
+    } else {
+      bias = Number(data.bias) || 0;
+    }
+  } else if (data.emaDir) {
+    const d = data.emaDir;
+    bias = (typeof d === 'object') ? ((d['5m']||0) + (d['1h']||0) + (d['4h']||0)) : Number(d) || 0;
+  }
 
-      // Map ATLAS//FIVE fields → watchlist fields
-      const price   = data.price  || data.close;
-      const ema200  = data.ema200 ? (typeof data.ema200 === 'object' ? data.ema200['1d'] || data.ema200['4h'] || data.ema200['1h'] : data.ema200) : null;
-      const rsi     = data.rsi    ? (typeof data.rsi    === 'object' ? data.rsi['5m']   || data.rsi['1h']   : data.rsi)    : null;
-      const vwap    = data.vwap   ? (typeof data.vwap   === 'object' ? data.vwap.mid    || data.vwap.upper1  : data.vwap)   : null;
+  let fvg = false, fvgHigh = null, fvgLow = null, fvgMid = null;
+  if (data.fvg && typeof data.fvg === 'object') {
+    fvg = data.fvg.bullActive || data.fvg.bearActive || false;
+    if (bias < 0 && data.fvg.bearActive) { fvgHigh = data.fvg.bearTop; fvgLow = data.fvg.bearBot; fvgMid = data.fvg.bearMid; }
+    else if (bias > 0 && data.fvg.bullActive) { fvgHigh = data.fvg.bullTop; fvgLow = data.fvg.bullBot; fvgMid = data.fvg.bullMid; }
+  } else {
+    fvg = data.fvgPresent || false;
+    fvgHigh = data.fvgHigh || null; fvgLow = data.fvgLow || null; fvgMid = data.fvgMid || null;
+  }
 
-      // Bias: handle object format {"score":-6,"bull":false,"bear":true} or number
-      let bias = 0;
-      if (data.bias !== null && data.bias !== undefined) {
-        if (typeof data.bias === 'object') {
-          bias = data.bias.score || (data.bias.bear ? -3 : data.bias.bull ? 3 : 0);
-        } else {
-          bias = Number(data.bias) || 0;
-        }
-      } else if (data.emaDir) {
-        const d = data.emaDir;
-        bias = (typeof d === 'object')
-          ? ((d['5m']||0) + (d['1h']||0) + (d['4h']||0))
-          : Number(d) || 0;
-      }
+  const rawStructureObj = (data.structure && typeof data.structure === 'object') ? data.structure : null;
+  let structure = data.structure || 'ranging';
+  if (typeof structure === 'object') structure = structure.bull ? 'bullish' : structure.bear ? 'bearish' : 'ranging';
 
-      // FVG — extract active flag and entry levels
-      let fvg = false;
-      let fvgHigh = null, fvgLow = null, fvgMid = null;
-      if (data.fvg && typeof data.fvg === 'object') {
-        fvg = data.fvg.bullActive || data.fvg.bearActive || false;
-        if (bias < 0 && data.fvg.bearActive) {
-          fvgHigh = data.fvg.bearTop; fvgLow = data.fvg.bearBot; fvgMid = data.fvg.bearMid;
-        } else if (bias > 0 && data.fvg.bullActive) {
-          fvgHigh = data.fvg.bullTop; fvgLow = data.fvg.bullBot; fvgMid = data.fvg.bullMid;
-        }
-      } else {
-        fvg = data.fvgPresent || false;
-        fvgHigh = data.fvgHigh || null; fvgLow = data.fvgLow || null; fvgMid = data.fvgMid || null;
-      }
+  const macdHist = data.macd ? (data.macd.hist || data.macd.histogram || null) : (data.macdHist || null);
+  const atr1h = data.atr ? (data.atr['1h'] || data.atr['4h'] || null) : null;
+  const aboveUpper2 = data.vwap?.aboveUpper2 || false;
+  const belowLower2 = data.vwap?.belowLower2 || false;
+  const momScore = data.momScore != null ? Number(data.momScore) : null;
 
-      // Structure — preserve raw object for raw_payload BEFORE converting to string
-      const rawStructureObj = (data.structure && typeof data.structure === 'object') ? data.structure : null;
-      let structure = data.structure || 'ranging';
-      if (typeof structure === 'object') {
-        structure = structure.bull ? 'bullish' : structure.bear ? 'bearish' : 'ranging';
-      }
-
-      const macdHist = data.macd ? (data.macd.hist || data.macd.histogram || null) : (data.macdHist || null);
-      const atr1h = data.atr ? (data.atr['1h'] || data.atr['4h'] || null) : null;
-      const aboveUpper2 = data.vwap?.aboveUpper2 || false;
-      const belowLower2 = data.vwap?.belowLower2 || false;
-      const momScore = data.momScore != null ? Number(data.momScore) : null;
-
-      // Preserve existing FXSSI data — Pine webhook must not overwrite it with nulls
-      const existing = require('./db').getLatestMarketData(sym);
-      upsertMarketData(sym, {
-        close: price, high: data.high, low: data.low, volume: data.volume,
-        ema200, vwap, rsi, macdHist, bias,
-        biasScore: data.biasScore || Math.abs(bias) / 3,
-        structure, fvgPresent: fvg, fvgHigh, fvgLow, fvgMid,
-        fxssiLongPct:  data.fxssiLongPct  || existing?.fxssi_long_pct  || null,
-        fxssiShortPct: data.fxssiShortPct || existing?.fxssi_short_pct || null,
-        fxssiTrapped:  data.fxssiTrapped  || existing?.fxssi_trapped   || null,
-        obAbsorption:  data.obAbsorption  || existing?.ob_absorption   || false,
-        obImbalance:   data.obImbalance   || existing?.ob_imbalance    || 0,
-        obLargeOrders: data.obLargeOrders || existing?.ob_large_orders || false,
-        fxssiAnalysis: existing?.fxssi_analysis || null,
-        rawExtra: {
-          momScore, structure: rawStructureObj,
-          rsi: data.rsi && typeof data.rsi === 'object' ? data.rsi : null,
-          rangeHigh: data.rangeHigh || null, rangeLow: data.rangeLow || null,
-          sr: { resistance: data.sr?.resistance, support: data.sr?.support,
-                swingH1: data.sr?.swingH1, swingH2: data.sr?.swingH2,
-                swingL1: data.sr?.swingL1, swingL2: data.sr?.swingL2 },
-          atr: data.atr || atr1h,
-          vwap: { mid: vwap, upper1: data.vwap?.upper1, lower1: data.vwap?.lower1,
-                  upper2: data.vwap?.upper2, lower2: data.vwap?.lower2, aboveUpper2, belowLower2 }
-        }
-      });
-
-      const { getLatestMarketData } = require('./db');
-      const check = getLatestMarketData(sym);
-      console.log('[Webhook] ' + sym + ':', check ? 'SAVED @ ' + check.close : 'FAILED');
-      broadcast({ type: 'MARKET_UPDATE', symbol: sym, close: price, ts: Date.now() });
-    } catch(e) {
-      console.error('[Webhook] Pine processing error:', e.message);
+  const existing = require('./db').getLatestMarketData(sym);
+  upsertMarketData(sym, {
+    close: price, high: data.high, low: data.low, volume: data.volume,
+    ema200, vwap, rsi, macdHist, bias,
+    biasScore: data.biasScore || Math.abs(bias) / 3,
+    structure, fvgPresent: fvg, fvgHigh, fvgLow, fvgMid,
+    fxssiLongPct:  data.fxssiLongPct  || existing?.fxssi_long_pct  || null,
+    fxssiShortPct: data.fxssiShortPct || existing?.fxssi_short_pct || null,
+    fxssiTrapped:  data.fxssiTrapped  || existing?.fxssi_trapped   || null,
+    obAbsorption:  data.obAbsorption  || existing?.ob_absorption   || false,
+    obImbalance:   data.obImbalance   || existing?.ob_imbalance    || 0,
+    obLargeOrders: data.obLargeOrders || existing?.ob_large_orders || false,
+    fxssiAnalysis: existing?.fxssi_analysis || null,
+    rawExtra: {
+      momScore, structure: rawStructureObj,
+      rsi: data.rsi && typeof data.rsi === 'object' ? data.rsi : null,
+      rangeHigh: data.rangeHigh || null, rangeLow: data.rangeLow || null,
+      sr: { resistance: data.sr?.resistance, support: data.sr?.support,
+            swingH1: data.sr?.swingH1, swingH2: data.sr?.swingH2,
+            swingL1: data.sr?.swingL1, swingL2: data.sr?.swingL2 },
+      atr: data.atr || atr1h,
+      vwap: { mid: vwap, upper1: data.vwap?.upper1, lower1: data.vwap?.lower1,
+              upper2: data.vwap?.upper2, lower2: data.vwap?.lower2, aboveUpper2, belowLower2 }
     }
   });
-});
+
+  const check = require('./db').getLatestMarketData(sym);
+  console.log('[Webhook] ' + sym + ':', check ? 'SAVED @ ' + check.close : 'FAILED');
+  broadcast({ type: 'MARKET_UPDATE', symbol: sym, close: price, ts: Date.now() });
+}
 
 // ── Webhook: FXSSI manual paste ──────────────────────────────────────────────
 app.post('/webhook/fxssi', (req, res) => {
