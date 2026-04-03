@@ -1127,11 +1127,14 @@ function scoreSymbol(symbol) {
       const mult = sentiment.magnitude === 'LARGE' ? 0.15
         : sentiment.magnitude === 'MEDIUM' ? 0.10 : 0.05;
 
+      // Trend bonus: when trend (vs previous) confirms the beat direction, extra weight
+      const trendBonus = (sentiment.trend === pairBias && sentiment.trend !== 0) ? 0.05 : 0;
+
       const confirms = (pairBias === 1 && direction === 'LONG') || (pairBias === -1 && direction === 'SHORT');
       const contradicts = (pairBias === 1 && direction === 'SHORT') || (pairBias === -1 && direction === 'LONG');
 
       if (confirms) {
-        conflictMultiplier *= (1 + mult);
+        conflictMultiplier *= (1 + mult + trendBonus);
         macroNote += macroNote ? ` · ✓ ${sentiment.summary}` : `✓ ${sentiment.summary}`;
       } else if (contradicts) {
         conflictMultiplier *= (1 - mult);

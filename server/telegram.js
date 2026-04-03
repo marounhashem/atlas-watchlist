@@ -105,18 +105,44 @@ async function sendHealthAlert(problems) {
 // Economic event fired alert with sentiment analysis
 async function sendEventFiredAlert(event, sentiment, affectedSymbols) {
   const beatIcon = sentiment?.beat > 0 ? '📈' : sentiment?.beat < 0 ? '📉' : '➡️';
-  const vs = event.forecast ? ` | Forecast: ${event.forecast}` : '';
-  const prev = event.previous ? ` | Prev: ${event.previous}` : '';
+  const trendIcon = sentiment?.trend > 0 ? '📈' : sentiment?.trend < 0 ? '📉' : '➡️';
+
+  // Stage 2 — vs forecast
+  let vsLine = '';
+  if (sentiment?.raw?.vsForecast != null) {
+    const vf = sentiment.raw.vsForecast;
+    vsLine = sentiment.beat > 0
+      ? `${beatIcon} Beat forecast by ${Math.abs(vf).toFixed(2)}`
+      : sentiment.beat < 0
+      ? `${beatIcon} Missed forecast by ${Math.abs(vf).toFixed(2)}`
+      : `➡️ In line with forecast`;
+  }
+
+  // Stage 3 — vs previous
+  let trendLine = '';
+  if (sentiment?.raw?.vsPrevious != null) {
+    trendLine = sentiment.trend > 0
+      ? `${trendIcon} Improving from previous ${event.previous}`
+      : sentiment.trend < 0
+      ? `${trendIcon} Deteriorating from previous ${event.previous}`
+      : `➡️ Unchanged from previous`;
+  }
+
   const text = [
     `📊 <b>${event.title} — ${event.currency}</b>`,
     ``,
-    `${beatIcon} Actual: <b>${event.actual || 'Released'}</b>${vs}${prev}`,
-    sentiment?.summary ? `<b>${sentiment.summary}</b>` : '',
-    sentiment?.magnitude ? `Surprise: ${sentiment.magnitude} (${sentiment.pctDelta || '?'}%)` : '',
+    `Actual:   <b>${event.actual || 'Released'}</b>`,
+    `Forecast: ${event.forecast || '—'}`,
+    `Previous: ${event.previous || '—'}`,
     ``,
-    `⏸ 5min volatility block — hold signals`,
+    vsLine,
+    trendLine,
+    ``,
+    `Signal strength: ${sentiment?.magnitude || 'UNKNOWN'}`,
+    sentiment?.trendSummary ? `Context: ${sentiment.trendSummary}` : '',
+    ``,
+    `⏸ 5min volatility window`,
     `✅ Opportunity window opens in 5min`,
-    `Enhanced scoring active for 2 hours`,
     ``,
     `Watch: ${affectedSymbols.slice(0, 8).join(', ')}${affectedSymbols.length > 8 ? ` +${affectedSymbols.length - 8} more` : ''}`,
   ].filter(Boolean).join('\n');

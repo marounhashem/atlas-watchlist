@@ -92,51 +92,106 @@ function calculateEventSentiment(event) {
 
   if (isNaN(actual) && isNaN(forecast)) return null;
 
+  // ── Stage 2 — actual vs forecast (immediate reaction) ────────────────────
+  let beat = 0;
+  let magnitude = 'SMALL';
+  let pctDelta = 0;
+
   if (!isNaN(actual) && !isNaN(forecast) && forecast !== 0) {
     const delta = actual - forecast;
-    const pctDelta = Math.round(Math.abs(delta / forecast) * 1000) / 10;
+    pctDelta = Math.round(Math.abs(delta / forecast) * 1000) / 10;
 
-    // Check commodity-specific rules first
     const isBearishEnergy = BEARISH_HIGHER_ENERGY.some(e => event.title.includes(e));
     const isBullishEnergy = BULLISH_HIGHER_ENERGY.some(e => event.title.includes(e));
-
     const isBullishHigher = BULLISH_HIGHER.some(e => event.title.includes(e))
       || HAWKISH_HIGHER.some(e => event.title.includes(e))
       || isBullishEnergy;
     const isBearishHigher = BEARISH_HIGHER.some(e => event.title.includes(e))
       || isBearishEnergy;
 
-    let beat = 0;
     if (delta > 0) beat = isBullishHigher ? 1 : isBearishHigher ? -1 : 1;
     if (delta < 0) beat = isBullishHigher ? -1 : isBearishHigher ? 1 : -1;
-
-    // Special: crude inventories higher = bearish OIL (supply up)
     if (isBearishEnergy && delta > 0) beat = -1;
     if (isBearishEnergy && delta < 0) beat = 1;
 
-    const magnitude = pctDelta < 0.5 ? 'SMALL' : pctDelta < 2.0 ? 'MEDIUM' : 'LARGE';
-    const beatLabel = beat > 0 ? 'beat' : 'missed';
-
-    return {
-      beat, magnitude, pctDelta,
-      actual: event.actual || String(actual),
-      forecast: event.forecast,
-      previous: event.previous,
-      summary: `${event.title} ${beatLabel} (${event.actual || actual} vs ${event.forecast}) — ${event.currency} ${beat > 0 ? 'bullish' : 'bearish'}`
-    };
+    magnitude = pctDelta < 0.5 ? 'SMALL' : pctDelta < 2.0 ? 'MEDIUM' : 'LARGE';
+  } else if (!isNaN(actual) && !isNaN(previous) && previous !== 0) {
+    // No forecast — fall back to actual vs previous only
+    beat = actual > previous ? 1 : actual < previous ? -1 : 0;
   }
+
+  if (beat === 0 && isNaN(forecast)) return null;
+
+  // ── Stage 3 — actual vs previous (trend context) ─────────────────────────
+  let trend = 0;
+  let trendMagnitude = 'SMALL';
+  let trendSummary = '';
 
   if (!isNaN(actual) && !isNaN(previous) && previous !== 0) {
-    const beat = actual > previous ? 1 : -1;
-    return {
-      beat, magnitude: 'SMALL', pctDelta: 0,
-      actual: event.actual || String(actual),
-      previous: event.previous,
-      summary: `${event.title}: ${event.actual || actual} vs prev ${event.previous}`
-    };
+    const vsPrevious = actual - previous;
+    const prevThreshold = Math.abs(previous * 0.1) || 0.1;
+
+    if (Math.abs(vsPrevious) > prevThreshold * 3) trendMagnitude = 'LARGE';
+    else if (Math.abs(vsPrevious) > prevThreshold) trendMagnitude = 'MEDIUM';
+
+    trend = vsPrevious > 0 ? 1 : vsPrevious < 0 ? -1 : 0;
+
+    const title = event.title.toLowerCase();
+    if (title.includes('non-farm') || title.includes('nfp')) {
+      if (trend === 1 && trendMagnitude === 'LARGE')
+        trendSummary = `NFP ${actual}K — massive recovery from ${previous}K — trend turning`;
+      else if (trend === 1)
+        trendSummary = `NFP ${actual}K improving from ${previous}K — trend recovering`;
+      else if (trend === -1)
+        trendSummary = `NFP ${actual}K deteriorating from ${previous}K — trend weakening`;
+    } else if (title.includes('cpi') || title.includes('inflation')) {
+      if (trend === 1) trendSummary = `CPI ${event.actual} rising from ${event.previous} — inflation accelerating`;
+      else if (trend === -1) trendSummary = `CPI ${event.actual} falling from ${event.previous} — inflation cooling`;
+    } else if (title.includes('unemployment')) {
+      if (trend === -1) trendSummary = `Unemployment ${event.actual} improving from ${event.previous} — labour market strengthening`;
+      else if (trend === 1) trendSummary = `Unemployment ${event.actual} rising from ${event.previous} — labour market deteriorating`;
+    } else if (title.includes('gdp')) {
+      if (trend === 1) trendSummary = `GDP ${event.actual} accelerating from ${event.previous}`;
+      else if (trend === -1) trendSummary = `GDP ${event.actual} slowing from ${event.previous}`;
+    } else if (title.includes('hourly earnings')) {
+      if (trend === 1) trendSummary = `Earnings ${event.actual} rising from ${event.previous} — wage inflation building`;
+      else if (trend === -1) trendSummary = `Earnings ${event.actual} cooling from ${event.previous} — wage pressure easing`;
+    }
   }
 
-  return null;
+  // ── Combined signal strength ─────────────────────────────────────────────
+  // Beat + positive trend = strongest signal
+  // Beat + negative trend = mixed (downgrade)
+  let combinedStrength = magnitude;
+  if (beat === trend && beat !== 0) {
+    combinedStrength = (trendMagnitude === 'LARGE' || magnitude === 'LARGE') ? 'LARGE' : 'MEDIUM';
+  } else if (beat !== 0 && trend !== 0 && beat !== trend) {
+    combinedStrength = 'SMALL';
+    if (trendSummary) trendSummary += ' · conflicting with trend';
+  }
+
+  const beatLabel = beat > 0 ? 'beat' : beat < 0 ? 'missed' : 'in-line';
+  const summary = [
+    `${event.title} ${beatLabel} (${event.actual || actual} vs ${event.forecast || '—'} forecast)`,
+    trendSummary
+  ].filter(Boolean).join(' · ');
+
+  return {
+    beat,
+    trend,
+    magnitude: combinedStrength,
+    pctDelta,
+    trendSummary,
+    actual: event.actual || String(actual),
+    forecast: event.forecast,
+    previous: event.previous,
+    summary,
+    raw: {
+      actual, forecast, previous,
+      vsForecast: !isNaN(forecast) ? actual - forecast : null,
+      vsPrevious: !isNaN(previous) ? actual - previous : null
+    }
+  };
 }
 
 // ── Get combined sentiment from recent fired events for a currency ──────────
