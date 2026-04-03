@@ -69,13 +69,15 @@ const MARKET_HOURS = {
 
 // ── Bank holidays — thin liquidity or closed markets ────────────────────────
 // Affects scoring (session penalty) and morning brief warnings
+// Only equity indices and commodities close for bank holidays
+// Forex pairs trade 24/5 regardless — NEVER list forex here
 const BANK_HOLIDAYS = {
-  '2026-04-03': ['UK100','DE40','GBPUSD','GBPJPY','GBPCHF','EURGBP','EURUSD','EURJPY','EURCHF','EURAUD','COPPER','PLATINUM'], // Good Friday
-  '2026-04-06': ['UK100','DE40','GBPUSD','GBPJPY','GBPCHF','EURGBP','EURUSD','EURJPY','EURCHF','EURAUD','COPPER','PLATINUM'], // Easter Monday
-  '2026-05-01': ['DE40','EURUSD','EURJPY','EURGBP','EURCHF','EURAUD'], // Labour Day EU
-  '2026-05-25': ['UK100','GBPUSD','GBPJPY','GBPCHF','EURGBP'], // Spring Bank Holiday UK
+  '2026-04-03': ['UK100','DE40','COPPER','PLATINUM'], // Good Friday
+  '2026-04-06': ['UK100','DE40'], // Easter Monday
+  '2026-05-01': ['DE40'], // Labour Day EU
+  '2026-05-25': ['UK100'], // Spring Bank Holiday UK
   '2026-07-04': ['US30','US100','US500'], // Independence Day US
-  '2026-08-31': ['UK100','GBPUSD','GBPJPY','GBPCHF','EURGBP'], // Summer Bank Holiday UK
+  '2026-08-31': ['UK100'], // Summer Bank Holiday UK
   '2026-11-26': ['US30','US100','US500'], // Thanksgiving US
   '2026-12-25': ['UK100','DE40','US30','US100','US500','COPPER','PLATINUM'], // Christmas
   '2026-12-26': ['UK100','DE40','COPPER','PLATINUM'], // Boxing Day

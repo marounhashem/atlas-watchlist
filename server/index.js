@@ -2501,6 +2501,18 @@ server.listen(PORT, () => {
       const expired = db.expireOldVersionSignals(SCORER_VERSION);
       if (expired > 0) console.log(`[Startup] Expired ${expired} stale OPEN signal(s) from old scorer version`);
     } catch(e) { console.error('[Startup] Version expiry error:', e.message); }
+    // Mark past unfired events as fired — prevents stale pre-event warnings
+    try {
+      const now = Date.now();
+      const allEvts = db.getAllEconomicEvents() || [];
+      let cleared = 0;
+      for (const e of allEvts) {
+        if (e.fired) continue;
+        const eTs = new Date(e.event_date + 'T' + (e.event_time || '00:00:00') + 'Z').getTime();
+        if (eTs < now) { db.run('UPDATE economic_events SET fired=1 WHERE id=?', [e.id]); cleared++; }
+      }
+      if (cleared > 0) { db.persist(); console.log(`[Startup] Cleared ${cleared} past unfired events`); }
+    } catch(e) { console.error('[Startup] Event cleanup error:', e.message); }
     // Expose macro context globally so scorer.js can access it in-process
     global.atlasGetMacroContext = getMacroContext;
     global.atlasGetDXY = () => db.getLatestDXY();
