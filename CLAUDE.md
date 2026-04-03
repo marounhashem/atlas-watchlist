@@ -316,3 +316,4 @@ Auto-categorised on every WIN/LOSS:
 10. **Webhook responds immediately.** `res.status(200)` before any processing, `setImmediate()` for async work.
 11. **Forex rounds to 5dp, others to 2dp.** Prevents SL enforcement from being destroyed by rounding.
 12. **Eastern → UTC on storage.** FF calendar times converted via `easternToUTC()` before DB write.
+13. **Update CLAUDE.md before closing.** Every session that makes code changes must end with CLAUDE.md updated to reflect all changes. Never close a session without confirming CLAUDE.md matches the actual codebase.
