@@ -119,33 +119,16 @@ wss.on('connection', ws => {
   sendInit();
 });
 
-// ── Webhook queue — serialise processing to prevent event loop competition ──
-const webhookQueue = [];
-let webhookProcessing = false;
-
-function enqueueWebhook(body) {
-  webhookQueue.push(body);
-  if (!webhookProcessing) processWebhookQueue();
-}
-
-function processWebhookQueue() {
-  if (webhookProcessing) return;
-  webhookProcessing = true;
-  while (webhookQueue.length > 0) {
-    const body = webhookQueue.shift();
-    try {
-      processPineWebhook(body);
-    } catch(e) {
-      console.error('[Webhook] Queue error:', e.message);
-    }
-  }
-  webhookProcessing = false;
-}
-
 // ── Webhook: TradingView Pine Script alerts ──────────────────────────────────
 app.post('/webhook/pine', (req, res) => {
   res.status(200).json({ ok: true });
-  enqueueWebhook(req.body);
+  setImmediate(() => {
+    try {
+      processPineWebhook(req.body);
+    } catch(e) {
+      console.error('[Webhook] Error:', e.message);
+    }
+  });
 });
 
 function processPineWebhook(data) {
