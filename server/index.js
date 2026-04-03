@@ -1928,6 +1928,25 @@ app.get('/api/calendar-force', async (req, res) => {
   }
 });
 
+// Force-mark past unfired events as fired — clears stale pre-event warnings
+app.post('/api/calendar-force-fired', (req, res) => {
+  try {
+    const now = Date.now();
+    const events = db.getAllEconomicEvents() || [];
+    let count = 0;
+    for (const e of events) {
+      if (e.fired) continue;
+      const eTs = new Date(e.event_date + 'T' + (e.event_time || '00:00:00') + 'Z').getTime();
+      if (eTs < now) {
+        db.run('UPDATE economic_events SET fired=1 WHERE id=?', [e.id]);
+        count++;
+      }
+    }
+    if (count > 0) db.persist();
+    res.json({ ok: true, marked: count });
+  } catch(e) { res.json({ ok: false, error: e.message }); }
+});
+
 // Manual calendar time fix — correct Eastern→UTC when auto-detection fails
 app.post('/api/calendar-fix', (req, res) => {
   const { from_time, to_time, date } = req.body;
