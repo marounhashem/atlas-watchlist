@@ -67,6 +67,41 @@ const MARKET_HOURS = {
   PLATINUM: { type:'commodity_lme', weeklyOpen:{day:1,hour:8,minute:0}, weeklyClose:{day:5,hour:17,minute:0}, peakWindow:{start:{hour:8,minute:0},end:{hour:17,minute:0}} }
 };
 
+// ── Bank holidays — thin liquidity or closed markets ────────────────────────
+// Affects scoring (session penalty) and morning brief warnings
+const BANK_HOLIDAYS = {
+  '2026-04-03': ['UK100','DE40','GBPUSD','GBPJPY','GBPCHF','EURGBP','EURUSD','EURJPY','EURCHF','EURAUD','COPPER','PLATINUM'], // Good Friday
+  '2026-04-06': ['UK100','DE40','GBPUSD','GBPJPY','GBPCHF','EURGBP','EURUSD','EURJPY','EURCHF','EURAUD','COPPER','PLATINUM'], // Easter Monday
+  '2026-05-01': ['DE40','EURUSD','EURJPY','EURGBP','EURCHF','EURAUD'], // Labour Day EU
+  '2026-05-25': ['UK100','GBPUSD','GBPJPY','GBPCHF','EURGBP'], // Spring Bank Holiday UK
+  '2026-07-04': ['US30','US100','US500'], // Independence Day US
+  '2026-08-31': ['UK100','GBPUSD','GBPJPY','GBPCHF','EURGBP'], // Summer Bank Holiday UK
+  '2026-11-26': ['US30','US100','US500'], // Thanksgiving US
+  '2026-12-25': ['UK100','DE40','US30','US100','US500','COPPER','PLATINUM'], // Christmas
+  '2026-12-26': ['UK100','DE40','COPPER','PLATINUM'], // Boxing Day
+  '2026-12-28': ['UK100','DE40'], // Boxing Day observed
+  '2027-01-01': ['UK100','DE40','US30','US100','US500','J225','COPPER','PLATINUM'], // New Year
+};
+
+function isBankHoliday(symbol) {
+  const today = new Date().toISOString().slice(0, 10);
+  const affected = BANK_HOLIDAYS[today] || [];
+  return affected.includes(symbol);
+}
+
+function getBankHolidayName() {
+  const today = new Date().toISOString().slice(0, 10);
+  const names = {
+    '2026-04-03': 'Good Friday', '2026-04-06': 'Easter Monday',
+    '2026-05-01': 'Labour Day', '2026-05-25': 'Spring Bank Holiday',
+    '2026-07-04': 'Independence Day', '2026-08-31': 'Summer Bank Holiday',
+    '2026-11-26': 'Thanksgiving', '2026-12-25': 'Christmas Day',
+    '2026-12-26': 'Boxing Day', '2026-12-28': 'Boxing Day (observed)',
+    '2027-01-01': 'New Year\'s Day',
+  };
+  return names[today] || null;
+}
+
 function isMarketOpen(symbol) {
   const cfg = MARKET_HOURS[symbol];
   if (!cfg) return true;
@@ -144,4 +179,4 @@ function _isOpenAt(symbol, utcDay, utcMins) {
   return true;
 }
 
-module.exports = { isMarketOpen, getMarketStatus, minutesUntilOpen, MARKET_HOURS };
+module.exports = { isMarketOpen, getMarketStatus, minutesUntilOpen, isBankHoliday, getBankHolidayName, MARKET_HOURS };

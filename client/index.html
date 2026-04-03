@@ -212,6 +212,7 @@
   .tag-past{color:#2e2e48;border-color:#1e1e2c;background:transparent;}
   .tag-swing{color:#00d4d4;border-color:#00d4d440;background:#00d4d410;}
   .tag-event{color:#ffb340;border-color:#ffb34040;background:#ffb34010;}
+  .tag-holiday{color:#888;border-color:#333;background:transparent;}
   .card-hd-right{display:flex;align-items:center;gap:10px;}
   .card-verdict{
     font-size:10px;font-weight:700;letter-spacing:.1em;
@@ -1341,6 +1342,7 @@ function renderCard(sig, isPast) {
     + (isSwing ? '<span class="card-tag tag-swing">↗ SWING</span>' : '')
     + (isPast ? '<span class="card-tag tag-past">PAST</span>' : '')
     + (sig.event_risk_tag ? '<span class="card-tag tag-event">⚠ '+esc(sig.event_risk_tag)+'</span>' : '')
+    + ((sig.reasoning||'').includes('Bank holiday') ? '<span class="card-tag tag-holiday">🏦 Bank Holiday</span>' : '')
     + '</div>'
     + '<div class="card-hd-right">'
     + '<span class="card-verdict verdict-'+v.toLowerCase()+'">'+v+'</span>'

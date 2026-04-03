@@ -747,7 +747,18 @@ function scoreSymbol(symbol) {
   const noOB      = cfg.noOrderBook === true;
   const fxssiSc   = noOB ? 0.4 : scoreFXSSI(data, direction);
   const obSc      = noOB ? 0.4 : scoreOrderBook(data, direction);
-  const sessionSc = scoreSession(symbol);
+  let sessionSc = scoreSession(symbol);
+
+  // ── Bank holiday thin liquidity penalty ──────────────────────────────────
+  let bankHolidayFlag = false;
+  try {
+    const { isBankHoliday } = require('./marketHours');
+    if (isBankHoliday(symbol)) {
+      sessionSc *= 0.5;
+      bankHolidayFlag = true;
+      console.log(`[Scorer] ${symbol} bank holiday — session score halved`);
+    }
+  } catch(e) {}
 
   // ── Structure zero pre-check (needed by counter-trend gate below) ────────
   let structureZero = false;
@@ -1902,6 +1913,12 @@ function scoreSymbol(symbol) {
       const reward = Math.abs(tp - entry);
       rr = risk > 0 ? Math.round((reward / risk) * 10) / 10 : rr;
     }
+  }
+
+  // ── Bank holiday — force WATCH, add warning ────────────────────────────────
+  if (bankHolidayFlag) {
+    if (macroVerdict === 'PROCEED') macroVerdict = 'WATCH';
+    macroNote += ' · ⚠ Bank holiday — thin liquidity';
   }
 
   let finalReasoning = fxssiStale
