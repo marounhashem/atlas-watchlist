@@ -51,12 +51,25 @@ setInterval(() => {
 let dbReady = false;
 
 // Custom body parser that handles Pine Script's invalid NaN values
-// Body parser — express.json for speed, with raw body capture for NaN sanitization fallback
-app.use(express.json({
-  limit: '1mb',
-  verify: (req, res, buf) => { req._rawBody = buf.toString(); } // capture raw for NaN fallback
-}));
-// Fallback: Pine sometimes sends NaN/Infinity which fails JSON.parse — sanitize and re-parse
+// Body parser — accept both application/json and text/plain (TradingView sends text/plain)
+app.use(express.json({ limit: '1mb', verify: (req, res, buf) => { req._rawBody = buf.toString(); } }));
+app.use(express.text({ limit: '1mb', type: 'text/plain' }));
+// Parse text/plain bodies as JSON (TradingView sometimes sends JSON with text/plain content-type)
+app.use((req, res, next) => {
+  if (typeof req.body === 'string' && req.body.trim().startsWith('{')) {
+    try {
+      const sanitized = req.body
+        .replace(/:NaN([,}\]])/g, ':null$1')
+        .replace(/: NaN([,}\]])/g, ':null$1')
+        .replace(/:NaN$/g, ':null')
+        .replace(/:Infinity/g, ':null')
+        .replace(/:-Infinity/g, ':null');
+      req.body = JSON.parse(sanitized);
+    } catch(e) { req.body = {}; }
+  }
+  next();
+});
+// Fallback: NaN/Infinity in application/json payloads that fail express.json
 app.use((err, req, res, next) => {
   if (err.type === 'entity.parse.failed' && req._rawBody) {
     try {
@@ -69,7 +82,7 @@ app.use((err, req, res, next) => {
       req.body = JSON.parse(sanitized);
       console.log('[Body] NaN sanitized for', req.path);
     } catch(e) { req.body = {}; }
-    next(); // continue without error
+    next();
   } else if (err) {
     next(err);
   } else {
@@ -125,7 +138,9 @@ app.post('/webhook/pine', (req, res) => {
   // ALL processing happens async after response — body is parsed by now
   setImmediate(() => {
     try {
-      console.log(`[Webhook] ${req.body?.symbol || 'unknown'} received`);
+      const bodyType = typeof req.body;
+      const bodyKeys = req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 8).join(',') : bodyType;
+      console.log(`[Webhook] ${req.body?.symbol || 'unknown'} received (type=${bodyType} keys=${bodyKeys} ct=${req.headers?.['content-type']})`);
       if (!dbReady) { console.log('[Webhook] DB not ready, skipping'); return; }
       const ws = process.env.WEBHOOK_SECRET;
       if (ws && req.body?.secret !== ws) {
