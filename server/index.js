@@ -374,10 +374,10 @@ app.get('/api/debug', (req, res) => {
     const macroKeys = Object.keys(macroCtx);
     const macroAge = macroKeys.length ? Math.round((now - macroCtx[macroKeys[0]].ts) / 3600000) : null;
     report.macro = {
-      ok: macroAge !== null && macroAge < 26,
+      ok: macroKeys.length > 0 && macroAge !== null && macroAge < 26,
       symbolCount: macroKeys.length,
       ageHours: macroAge,
-      stale: macroAge > 20,
+      stale: macroAge > 20 || macroKeys.length === 0,
       symbols: macroKeys.reduce((acc, k) => {
         acc[k] = { sentiment: macroCtx[k].sentiment, strength: macroCtx[k].strength };
         return acc;
@@ -469,9 +469,11 @@ app.get('/api/debug', (req, res) => {
         !report.fxssi.ok && `FXSSI stale: ${report.fxssi.staleCount} symbols`,
         zeroSL.length > 0 && `Zero SL: ${zeroSL.map(s => s.symbol).join(', ')}`,
         lowRR.length > 0 && `Low R:R PROCEEDs: ${lowRR.map(s => s.symbol).join(', ')}`,
-        report.macro.stale && `Macro stale: ${macroAge}h`,
+        macroKeys.length === 0 && 'Macro context empty — no symbols loaded',
+        report.macro.stale && macroKeys.length > 0 && `Macro stale: ${macroAge}h`,
         !report.calendar.ok && `Events not fired: ${pastNotFired.map(e => e.title).join(', ')}`,
         (corr['LONG'] || []).length > 3 && `${corr['LONG'].length} correlated LONGs active`,
+        (corr['SHORT'] || []).length > 3 && `${corr['SHORT'].length} correlated SHORTs active`,
       ].filter(Boolean)
     };
 
