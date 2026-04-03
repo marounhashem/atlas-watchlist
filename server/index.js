@@ -315,20 +315,26 @@ app.get('/api/debug', (req, res) => {
 
     // ── 1. PINE DATA FRESHNESS ──
     const pineCheck = {};
+    let isBankHolidayFn;
+    try { isBankHolidayFn = require('./marketHours').isBankHoliday; } catch(e) {}
+
     for (const sym of Object.keys(SYMBOLS)) {
       try {
         const md = db.getLatestMarketData(sym);
         if (!md) { pineCheck[sym] = 'NO_DATA'; continue; }
         const ageMin = Math.round((now - md.ts) / 60000);
         const market = isMarketOpen(sym);
-        pineCheck[sym] = { ageMin, stale: market && ageMin > 5, marketOpen: market };
+        const holiday = isBankHolidayFn ? isBankHolidayFn(sym) : false;
+        pineCheck[sym] = { ageMin, stale: market && !holiday && ageMin > 5, marketOpen: market, holiday };
       } catch(e) { pineCheck[sym] = 'ERROR'; }
     }
     const staleSyms = Object.entries(pineCheck).filter(([,v]) => v.stale).map(([k]) => k);
+    const holidaySyms = Object.entries(pineCheck).filter(([,v]) => typeof v === 'object' && v.holiday).map(([k]) => k);
     report.pine = {
       ok: staleSyms.length === 0,
       staleCount: staleSyms.length,
       staleSymbols: staleSyms,
+      holidaySymbols: holidaySyms,
       maxAgeMin: Math.max(0, ...Object.values(pineCheck).filter(v => typeof v === 'object').map(v => v.ageMin || 0))
     };
 
