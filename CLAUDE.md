@@ -13,7 +13,10 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260401.15'`
+`SCORER_VERSION = '20260403.1'`
+
+Changes since 20260401.15:
+- **20260403.1** — Fix dead multipliers (post-event OPPORTUNITY + forecast bias applied after score consumed), FXSSI scoring order bug (70% branch unreachable), session exhaustion used undefined `close`, eventRiskNote used before declaration, pre-event suppression over-applied to unrelated symbols, US500 hours aligned
 
 Changes since 20260401.7:
 - **20260401.15** — Forecast-based pre-release scoring (getForecastBias), three-stage event sentiment (beat/miss + trend context)
