@@ -36,6 +36,9 @@ Changes since 20260401.7:
 - **Breakdown bars:** Technical, Sentiment, OB Levels, Session — color-coded hi/mid/lo
 - **Reasoning:** always visible, 4-line clamp, expandable via "more" button, color-coded ✓/⚠ prefixes
 - **Score:** large JetBrains Mono number, always white, no % symbol
+- **Footer:** single row — left zone (recommendation), right zone (progress bar + MFE + Close/Ignore + ANALYSE + copy)
+- **ACTIVE cards:** 44px progress bar toward TP, MFE label, Close button (force close at current price)
+- **OPEN cards:** Ignore button (mark as not taken, excluded from win rate)
 - **Position sizing:** moved to ANALYSE panel (not shown on card)
 - **Breakdown fallback:** when DB signals have null breakdown, bars show score-based estimates
 - **noOB detection:** hardcoded `NO_OB_SYMBOLS` set + reasoning text fallback
