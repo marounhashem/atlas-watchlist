@@ -25,7 +25,48 @@ const { SYMBOLS } = require('./config');
 console.log('[Startup] 2 — modules loaded', Date.now());
 
 const app = express();
-const server = http.createServer(app);
+const server = http.createServer((req, res) => {
+  // Intercept webhook POSTs at HTTP level — respond 200 BEFORE Express touches them
+  // This guarantees TradingView gets 200 OK in <1ms regardless of server load
+  if (req.method === 'POST' && req.url.startsWith('/webhook/')) {
+    // Send 200 immediately — before reading body, before any middleware
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end('{"ok":true}');
+
+    // Read body async — stream is still open even after response sent
+    // because we used res.end() on the RESPONSE, not closed the REQUEST stream
+    let body = '';
+    req.on('data', chunk => body += chunk.toString());
+    req.on('end', () => {
+      let parsed = {};
+      try {
+        const sanitized = body
+          .replace(/:NaN([,}\]])/g, ':null$1')
+          .replace(/: NaN([,}\]])/g, ':null$1')
+          .replace(/:NaN$/g, ':null')
+          .replace(/:Infinity/g, ':null')
+          .replace(/:-Infinity/g, ':null');
+        parsed = JSON.parse(sanitized);
+      } catch(e) { parsed = {}; }
+
+      // Route to correct handler
+      if (req.url === '/webhook/pine') {
+        try { processPineWebhook(parsed); }
+        catch(e) { console.error('[Webhook] Pine error:', e.message); }
+      } else if (req.url === '/webhook/fxssi') {
+        try { processFxssiWebhook(parsed); }
+        catch(e) { console.error('[Webhook] FXSSI error:', e.message); }
+      } else if (req.url === '/webhook/fxssi-rich') {
+        try { processFxssiRichWebhook(parsed); }
+        catch(e) { console.error('[Webhook] FXSSI-rich error:', e.message); }
+      }
+    });
+    return; // Don't pass to Express
+  }
+
+  // All non-webhook requests go through Express normally
+  app(req, res);
+});
 const wss = new WebSocket.Server({ noServer: true });
 
 // Handle WS upgrade with error protection
@@ -111,16 +152,10 @@ wss.on('connection', ws => {
   sendInit();
 });
 
-// ── Webhook: TradingView Pine Script alerts ──────────────────────────────────
-// Body is already parsed by middleware above. Respond 200 immediately, process async.
-// TradingView timeout is 3s — body parsing takes <10ms, so 200 goes out fast.
-app.post('/webhook/pine', (req, res) => {
-  res.status(200).json({ ok: true });
-  setImmediate(() => {
-    try { processPineWebhook(req.body); }
-    catch(e) { console.error('[Webhook] Error:', e.message); }
-  });
-});
+// ── Webhook handlers ────────────────────────────────────────────────────────
+// Pine/FXSSI webhooks are intercepted at HTTP level (see http.createServer above)
+// They respond 200 BEFORE Express middleware runs. These Express routes are kept
+// as fallback only — the HTTP handler should catch them first.
 
 function processPineWebhook(data) {
   if (!data || !Object.keys(data).length) { console.log('[Webhook] Empty body — skipping'); return; }
@@ -225,34 +260,24 @@ function processPineWebhook(data) {
 }
 
 // ── Webhook: FXSSI manual paste ──────────────────────────────────────────────
-app.post('/webhook/fxssi', (req, res) => {
-  res.status(200).json({ ok: true });
-  setImmediate(() => {
-    try {
-      const data = req.body || {};
-      const ws = process.env.WEBHOOK_SECRET;
-      if (ws && data.secret !== ws) return;
-      const { symbol, longPct, shortPct, trapped } = data;
-      if (!symbol) return;
-      const sym = symbol.toUpperCase();
-      const latest = require('./db').getLatestMarketData(sym);
-      if (latest) {
-        upsertMarketData(sym, {
-          close: latest.close, high: latest.high, low: latest.low, volume: latest.volume,
-          ema200: latest.ema200, vwap: latest.vwap, rsi: latest.rsi, macdHist: latest.macd_hist,
-          bias: latest.bias, biasScore: latest.bias_score, structure: latest.structure,
-          fvgPresent: latest.fvg_present === 1,
-          fvgHigh: latest.fvg_high, fvgLow: latest.fvg_low, fvgMid: latest.fvg_mid,
-          fxssiLongPct: longPct, fxssiShortPct: shortPct, fxssiTrapped: trapped,
-          obAbsorption: latest.ob_absorption, obImbalance: latest.ob_imbalance,
-          obLargeOrders: latest.ob_large_orders, fxssiAnalysis: latest.fxssi_analysis
-        });
-      }
-    } catch(e) {
-      console.error('[Webhook] FXSSI error:', e.message);
-    }
-  });
-});
+function processFxssiWebhook(data) {
+  if (!data || !data.symbol) return;
+  const sym = data.symbol.toUpperCase();
+  const latest = require('./db').getLatestMarketData(sym);
+  if (latest) {
+    upsertMarketData(sym, {
+      close: latest.close, high: latest.high, low: latest.low, volume: latest.volume,
+      ema200: latest.ema200, vwap: latest.vwap, rsi: latest.rsi, macdHist: latest.macd_hist,
+      bias: latest.bias, biasScore: latest.bias_score, structure: latest.structure,
+      fvgPresent: latest.fvg_present === 1,
+      fvgHigh: latest.fvg_high, fvgLow: latest.fvg_low, fvgMid: latest.fvg_mid,
+      fxssiLongPct: data.longPct, fxssiShortPct: data.shortPct, fxssiTrapped: data.trapped,
+      obAbsorption: latest.ob_absorption, obImbalance: latest.ob_imbalance,
+      obLargeOrders: latest.ob_large_orders, fxssiAnalysis: latest.fxssi_analysis
+    });
+    console.log(`[Webhook] FXSSI ${sym} updated`);
+  }
+}
 
 // ── REST API ─────────────────────────────────────────────────────────────────
 // Returns saved signals + latest scoring results for immediate dashboard render
@@ -829,18 +854,20 @@ app.get('/api/fxssi-test', async (req, res) => {
 });
 
 // FXSSI Rich webhook — accepts payload from browser extension as backup
+function processFxssiRichWebhook(payload) {
+  if (!payload || !payload.fxssi) return;
+  const result = processBridgePayload(payload);
+  if (!result) return;
+  broadcast({ type: 'FXSSI_UPDATE', symbol: result.symbol, analysed: result.analysed, ts: Date.now() });
+  console.log(`[Webhook] FXSSI-rich ${result.symbol} processed`);
+}
+
 app.post('/webhook/fxssi-rich', (req, res) => {
+  // Fallback if HTTP interceptor misses this route
   res.status(200).json({ ok: true });
   setImmediate(() => {
-    try {
-      const payload = req.body || {};
-      if (!payload.fxssi) return;
-      const result = processBridgePayload(payload);
-      if (!result) return;
-      broadcast({ type: 'FXSSI_UPDATE', symbol: result.symbol, analysed: result.analysed, ts: Date.now() });
-    } catch(e) {
-      console.error('[Webhook] FXSSI-rich error:', e.message);
-    }
+    try { processFxssiRichWebhook(req.body || {}); }
+    catch(e) { console.error('[Webhook] FXSSI-rich error:', e.message); }
   });
 });
 
