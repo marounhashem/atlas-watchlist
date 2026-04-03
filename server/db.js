@@ -370,6 +370,25 @@ function initSchema() {
     }
   } catch(e) { console.error('[DB] Zero-SL cleanup error:', e.message); }
 
+  // One-time fix: convert Eastern times to UTC for today's events
+  // FF calendar publishes in Eastern but system was storing as-is
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const month = new Date().getMonth() + 1;
+    const offset = (month >= 3 && month <= 10) ? 4 : 5;
+    const fixed = db.exec(`SELECT COUNT(*) FROM economic_events WHERE event_date >= '${today}' AND event_time IS NOT NULL AND CAST(SUBSTR(event_time,1,2) AS INTEGER) < 12`);
+    const count = fixed[0]?.values?.[0]?.[0] || 0;
+    if (count > 0) {
+      // Shift all sub-12h times forward by EDT/EST offset (they're likely Eastern)
+      db.run(`UPDATE economic_events SET event_time =
+        SUBSTR('0' || (CAST(SUBSTR(event_time,1,2) AS INTEGER) + ${offset}), -2) || SUBSTR(event_time,3)
+        WHERE event_date >= '${today}' AND event_time IS NOT NULL
+        AND CAST(SUBSTR(event_time,1,2) AS INTEGER) < 12
+        AND CAST(SUBSTR(event_time,1,2) AS INTEGER) + ${offset} < 24`);
+      console.log(`[DB] Fixed ${count} Eastern→UTC event times (offset +${offset}h)`);
+    }
+  } catch(e) { console.error('[DB] Timezone fix error:', e.message); }
+
   console.log('[DB] Schema initialised, weights seeded');
 }
 

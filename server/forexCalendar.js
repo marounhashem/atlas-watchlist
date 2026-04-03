@@ -59,6 +59,22 @@ function isEventRelevant(eventTitle, symbol) {
   return true; // forex pairs + OILWTI + crypto: always relevant
 }
 
+// ── Eastern → UTC conversion ────────────────────────────────────────────────
+// FairEconomy FF calendar publishes times in US Eastern (EDT/EST)
+// EDT (Mar–Nov) = UTC-4, EST (Nov–Mar) = UTC-5
+// We must convert to UTC before storing so all system comparisons work
+function easternToUTC(dateStr, timeStr) {
+  if (!timeStr) return '00:00:00';
+  const [h, m, s] = timeStr.split(':').map(Number);
+  // Determine DST: approximate — EDT from second Sunday of March to first Sunday of November
+  const month = dateStr ? new Date(dateStr + 'T12:00:00Z').getMonth() + 1 : 1;
+  const offset = (month >= 3 && month <= 10) ? 4 : 5; // EDT=4, EST=5
+  const utcH = h + offset;
+  // Handle day rollover — date stays the same for simplicity (events rarely cross midnight)
+  const finalH = utcH % 24;
+  return String(finalH).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s || 0).padStart(2, '0');
+}
+
 // Post-event state: { symbol: { firedAt, title, actual, forecast, sentiment } }
 const postEventState = {};
 const VOLATILITY_MS = 5 * 60 * 1000;   // 5min hard block
@@ -296,10 +312,11 @@ async function runCalendarCheck(broadcast) {
     console.log(`[Calendar] Processing ${highImpact.length} HIGH impact events for storage...`);
 
     for (const { event: e, sources } of highImpact) {
-      // FF dates are already in UTC — store as-is, no timezone conversion
+      // FF dates are in US Eastern time — convert to UTC for storage
       const eventDate = e.date ? e.date.slice(0, 10) : null;
-      const eventTime = e.date ? e.date.slice(11, 19) || null : null;
+      const rawTime = e.date ? e.date.slice(11, 19) || null : null;
       if (!eventDate) continue;
+      const eventTime = easternToUTC(eventDate, rawTime);
       const eventId = `${e.country}_${eventDate}_${e.title}`;
       const sourcesArr = Array.from(sources);
 

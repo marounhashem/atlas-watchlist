@@ -1760,6 +1760,17 @@ app.get('/api/calendar-force', async (req, res) => {
   }
 });
 
+// Manual calendar time fix — correct Eastern→UTC when auto-detection fails
+app.post('/api/calendar-fix', (req, res) => {
+  const { from_time, to_time, date } = req.body;
+  if (!from_time || !to_time || !date) return res.status(400).json({ error: 'Need from_time, to_time, date' });
+  try {
+    db.run('UPDATE economic_events SET event_time=? WHERE event_time=? AND event_date=?', [to_time, from_time, date]);
+    db.persist();
+    res.json({ ok: true, fixed: `${date} ${from_time} → ${to_time}` });
+  } catch(e) { res.json({ ok: false, error: e.message }); }
+});
+
 // Manual rate override — for BOJ/ECB announcements before next API fetch
 // POST /api/rate-update { currency: "JPY", ratePct: 0.75 }
 app.post('/api/rate-update', (req, res) => {
