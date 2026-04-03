@@ -130,7 +130,10 @@ app.post('/webhook/pine', (req, res) => {
     try {
       if (!dbReady) { console.log('[Webhook] DB not ready, skipping'); return; }
       const ws = process.env.WEBHOOK_SECRET;
-      if (ws && req.body?.secret !== ws) { console.warn('[Webhook] Auth failed'); return; }
+      if (ws && req.body?.secret !== ws) {
+        console.warn(`[Webhook] Auth failed for ${req.body?.symbol || 'unknown'} — WEBHOOK_SECRET is set but payload secret=${req.body?.secret ? 'present(wrong)' : 'missing'}. Clear WEBHOOK_SECRET env var to disable auth.`);
+        return;
+      }
       const data = req.body || {};
       const rawSym = data.symbol || data.ticker || null;
       if (!rawSym) return;

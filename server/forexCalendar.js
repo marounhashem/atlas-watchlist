@@ -527,14 +527,12 @@ function getForecastBias(symbol) {
   if (symCurrencies.length === 0) return null;
 
   try {
-    const nowISO = new Date(now).toISOString().slice(0, 19) + 'Z';
-    const futISO = new Date(now + 24 * 3600000).toISOString().slice(0, 19) + 'Z';
-    const upcoming = db.all(
-      `SELECT * FROM economic_events
-       WHERE fired = 0 AND impact = 'High'
-       AND forecast IS NOT NULL AND forecast != ''
-       AND previous IS NOT NULL AND previous != ''
-       ORDER BY event_date, event_time`, []);
+    const allEvents = db.getAllEconomicEvents() || [];
+    const upcoming = allEvents.filter(e =>
+      !e.fired && e.impact === 'High'
+      && e.forecast && e.forecast !== ''
+      && e.previous && e.previous !== ''
+    );
 
     for (const event of upcoming) {
       if (!symCurrencies.includes(event.currency)) continue;
