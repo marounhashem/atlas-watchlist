@@ -317,6 +317,9 @@ async function runCalendarCheck(broadcast) {
       const rawTime = e.date ? e.date.slice(11, 19) || null : null;
       if (!eventDate) continue;
       const eventTime = easternToUTC(eventDate, rawTime);
+      if (e.title.includes('Non-Farm') || e.title.includes('NFP') || e.title.includes('Employ'))
+        console.log(`[Calendar TZ] ${e.title}: raw="${e.date}" rawTime="${rawTime}" → UTC="${eventTime}"`);
+
       const eventId = `${e.country}_${eventDate}_${e.title}`;
       const sourcesArr = Array.from(sources);
 

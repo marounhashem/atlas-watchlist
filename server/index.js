@@ -1747,7 +1747,15 @@ app.get('/api/cb-calendar', (req, res) => {
 // Economic calendar — upcoming HIGH impact events from all 4 feeds
 app.get('/api/calendar-status', (req, res) => {
   const events = getUpcomingHighImpactEvents(14);
-  res.json({ totalEvents: events.length, highImpactCount: events.filter(e => e.impact === 'High').length, events });
+  // Debug: log time calculations for each event
+  const now = Date.now();
+  for (const e of events.slice(0, 5)) {
+    const constructed = e.date + 'T' + (e.time || '00:00:00') + 'Z';
+    const eventTs = new Date(constructed).getTime();
+    const diffMin = Math.round((eventTs - now) / 60000);
+    console.log(`[Cal debug] ${e.title} stored=${e.time} constructed=${constructed} eventTs=${eventTs} now=${now} diff=${diffMin}min`);
+  }
+  res.json({ totalEvents: events.length, highImpactCount: events.filter(e => e.impact === 'High').length, events, _debug: { now, nowISO: new Date(now).toISOString() } });
 });
 
 app.get('/api/calendar-force', async (req, res) => {
