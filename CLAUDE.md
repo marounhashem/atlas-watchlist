@@ -13,9 +13,10 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260403.3'`
+`SCORER_VERSION = '20260403.4'`
 
-Changes since 20260401.15 (three review rounds + NFP debug, 21 bugs fixed):
+Changes since 20260401.15:
+- **20260403.4** — conflictMultiplier floor 0.65, momentum <25% force WATCH gate, macro event-superseded decay (HIGH event after macro → max staleness), DXY direct USD pairs ×1.07/×0.92 (crosses ×1.03/×0.97)
 - **20260403.3** — CRITICAL: NFP Telegram alert fixed — three simultaneous bugs prevented ANY event alerts from ever firing: (1) fired detection used Eastern not UTC timestamp (4h offset), (2) actual field never stored in DB upsert (silently dropped), (3) sentiment used forecast as actual fallback (always beat=0). Added retry mechanism for delayed actuals. Note: no event alerts fired since system launch.
 - **20260403.2** — OPPORTUNITY scoring finally works end-to-end (currency was missing from getPostEventState() return, ×1.10/×0.90 never fired). Opposite-signal expiry filtered to outcome='OPEN' only (previously could auto-expire ACTIVE live trades). WATCH paper tracking removed (queried wrong table). Accurate DST detection using actual US transition rules. All FairEconomy feeds confirmed Eastern timezone.
 - **20260403.1** — Fix dead multipliers (post-event OPPORTUNITY + forecast bias applied after score consumed), FXSSI scoring order bug (70% branch unreachable), session exhaustion used undefined `close`, eventRiskNote used before declaration, pre-event suppression over-applied to unrelated symbols, US500 hours aligned
@@ -125,6 +126,14 @@ Dynamic minScore floor:
 | FXSSI stale | OB data >25min old | ×0.82 |
 | Gravity against | Gravity pulls against direction | ×0.88 |
 | Cluster proximity | Losing cluster within 0.3% of entry | ×0.85 |
+| Multiplier floor | All penalties combined | min 0.65 |
+| Momentum <15% | momScore critically weak | ×0.88 + force WATCH |
+| Momentum <25% | momScore weak | force WATCH |
+| DXY confirms | Direct USD pair (7 majors) | ×1.07 |
+| DXY confirms | Cross/commodity USD pair | ×1.03 |
+| DXY conflicts | Direct USD pair | ×0.92 |
+| DXY conflicts | Cross/commodity USD pair | ×0.97 |
+| Macro superseded | HIGH event fired after macro update | decay factor 0.25 |
 | Intel key levels | Price at resistance vs LONG | ×0.80 |
 | Intel key levels | Price at support confirms LONG | ×1.08 |
 | Intel approaching | Price approaching key level | ×0.92 |

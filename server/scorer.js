@@ -153,7 +153,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260403.3'; // NFP alert fix — UTC fired detection, actual stored, retry mechanism
+const SCORER_VERSION = '20260403.4'; // Multiplier floor, momentum WATCH, macro event decay, DXY direct pairs
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -990,13 +990,32 @@ function scoreSymbol(symbol) {
         (direction === 'SHORT' && macro.supports_short && !macro.supports_long);
 
       if (macroConflict) {
-        // Macro penalty with age decay — stale macro has less weight
+        // Macro penalty with event-aware decay — if HIGH impact event fired after macro
+        // was last updated, macro context is superseded (event changed conditions)
         const macroAgeH = (Date.now() - macro.ts) / 3600000;
-        const decayFactor = macroAgeH < 6 ? 1.00 : macroAgeH < 12 ? 0.75 : macroAgeH < 20 ? 0.50 : 0.25;
+        let decayFactor;
+        let superseded = false;
+        try {
+          const symCurrencies = SYMBOL_CURRENCIES[symbol] || [];
+          const dbMod = require('./db');
+          const allEvts = dbMod.getAllEconomicEvents() || [];
+          const eventsSince = allEvts.filter(e =>
+            e.fired && e.impact === 'High' && e.ts > macro.ts
+            && symCurrencies.some(c => c === e.currency)
+          );
+          if (eventsSince.length > 0) {
+            decayFactor = 0.25; // Max staleness — event superseded macro context
+            superseded = true;
+          }
+        } catch(e) {}
+        if (!superseded) {
+          decayFactor = macroAgeH < 6 ? 1.00 : macroAgeH < 12 ? 0.75 : macroAgeH < 20 ? 0.50 : 0.25;
+        }
         const basePenalty = macro.strength >= 8 ? 0.70 : macro.strength >= 6 ? 0.78 : macro.strength >= 4 ? 0.88 : 0.94;
         const decayedPenalty = 1 - ((1 - basePenalty) * decayFactor);
         conflictMultiplier *= decayedPenalty;
-        macroNote = `⚠ Macro ${macro.sentiment} (${macro.strength}/10${macroAgeH > 6 ? ', ' + Math.round(macroAgeH) + 'h old' : ''}) conflicts — ${macro.summary}`;
+        const ageLabel = superseded ? 'superseded by event' : (macroAgeH > 6 ? Math.round(macroAgeH) + 'h old' : '');
+        macroNote = `⚠ Macro ${macro.sentiment} (${macro.strength}/10${ageLabel ? ', ' + ageLabel : ''}) conflicts — ${macro.summary}`;
       } else if (macroConfirm) {
         const bonus = macro.strength >= 7 ? 1.08 : 1.04;
         conflictMultiplier *= bonus;
@@ -1009,15 +1028,34 @@ function scoreSymbol(symbol) {
   if (noOB) {
     conflictMultiplier *= 0.92;
     macroNote += macroNote ? ' · No Retail OB — Technical only' : 'No Retail OB — Technical only';
-    // DXY context for USD-correlated globals
-    try {
-      const dxy = global.atlasGetDXY?.();
-      if (dxy && ['US500','COPPER','PLATINUM'].includes(symbol)) {
-        if (dxy.trend === 'bearish' && direction === 'LONG') conflictMultiplier *= 1.03;
-        if (dxy.trend === 'bullish' && direction === 'SHORT') conflictMultiplier *= 1.03;
-      }
-    } catch(e) {}
   }
+
+  // ── DXY correlation — USD strength/weakness context ─────────────────────────
+  // Direct USD pairs get stronger weight (×1.07/×0.92)
+  // Cross pairs and commodities get lighter weight (×1.03/×0.97)
+  try {
+    const dxy = global.atlasGetDXY?.();
+    if (dxy && dxy.trend) {
+      const symCurrencies = SYMBOL_CURRENCIES[symbol] || [];
+      if (symCurrencies.includes('USD')) {
+        const USD_DIRECT = ['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD'];
+        const isDirect = USD_DIRECT.includes(symbol);
+        const isBase = symCurrencies[0] === 'USD'; // USDJPY, USDCHF, USDCAD
+        // DXY bullish = USD strong → base-USD pairs LONG, quote-USD pairs SHORT
+        const dxyConfirms = (dxy.trend === 'bullish' && ((isBase && direction === 'LONG') || (!isBase && direction === 'SHORT')))
+          || (dxy.trend === 'bearish' && ((isBase && direction === 'SHORT') || (!isBase && direction === 'LONG')));
+        const dxyConflicts = (dxy.trend === 'bullish' && ((isBase && direction === 'SHORT') || (!isBase && direction === 'LONG')))
+          || (dxy.trend === 'bearish' && ((isBase && direction === 'LONG') || (!isBase && direction === 'SHORT')));
+        if (dxyConfirms) {
+          conflictMultiplier *= isDirect ? 1.07 : 1.03;
+          macroNote += ` · ✓ DXY ${dxy.trend} confirms`;
+        } else if (dxyConflicts) {
+          conflictMultiplier *= isDirect ? 0.92 : 0.97;
+          macroNote += ` · ⚠ DXY ${dxy.trend} conflicts`;
+        }
+      }
+    }
+  } catch(e) {}
 
   // ── Nikkei-JPY correlation ──────────────────────────────────────────────────
   // J225 bullish = risk-on = JPY weakens → JPY pairs LONG favoured
@@ -1139,6 +1177,12 @@ function scoreSymbol(symbol) {
       break; // only apply the most relevant currency's sentiment
     }
   } catch(e) {}
+
+  // ── Multiplier floor — prevent compounding below 0.65 ───────────────────────
+  if (conflictMultiplier < 0.65) {
+    console.log(`[Scorer] ${symbol} conflictMultiplier floored at 0.65 (was ${conflictMultiplier.toFixed(3)})`);
+    conflictMultiplier = 0.65;
+  }
 
   // Combined FXSSI score = average of sentiment + order book (same source, two perspectives)
   const fxssiCombined = (fxssiSc + obSc) / 2;
@@ -1793,13 +1837,28 @@ function scoreSymbol(symbol) {
   // gravity post-score, cluster proximity post-score) — all already in conflictMultiplier
   let macroAdjustedScore = Math.min(structureCap, Math.min(95, Math.max(0, finalScore)));
 
+  // ── Momentum WATCH gate ──────────────────────────────────────────────────
+  let momentumForceWatch = false;
+  try {
+    const rawMom = JSON.parse(data.raw_payload || '{}');
+    const momentumPct = rawMom.momScore || 0;
+    if (momentumPct > 0 && momentumPct < 15) {
+      macroAdjustedScore = Math.round(macroAdjustedScore * 0.88);
+      macroNote += ` · ⚠ Momentum critically weak (${momentumPct}%)`;
+      momentumForceWatch = true;
+    } else if (momentumPct > 0 && momentumPct < 25) {
+      macroNote += ` · ⚠ Momentum weak (${momentumPct}%) — wait for confirmation`;
+      momentumForceWatch = true;
+    }
+  } catch(e) {}
+
   // Ranging daily: reduced floor for spot (was +4, now +2)
   const macroRangingPenalty = data._dailyBias === 0 ? 2 : 0;
   const macroEffectiveMin = adjustedMinScore + macroRangingPenalty;
-  // Structure 0/5 caps verdict to WATCH maximum — cannot be PROCEED
   const macroRawVerdict = macroAdjustedScore >= macroEffectiveMin ? 'PROCEED'
     : macroAdjustedScore >= macroEffectiveMin - 12 ? 'WATCH' : 'SKIP';
   let macroVerdict = structureZero && macroRawVerdict === 'PROCEED' ? 'WATCH' : macroRawVerdict;
+  if (momentumForceWatch && macroVerdict === 'PROCEED') macroVerdict = 'WATCH';
 
   // ── Event risk tags ──────────────────────────────────────────────────────────
   let eventRiskNote = '';
