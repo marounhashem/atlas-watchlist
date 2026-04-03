@@ -51,36 +51,27 @@ setInterval(() => {
 let dbReady = false;
 
 // Custom body parser that handles Pine Script's invalid NaN values
-// TradingView sends Content-Type: text/plain — rewrite so express.json() parses it
+// Body parser — sanitize NaN/Infinity BEFORE JSON.parse (TradingView sends these)
+// This is the original working parser. express.json() cannot handle NaN literals
+// and silently drops the payload. This stream reader sanitizes first, then parses.
 app.use((req, res, next) => {
-  if (req.headers['content-type']?.includes('text/plain')) {
-    req.headers['content-type'] = 'application/json';
-  }
-  next();
-});
-// Body parser — lean, no verify overhead
-app.use(express.json({ limit: '1mb' }));
-// NaN/Infinity fallback — Pine sometimes sends invalid JSON literals
-app.use((err, req, res, next) => {
-  if (err.type === 'entity.parse.failed') {
-    // Re-read body from raw — express already consumed the stream
-    let raw = '';
-    try { raw = err.body || ''; } catch(e) {}
-    if (raw) {
-      try {
-        req.body = JSON.parse(raw
-          .replace(/:NaN([,}\]])/g, ':null$1').replace(/: NaN([,}\]])/g, ':null$1')
-          .replace(/:NaN$/g, ':null').replace(/:Infinity/g, ':null').replace(/:-Infinity/g, ':null'));
-      } catch(e) { req.body = {}; }
-    } else {
+  if (req.method !== 'POST') return next();
+  let body = '';
+  req.on('data', chunk => body += chunk.toString());
+  req.on('end', () => {
+    try {
+      const sanitized = body
+        .replace(/:NaN([,}\]])/g, ':null$1')
+        .replace(/: NaN([,}\]])/g, ':null$1')
+        .replace(/:NaN$/g, ':null')
+        .replace(/:Infinity/g, ':null')
+        .replace(/:-Infinity/g, ':null');
+      req.body = JSON.parse(sanitized);
+    } catch(e) {
       req.body = {};
     }
     next();
-  } else if (err) {
-    next(err);
-  } else {
-    next();
-  }
+  });
 });
 app.use(express.static(path.join(__dirname, '../client')));
 
