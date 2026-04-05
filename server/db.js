@@ -455,55 +455,13 @@ function initSchema() {
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
   try { db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL'); } catch(e) { console.error('[DB] Backfill error:', e.message); }
 
-  // Emergency cleanup: purge bloated market_data_history (was storing raw_payload blobs)
+  // NO automatic signal deletion on startup — previous cleanup queries were too aggressive
+  // and kept wiping all signals. Only log counts for debugging.
   try {
-    const histCount = db.exec("SELECT COUNT(*) FROM market_data_history")[0]?.values?.[0]?.[0] || 0;
-    if (histCount > 50000) {
-      console.warn(`[DB] market_data_history has ${histCount} rows — purging to last 14 days`);
-      db.run('DELETE FROM market_data_history WHERE snapshot_ts < ?', [Date.now() - 14 * 86400000]);
-      // Also drop raw_payload and fxssi_analysis columns if they exist (they bloat the table)
-      // SQLite doesn't support DROP COLUMN, but we can just stop writing to them
-      console.log('[DB] History table cleaned up');
-    }
-  } catch(e) {}
-
-  // Clean only clearly corrupted signals — NEVER delete ACTIVE signals automatically
-  try {
-    const corrupted = db.exec("SELECT COUNT(*) FROM signals WHERE outcome IN ('OPEN','SKIP') AND score = 0 AND entry IS NULL")[0]?.values?.[0]?.[0] || 0;
-    if (corrupted > 0) {
-      db.run("DELETE FROM signals WHERE outcome IN ('OPEN','SKIP') AND score = 0 AND entry IS NULL");
-      console.log(`[DB] Cleaned ${corrupted} corrupted signals (OPEN/SKIP with null entry + zero score)`);
-    }
-  } catch(e) {}
-
-  // Fix zero-SL signals — widen SL to minimum instead of expiring
-  try {
-    const { SYMBOLS } = require('./config');
-    const stmt = db.prepare("SELECT * FROM signals WHERE outcome IN ('OPEN','ACTIVE') AND ABS(sl - entry) < 0.0001");
-    const zeroSL = [];
-    while (stmt.step()) zeroSL.push(stmt.getAsObject());
-    stmt.free();
-    for (const sig of zeroSL) {
-      const cfg = SYMBOLS[sig.symbol] || {};
-      const minPct = { forex: 0.002, index: 0.003, commodity: 0.005, crypto: 0.008 }[cfg.assetClass] || 0.002;
-      const minDist = sig.entry * minPct;
-      const newSL = sig.direction === 'LONG' ? sig.entry - minDist : sig.entry + minDist;
-      const rounded = Math.round(newSL * 100000) / 100000;
-      db.run('UPDATE signals SET sl=? WHERE id=?', [rounded, sig.id]);
-      console.log(`[DB] Fixed zero SL: ${sig.symbol} ${sig.direction} entry=${sig.entry} → sl=${rounded}`);
-    }
-    if (zeroSL.length > 0) persist();
-  } catch(e) { console.error('[DB] Zero-SL fix error:', e.message); }
-
-  // Eastern→UTC fix is now handled at fetch time in forexCalendar.js easternToUTC()
-  // Next calendar scrape (every 5min) will re-upsert all events with correct UTC times
-
-  // Log final signal count after all cleanup
-  try {
-    const finalCount = db.exec("SELECT COUNT(*) FROM signals")[0]?.values?.[0]?.[0] || 0;
+    const totalCount = db.exec("SELECT COUNT(*) FROM signals")[0]?.values?.[0]?.[0] || 0;
     const activeCount = db.exec("SELECT COUNT(*) FROM signals WHERE outcome='ACTIVE'")[0]?.values?.[0]?.[0] || 0;
     const openCount = db.exec("SELECT COUNT(*) FROM signals WHERE outcome='OPEN'")[0]?.values?.[0]?.[0] || 0;
-    console.log(`[DB] After cleanup: ${finalCount} total signals (${activeCount} ACTIVE, ${openCount} OPEN)`);
+    console.log(`[DB] Signal counts: ${totalCount} total (${activeCount} ACTIVE, ${openCount} OPEN)`);
   } catch(e) {}
 
   console.log('[DB] Schema initialised, weights seeded');
@@ -679,28 +637,9 @@ function getLatestOpenSignal(symbol, direction) {
 // ACTIVE signals (entry touched = real trade) are NEVER auto-expired
 // Called on startup — cleans up stale setups after a deploy
 function expireOldVersionSignals(currentVersion) {
-  if (!currentVersion) return 0;
-  // ONLY touches outcome='OPEN' — never WIN, LOSS, ACTIVE, EXPIRED, REPLACED
-  // 30-minute grace period: recently fired signals survive version bumps
-  const thirtyMinAgo = Date.now() - (30 * 60 * 1000);
-  const stale = all(
-    "SELECT id, symbol, outcome, scorer_version FROM signals WHERE outcome='OPEN' AND (scorer_version IS NULL OR scorer_version != ?) AND ts < ?",
-    [currentVersion, thirtyMinAgo]
-  );
-  if (stale.length === 0) return 0;
-  console.log(`[DB] expireOldVersionSignals: found ${stale.length} OPEN signals from old versions:`, stale.map(s => `${s.symbol}(v:${s.scorer_version||'null'})`).join(', '));
-  // Safety cap — refuse to expire more than 50 signals at once
-  if (stale.length > 50) {
-    console.error(`[DB] expireOldVersionSignals SAFETY ABORT — would expire ${stale.length} signals, limit is 50`);
-    return 0;
-  }
-  const ids = stale.map(s => s.id);
-  const placeholders = ids.map(() => '?').join(',');
-  run(`UPDATE signals SET outcome='EXPIRED', outcome_ts=? WHERE id IN (${placeholders})`,
-    [Date.now(), ...ids]);
-  persist();
-  console.log(`[DB] Expired ${stale.length} OPEN signal(s) from old scorer version (${currentVersion}) — ACTIVE/WIN/LOSS untouched`);
-  return stale.length;
+  // DISABLED — was expiring all signals after DB restores because restored signals
+  // have old scorer versions. Signals naturally expire via expires_at or get replaced.
+  return 0;
 }
 function entriesWithinPct(e1, e2, pct) {
   if (!e1 || !e2) return false;
