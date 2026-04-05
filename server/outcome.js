@@ -460,15 +460,6 @@ function generateRecommendations(sig, data, price) {
       mfe_pct: mfePct,
       progress_pct: progressPct
     });
-  } else if (maeProgress > 50) {
-    recs.push({
-      type: 'CLOSE',
-      reason: `Price ${maeProgress}% of the way to SL — monitor closely`,
-      urgency: 'LOW',
-      price,
-      mfe_pct: mfePct,
-      progress_pct: progressPct
-    });
   }
 
   // ── 2. MOVE_SL recommendations ────────────────────────────────────────────

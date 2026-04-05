@@ -1909,6 +1909,7 @@ function scoreSymbol(symbol) {
           if (sent.magnitude === 'LARGE' && sent.beat !== 0 && sent.trend !== 0 && sent.beat === sent.trend) {
             const liftedCap = Math.min(structureCap + 5, 92);
             if (liftedCap > structureCap) {
+              structureCap = liftedCap; // raise the cap itself so re-cap respects it
               macroAdjustedScore = Math.min(liftedCap, Math.min(95, macroAdjustedScore));
               macroNote += ` · ✓ LARGE confirmed — cap lifted to ${liftedCap}`;
             }
@@ -2035,8 +2036,9 @@ function scoreSymbol(symbol) {
 
   // ── Re-cap macroAdjustedScore after all post-score multipliers ──────────────
   // Post-event ×1.10, consensus ×1.08, forecast ×1.12 can push above structureCap.
-  // LARGE event cap lift is the ONLY intentional exception (handled at lines 1916-1921).
-  macroAdjustedScore = Math.min(95, Math.max(0, macroAdjustedScore));
+  // LARGE event cap lift already applied its own Math.min(structureCap+5, 92) above.
+  // Everything else must respect the original structureCap.
+  macroAdjustedScore = Math.min(structureCap, Math.min(95, Math.max(0, macroAdjustedScore)));
 
   // ── Bank holiday — force WATCH, add warning ────────────────────────────────
   if (bankHolidayFlag) {

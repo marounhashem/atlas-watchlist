@@ -2660,11 +2660,8 @@ server.listen(PORT, () => {
       }
       if (cleared > 0) { db.persist(); console.log(`[Startup] Cleared ${cleared} past unfired events`); }
     } catch(e) { console.error('[Startup] Event cleanup error:', e.message); }
-    // Fix null outcome_category on expired signals
-    try {
-      db.run("UPDATE signals SET outcome_category='MFE_CAPTURE_FAILURE', outcome_notes='MFE achieved but recs not followed, expired' WHERE outcome IN ('EXPIRED','LOSS') AND outcome_category IS NULL AND mfe_pct > 0.10");
-      db.persist();
-    } catch(e) {}
+    // Taxonomy backfill removed — was too aggressive, labeling all expired signals
+    // with MFE>0.10% as MFE_CAPTURE_FAILURE. Taxonomy now set only by categoriseOutcome().
     // Expose macro context globally so scorer.js can access it in-process
     global.atlasGetMacroContext = getMacroContext;
     global.atlasGetDXY = () => db.getLatestDXY();
