@@ -16,7 +16,7 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 `SCORER_VERSION = '20260403.10'`
 
 Changes since 20260401.15:
-- **20260403.10** — market_data_history (30-day retention, bulk snapshot), BACKTEST tab (filter by symbol/score/session/direction, simulate rec-following, profit factor/max DD), auto-recover corrupted DB from backup on startup (PRAGMA integrity_check + backup search), correct market hours (forex 22:00, commodities 23:00, EU indices Monday 07-08, Asia Monday 00-01:30, COPPER/PLATINUM Monday 01:00), Close/Ignore card removal fix (immediate array removal + re-render)
+- **20260403.10** — market_data_history (14-day retention, every 5min, no blob storage), BACKTEST tab, auto-recover corrupted DB from backup on startup (PRAGMA integrity_check), correct market hours (forex 22:00, commodities 23:00, EU/Asia indices Monday), db-cleanup.js runs before server with 4GB heap for bloated DB recovery, ALL automatic signal deletion on startup REMOVED (expireOldVersionSignals disabled, cleanup queries removed — signals expire naturally via expires_at)
 - **20260403.9** — TP1/TP2/TP3 multi-level targets (1:1, full, stretch +50%), trade journal table with auto-snapshot on every outcome, MTF bias tab (6TF direction for 29 symbols), STATS tab (win rate, MFE capture, session/loss breakdowns), 29-symbol score heatmap, correlation risk panel (shared currency exposure warnings), ACTIVE as default tab
 - **20260403.7** — CRITICAL: structureCap enforcement corrected — re-cap uses `Math.min(structureCap, ...)` not `Math.min(95, ...)`. LARGE event lift raises structureCap itself (+5) before re-cap. SL proximity 50% LOW tier removed (noise on healthy trades). Taxonomy backfill removed from startup (was corrupting analytics).
 - **20260403.6** — Structure cap bypass fixed (re-cap after all multipliers). Lost reasoning notes fixed (macroNote snapshot). Dead intermediate verdict removed.
@@ -361,3 +361,4 @@ Auto-categorised on every WIN/LOSS:
 12. **Eastern → UTC on storage.** FF calendar times converted via `easternToUTC()` before DB write.
 13. **Update CLAUDE.md before closing.** Every session that makes code changes must end with CLAUDE.md updated to reflect all changes. Never close a session without confirming CLAUDE.md matches the actual codebase.
 14. **Never replace the stream body parser with express.json().** Pine Script sends NaN literals which are invalid JSON. The stream parser with NaN sanitisation is intentional and must not be changed.
+15. **Never DELETE signals on startup.** No automatic cleanup queries that delete from the signals table during init. Signals expire naturally via `expires_at` or get replaced by new scoring runs. Previous cleanup queries wiped all signals after DB restores.
