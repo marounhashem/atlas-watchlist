@@ -986,6 +986,59 @@ app.get('/api/status', (req, res) => {
 // ── Health check — Pine alert + FXSSI freshness per symbol ───────────────────
 // Flags symbols where no Pine data received >2h during market hours,
 // or FXSSI data is stale. Use this to detect TradingView alert failures.
+// MTF bias — multi-timeframe structure direction for all symbols
+app.get('/api/mtf-bias', (req, res) => {
+  try {
+    const result = {};
+    for (const sym of Object.keys(SYMBOLS)) {
+      const md = db.getLatestMarketData(sym);
+      if (!md) continue;
+      let emaDir = {}, struct = {};
+      try { const raw = JSON.parse(md.raw_payload || '{}'); emaDir = raw.emaDir || raw.structure || {}; struct = raw.structure || {}; } catch(e) {}
+      const getDir = (v) => v === 1 || v === 'bull' ? 1 : v === -1 || v === 'bear' ? -1 : 0;
+      // Compute weighted struct score from structure data
+      const SW = {'1d':3,'4h':2,'1h':1.5,'15m':1,'5m':0.5,'1m':0.5};
+      let wScore = 0;
+      for (const [tf, w] of Object.entries(SW)) { wScore += (getDir(struct[tf]) || 0) * w; }
+      result[sym] = {
+        '1m': getDir(emaDir['1m'] || struct['1m']),
+        '5m': getDir(emaDir['5m'] || struct['5m']),
+        '15m': getDir(emaDir['15m'] || struct['15m']),
+        '1h': getDir(emaDir['1h'] || struct['1h']),
+        '4h': getDir(emaDir['4h'] || struct['4h']),
+        '1d': getDir(emaDir['1d'] || struct['1d']),
+        score: Math.round(Math.abs(wScore) * 10) / 10,
+        price: md.close || 0,
+        ageMin: Math.round((Date.now() - (md.ts || 0)) / 60000)
+      };
+    }
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Performance stats — win rate, MFE, sessions, score bands, loss categories
+app.get('/api/stats', (req, res) => {
+  try {
+    const signals = db.getAllSignals(500);
+    const closed = signals.filter(s => ['WIN','LOSS'].includes(s.outcome));
+    if (closed.length === 0) return res.json({ empty: true });
+    const wins = closed.filter(s => s.outcome === 'WIN');
+    const losses = closed.filter(s => s.outcome === 'LOSS');
+    const winRate = Math.round(wins.length / closed.length * 100);
+    const bySess = {};
+    for (const s of closed) { const sess = s.session || 'unknown'; if (!bySess[sess]) bySess[sess] = {w:0,l:0}; s.outcome === 'WIN' ? bySess[sess].w++ : bySess[sess].l++; }
+    const mfes = closed.filter(s => s.mfe_pct > 0);
+    const avgMFE = mfes.length ? Math.round(mfes.reduce((a,b) => a + (b.mfe_pct||0), 0) / mfes.length * 100) / 100 : 0;
+    const avgPNL = wins.length ? wins.reduce((a,b) => a + (b.pnl_pct||0), 0) / wins.length : 0;
+    const mfeCapture = avgMFE > 0 ? Math.round(avgPNL / avgMFE * 100) : 0;
+    const holdTimes = closed.filter(s => s.ts && s.outcome_ts).map(s => (s.outcome_ts - s.ts) / 3600000);
+    const avgHold = holdTimes.length ? Math.round(holdTimes.reduce((a,b) => a+b, 0) / holdTimes.length * 10) / 10 : 0;
+    const lossCats = {};
+    for (const s of losses) { const cat = s.outcome_category || 'UNKNOWN'; lossCats[cat] = (lossCats[cat]||0) + 1; }
+    res.json({ total: closed.length, wins: wins.length, losses: losses.length, winRate, avgMFE, mfeCapture, avgHoldH: avgHold, bySess, lossCats });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/health', (req, res) => {
   const { isMarketOpen } = require('./marketHours');
   const db2 = require('./db');

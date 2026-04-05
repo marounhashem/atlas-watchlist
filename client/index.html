@@ -718,7 +718,9 @@
     <div class="mtab active" id="mtab-signals" onclick="switchMainTab('signals')">SIGNALS</div>
     <div class="mtab" id="mtab-forex" onclick="switchMainTab('forex')">FOREX <span id="fx-count" style="font-size:9px;color:var(--dim);font-weight:400;"></span></div>
     <div class="mtab" id="mtab-global" onclick="switchMainTab('global')" style="color:var(--teal)">🌐 GLOBAL</div>
+    <div class="mtab" id="mtab-bias" onclick="switchMainTab('bias')">📊 BIAS</div>
     <div class="mtab" id="mtab-idea" onclick="switchMainTab('idea')">💡 IDEA</div>
+    <div class="mtab" id="mtab-stats" onclick="switchMainTab('stats')">📈 STATS</div>
     <div class="mtab" id="mtab-intel" onclick="switchMainTab('intel')" style="color:var(--amber,var(--watch))">📡 INTEL</div>
   </div>
 
@@ -766,6 +768,18 @@
   </div>
 
   <!-- Idea pane -->
+  <!-- Bias pane -->
+  <div class="main-pane" id="pane-bias">
+    <div style="padding:8px 0 4px;"><div class="sec" style="margin:0;">📊 Multi-timeframe bias</div></div>
+    <div id="bias-content"><div class="empty">Loading bias data...</div></div>
+  </div>
+
+  <!-- Stats pane -->
+  <div class="main-pane" id="pane-stats">
+    <div style="padding:8px 0 4px;"><div class="sec" style="margin:0;">📈 Performance analytics</div></div>
+    <div id="stats-content"><div class="empty">Need at least 3 closed trades</div></div>
+  </div>
+
   <div class="main-pane" id="pane-idea">
     <div style="padding:12px 0;">
       <div class="sec" style="margin:0 0 8px;">💡 TRADE IDEA FEEDBACK</div>
@@ -2159,6 +2173,52 @@ function renderCorrelation() {
   el.innerHTML = risks.map(r => '<div style="margin-bottom:6px;"><div style="font-size:9px;font-weight:700;color:#ffb340;letter-spacing:.05em;margin-bottom:2px;">⚠ '+r.label+'</div><div style="font-size:9px;color:#555575;">'+r.symbols.join(' · ')+'</div><div style="font-size:8px;color:#333348;margin-top:1px;">treat as one position</div></div>').join('');
 }
 
+// ── MTF Bias tab ──────────────────────────────────────────────────────────
+function renderBiasTab() {
+  fetch('/api/mtf-bias').then(r=>r.json()).then(data => {
+    const TFS = ['1m','5m','15m','1h','4h','1d'];
+    let html = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-family:\'JetBrains Mono\',monospace;font-size:11px;"><thead><tr style="color:#444466;border-bottom:1px solid #1a1a28;"><th style="text-align:left;padding:6px 10px;width:80px;">Symbol</th>';
+    TFS.forEach(tf => html += '<th style="text-align:center;padding:6px 8px;">'+tf+'</th>');
+    html += '<th style="text-align:center;padding:6px 8px;">Struct</th><th style="text-align:center;padding:6px 8px;">Price</th></tr></thead><tbody>';
+    const sorted = Object.entries(data).sort((a,b) => (b[1].score||0) - (a[1].score||0));
+    for (const [sym, d] of sorted) {
+      const stale = d.ageMin > 10;
+      html += '<tr style="border-bottom:1px solid #111120;'+(d.score>=5?'background:#00c88006':d.score>=3.5?'background:#4d9eff06':'')+'"><td style="padding:5px 10px;color:'+(stale?'#333348':'#8888b0')+';font-weight:700;">'+sym+(stale?' <span style="color:#333;font-size:8px;">'+d.ageMin+'m</span>':'')+'</td>';
+      TFS.forEach(tf => {
+        const dir = d[tf]; const arrow = dir===1?'↑':dir===-1?'↓':'→';
+        const c = dir===1?'#00c880':dir===-1?'#c07080':'#333348';
+        html += '<td style="text-align:center;padding:5px 8px;color:'+c+';font-size:13px;">'+arrow+'</td>';
+      });
+      const sc = d.score>=5?'#00c880':d.score>=2?'#ffb340':'#555575';
+      html += '<td style="text-align:center;color:'+sc+';padding:5px 8px;">'+d.score+'/8.5</td><td style="text-align:center;color:#444466;padding:5px 8px;">'+d.price+'</td></tr>';
+    }
+    html += '</tbody></table></div>';
+    document.getElementById('bias-content').innerHTML = html;
+  }).catch(() => { document.getElementById('bias-content').innerHTML = '<div class="empty">No bias data</div>'; });
+}
+
+// ── Stats tab ─────────────────────────────────────────────────────────────
+function renderStatsTab() {
+  fetch('/api/stats').then(r=>r.json()).then(d => {
+    if (d.empty || d.total < 3) { document.getElementById('stats-content').innerHTML = '<div class="empty">Need at least 3 closed trades</div>'; return; }
+    function sBox(l,v,c) { return '<div style="background:#0e0e1b;border:1px solid #1a1a28;border-radius:5px;padding:8px 10px;text-align:center;"><div style="font-size:8px;color:#333348;letter-spacing:.08em;margin-bottom:4px;">'+l+'</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:16px;font-weight:700;color:'+c+';">'+v+'</div></div>'; }
+    const wrc = d.winRate>=55?'#00c880':d.winRate>=45?'#ffb340':'#c07080';
+    const mfec = d.mfeCapture>=60?'#00c880':d.mfeCapture>=40?'#ffb340':'#c07080';
+    let html = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px;">'+sBox('Win Rate',d.winRate+'%',wrc)+sBox('Trades',d.total,'#8888b0')+sBox('W/L',d.wins+'/'+d.losses,'#8888b0')+sBox('Avg MFE','+'+d.avgMFE+'%','#8888b0')+sBox('MFE Capture',d.mfeCapture+'%',mfec)+sBox('Avg Hold',d.avgHoldH+'h','#8888b0')+'</div>';
+    if (Object.keys(d.bySess).length) {
+      html += '<div style="margin-bottom:12px;"><div style="font-size:9px;color:#444466;letter-spacing:.1em;margin-bottom:6px;">BY SESSION</div>';
+      for (const [sess,v] of Object.entries(d.bySess)) { const wr=v.w+v.l>0?Math.round(v.w/(v.w+v.l)*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px;"><span style="color:#555575;text-transform:capitalize;">'+sess+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W '+v.l+'L)</span></div>'; }
+      html += '</div>';
+    }
+    if (Object.keys(d.lossCats||{}).length) {
+      html += '<div style="margin-bottom:12px;"><div style="font-size:9px;color:#444466;letter-spacing:.1em;margin-bottom:6px;">LOSS REASONS</div>';
+      for (const [cat,count] of Object.entries(d.lossCats).sort((a,b)=>b[1]-a[1])) { html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px;"><span style="color:#555575;">'+cat.replace(/_/g,' ')+'</span><span style="color:#c07080;font-family:\'JetBrains Mono\',monospace;">'+count+'</span></div>'; }
+      html += '</div>';
+    }
+    document.getElementById('stats-content').innerHTML = html;
+  }).catch(() => {});
+}
+
 function updateClock() {
   const uae=new Date(Date.now()+4*3600000);
   document.getElementById('clock').textContent=uae.toUTCString().slice(17,25)+' UAE';
@@ -2211,6 +2271,8 @@ function switchMainTab(tab) {
   if (tab === 'forex') renderForexSignals();
   if (tab === 'global') renderGlobalSignals();
   if (tab === 'intel') loadIntel();
+  if (tab === 'bias') renderBiasTab();
+  if (tab === 'stats') renderStatsTab();
   if (tab === 'settings') loadSettings();
 }
 
