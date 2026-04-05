@@ -1209,6 +1209,19 @@ function getAllCOTData() {
 }
 
 // ── Market data history — snapshots for backtesting ─────────────────────────
+// Snapshot all symbols at once — bulk insert for efficiency
+function snapshotAllMarketData() {
+  try {
+    const now = Date.now();
+    // Single INSERT...SELECT copies all symbols in one statement
+    db.run(`INSERT INTO market_data_history (symbol,snapshot_ts,close,high,low,rsi,bias,bias_score,structure,fxssi_long_pct,fxssi_short_pct,raw_payload,fxssi_analysis,ts)
+            SELECT symbol,?,close,high,low,rsi,bias,bias_score,structure,fxssi_long_pct,fxssi_short_pct,raw_payload,fxssi_analysis,ts FROM market_data`, [now]);
+    // Cleanup: keep 30 days only
+    db.run('DELETE FROM market_data_history WHERE snapshot_ts < ?', [now - 30 * 86400000]);
+  } catch(e) {}
+}
+
+// Legacy per-symbol function (kept for compatibility)
 function snapshotMarketData(symbol) {
   try {
     const md = get('SELECT * FROM market_data WHERE symbol=? ORDER BY ts DESC LIMIT 1', [symbol]);
@@ -1241,7 +1254,7 @@ function getJournalEntries(limit) {
 }
 
 module.exports = {
-  init, isReady, persist, run, insertJournalEntry, getJournalEntries, snapshotMarketData, getMarketDataHistory,
+  init, isReady, persist, run, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
   upsertMarketData, getLatestMarketData,
   insertSignal, refineSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,

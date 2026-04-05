@@ -2202,8 +2202,8 @@ cron.schedule('* * * * *', async () => {
   try {
     const results = scoreAllPriority();
     _lastScoringResults = results; // cache for instant HTTP response
-    // Snapshot market data for backtesting (one per symbol per scoring run)
-    try { for (const sym of Object.keys(SYMBOLS)) db.snapshotMarketData(sym); } catch(e) {}
+    // Snapshot all market data for backtesting (bulk INSERT...SELECT, 30-day retention)
+    try { db.snapshotAllMarketData(); } catch(e) {}
     const proceeds = results.filter(r => r.verdict === 'PROCEED');
     const watches  = results.filter(r => r.verdict === 'WATCH');
 
@@ -2664,13 +2664,13 @@ cron.schedule('0 0 * * *', () => {
   }
 });
 
-// Cleanup market_data_history — keep 14 days max
+// Cleanup market_data_history — keep 30 days (handled in snapshotAllMarketData)
+// Daily cron as backup in case the per-cycle cleanup misses
 cron.schedule('0 1 * * *', () => {
   try {
-    const cutoff = Date.now() - 14 * 86400000;
-    db.run('DELETE FROM market_data_history WHERE snapshot_ts < ?', [cutoff]);
+    db.run('DELETE FROM market_data_history WHERE snapshot_ts < ?', [Date.now() - 30 * 86400000]);
     db.persist();
-    console.log('[DB] Cleaned up market_data_history older than 14 days');
+    console.log('[DB] Cleaned up market_data_history older than 30 days');
   } catch(e) {}
 });
 
