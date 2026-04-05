@@ -153,7 +153,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260403.6'; // Structure cap bypass fix, lost reasoning notes, dead verdict removed
+const SCORER_VERSION = '20260403.7'; // structureCap enforcement, SL proximity noise fix, taxonomy backfill removed
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously

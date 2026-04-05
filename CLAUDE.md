@@ -13,10 +13,11 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260403.6'`
+`SCORER_VERSION = '20260403.7'`
 
 Changes since 20260401.15:
-- **20260403.6** — CRITICAL: structure cap bypass fixed (post-event/consensus/forecast multipliers could push above structureCap, re-cap applied after all). Lost reasoning notes fixed (macroNote snapshot before buildReasoning, late additions appended). Dead intermediate verdict removed. Four review rounds complete, 24 bugs fixed total.
+- **20260403.7** — CRITICAL: structureCap enforcement corrected — re-cap uses `Math.min(structureCap, ...)` not `Math.min(95, ...)`. LARGE event lift raises structureCap itself (+5) before re-cap. SL proximity 50% LOW tier removed (noise on healthy trades). Taxonomy backfill removed from startup (was corrupting analytics).
+- **20260403.6** — Structure cap bypass fixed (re-cap after all multipliers). Lost reasoning notes fixed (macroNote snapshot). Dead intermediate verdict removed.
 - **20260403.5** — Quality tier A/B/C (positive vs negative gate count), post-event LARGE cap lift (+5 when beat+trend agree), score trace field (Raw→Cap→Mult→Regime→Post), COT re-enabled with age decay (full <48h, 75% 2-4d, 50% 4-6d, 20% >6d)
 - **20260403.4** — conflictMultiplier floor 0.65, momentum <25% force WATCH gate, macro event-superseded decay (HIGH event after macro → max staleness), DXY direct USD pairs ×1.07/×0.92 (crosses ×1.03/×0.97)
 - **20260403.3** — CRITICAL: NFP Telegram alert fixed — three simultaneous bugs prevented ANY event alerts from ever firing: (1) fired detection used Eastern not UTC timestamp (4h offset), (2) actual field never stored in DB upsert (silently dropped), (3) sentiment used forecast as actual fallback (always beat=0). Added retry mechanism for delayed actuals. Note: no event alerts fired since system launch.
