@@ -15,19 +15,84 @@ async function init() {
     SQL = await initSqlJs();
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
+    let loaded = false;
     if (fs.existsSync(DB_PATH)) {
       const stat = fs.statSync(DB_PATH);
       if (stat.size > 0) {
-        const buf = fs.readFileSync(DB_PATH);
-        db = new SQL.Database(buf);
-        console.log(`[DB] Loaded existing database from ${DB_PATH} (${Math.round(stat.size/1024)}KB)`);
+        try {
+          const buf = fs.readFileSync(DB_PATH);
+          db = new SQL.Database(buf);
+          // Integrity check — detect corruption before proceeding
+          const check = db.exec("PRAGMA integrity_check")[0];
+          const result = check?.values?.[0]?.[0];
+          if (result !== 'ok') {
+            console.error(`[DB] INTEGRITY CHECK FAILED: ${result} — attempting restore from backup`);
+            db.close();
+            db = null;
+          } else {
+            loaded = true;
+            console.log(`[DB] Loaded existing database from ${DB_PATH} (${Math.round(stat.size/1024)}KB) — integrity OK`);
+          }
+        } catch(e) {
+          console.error(`[DB] Failed to load DB: ${e.message} — attempting restore from backup`);
+          db = null;
+        }
       } else {
-        console.warn('[DB] WARNING: DB file exists but is EMPTY — creating new database');
+        console.warn('[DB] WARNING: DB file exists but is EMPTY');
+      }
+    }
+
+    // Auto-restore from backup if DB is corrupted or failed to load
+    if (!loaded) {
+      const dir = path.dirname(DB_PATH);
+      const backups = [];
+      // Check rolling backups
+      for (const suffix of ['.bak', '.bak1', '.bak2', '.bak3']) {
+        const bakPath = DB_PATH.replace('.db', suffix.includes('.bak') && !suffix.includes('bak1') ? suffix : '') || DB_PATH + suffix;
+        const candidates = [DB_PATH + suffix, DB_PATH.replace('.db', `_backup_${new Date().toISOString().slice(0, 10)}.db`)];
+        // Also check date-based backups
+        for (let d = 0; d < 3; d++) {
+          const dt = new Date(Date.now() - d * 86400000).toISOString().slice(0, 10);
+          candidates.push(DB_PATH.replace('.db', `_backup_${dt}.db`));
+        }
+        for (const bp of candidates) {
+          if (fs.existsSync(bp) && fs.statSync(bp).size > 1000) {
+            backups.push({ path: bp, size: fs.statSync(bp).size });
+          }
+        }
+      }
+      // Sort by size descending (largest backup is likely most complete)
+      backups.sort((a, b) => b.size - a.size);
+      // Dedupe
+      const seen = new Set();
+      const unique = backups.filter(b => { if (seen.has(b.path)) return false; seen.add(b.path); return true; });
+
+      for (const bak of unique) {
+        try {
+          console.log(`[DB] Trying backup: ${bak.path} (${Math.round(bak.size/1024)}KB)`);
+          const buf = fs.readFileSync(bak.path);
+          const testDb = new SQL.Database(buf);
+          const check = testDb.exec("PRAGMA integrity_check")[0];
+          if (check?.values?.[0]?.[0] === 'ok') {
+            db = testDb;
+            loaded = true;
+            // Overwrite corrupted DB with good backup
+            fs.writeFileSync(DB_PATH, Buffer.from(db.export()));
+            console.log(`[DB] RESTORED from ${bak.path} — integrity OK`);
+            break;
+          } else {
+            console.warn(`[DB] Backup ${bak.path} also corrupted — trying next`);
+            testDb.close();
+          }
+        } catch(e) {
+          console.error(`[DB] Backup ${bak.path} failed: ${e.message}`);
+        }
+      }
+
+      if (!loaded) {
+        console.error('[DB] ALL BACKUPS FAILED — creating fresh database');
         db = new SQL.Database();
       }
-    } else {
-      db = new SQL.Database();
-      console.log('[DB] Created new in-memory database');
     }
 
     initSchema();
