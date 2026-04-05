@@ -1042,36 +1042,53 @@ app.get('/api/stats', (req, res) => {
 // Backtest — replay historical market data through scorer
 app.get('/api/backtest', (req, res) => {
   try {
-    const { symbol, days } = req.query;
-    if (!symbol) return res.status(400).json({ error: 'Missing symbol query param' });
-    const d = parseInt(days) || 7;
-    const cutoff = Date.now() - d * 86400000;
-    const history = db.getMarketDataHistory(symbol, cutoff);
-    if (!history.length) return res.json({ signals: [], total: 0, note: 'No historical data yet — snapshots start collecting after deploy' });
+    const { symbol = 'ALL', minScore = 80, session = 'ALL', direction = 'ALL', followRecs = 'false' } = req.query;
+    let signals = db.getAllSignals(1000).filter(s => s.verdict === 'PROCEED' || s.verdict === 'WATCH');
+    if (symbol !== 'ALL') signals = signals.filter(s => s.symbol === symbol);
+    if (session !== 'ALL') signals = signals.filter(s => s.session === session);
+    if (direction !== 'ALL') signals = signals.filter(s => s.direction === direction);
+    signals = signals.filter(s => (s.score || 0) >= Number(minScore));
+    signals.sort((a, b) => a.ts - b.ts);
 
-    // Replay each snapshot through scorer direction inference
-    const signals = [];
-    for (const snap of history) {
-      try {
-        // Basic signal reconstruction from stored data
-        const direction = snap.bias > 0 ? 'LONG' : snap.bias < 0 ? 'SHORT' : null;
-        if (!direction) continue;
-        const score = snap.bias_score ? Math.round(Math.abs(snap.bias_score) * 100) : 0;
-        if (score < 60) continue; // skip weak signals
-        signals.push({
-          ts: snap.snapshot_ts,
-          symbol: snap.symbol,
-          direction,
-          score,
-          close: snap.close,
-          rsi: snap.rsi,
-          fxssi_long: snap.fxssi_long_pct,
-          fxssi_short: snap.fxssi_short_pct
-        });
-      } catch(e) {}
-    }
-    res.json({ signals, total: signals.length, snapshots: history.length, days: d });
-  } catch(e) { res.status(500).json({ error: e.message }); }
+    const simulated = signals.map(sig => {
+      const recs = (() => { try { return JSON.parse(sig.recommendations || '[]'); } catch(e) { return []; } })();
+      let simOutcome = sig.outcome, simPnl = sig.pnl_pct || 0;
+      if (followRecs === 'true' && recs.length) {
+        const highClose = recs.find(r => r.type === 'CLOSE' && r.urgency === 'HIGH' && !r.resolved_reason?.includes('rsi-normalised'));
+        if (highClose && highClose.price) {
+          simPnl = sig.direction === 'LONG' ? Math.round((highClose.price - sig.entry) / sig.entry * 10000) / 100 : Math.round((sig.entry - highClose.price) / sig.entry * 10000) / 100;
+          simOutcome = simPnl >= 0 ? 'WIN' : 'LOSS';
+        }
+      }
+      if (['ACTIVE', 'OPEN'].includes(sig.outcome)) { simOutcome = 'PENDING'; simPnl = sig.mfe_pct || 0; }
+      if (sig.outcome === 'EXPIRED') { simOutcome = 'EXPIRED'; simPnl = 0; }
+      return { id: sig.id, symbol: sig.symbol, direction: sig.direction, score: sig.score, verdict: sig.verdict, session: sig.session, rr: sig.rr, struct: sig.weighted_struct_score, entry: sig.entry, sl: sig.sl, tp: sig.tp, mfe_pct: sig.mfe_pct || 0, outcome: sig.outcome, outcome_category: sig.outcome_category, simOutcome, simPnl, ts: sig.ts, outcome_ts: sig.outcome_ts, recs_count: recs.length, high_recs: recs.filter(r => r.urgency === 'HIGH').length };
+    });
+
+    const closed = simulated.filter(s => ['WIN', 'LOSS'].includes(s.simOutcome));
+    const wins = closed.filter(s => s.simOutcome === 'WIN');
+    const losses = closed.filter(s => s.simOutcome === 'LOSS');
+    const winRate = closed.length > 0 ? Math.round(wins.length / closed.length * 100) : 0;
+    const totalPnl = Math.round(closed.reduce((a, b) => a + (b.simPnl || 0), 0) * 100) / 100;
+    const avgWin = wins.length ? Math.round(wins.reduce((a, b) => a + (b.simPnl || 0), 0) / wins.length * 100) / 100 : 0;
+    const avgLoss = losses.length ? Math.round(Math.abs(losses.reduce((a, b) => a + (b.simPnl || 0), 0) / losses.length) * 100) / 100 : 0;
+    const profitFactor = avgLoss > 0 ? Math.round((avgWin * wins.length) / (avgLoss * losses.length) * 100) / 100 : null;
+    let peak = 0, maxDD = 0, running = 0;
+    const equity = [];
+    for (const s of closed) { running += s.simPnl || 0; if (running > peak) peak = running; const dd = peak - running; if (dd > maxDD) maxDD = dd; equity.push({ ts: s.outcome_ts || s.ts, pnl: Math.round(running * 100) / 100, symbol: s.symbol, outcome: s.simOutcome }); }
+
+    const byScore = { '80-82': { w: 0, l: 0 }, '83-84': { w: 0, l: 0 }, '85-87': { w: 0, l: 0 }, '88+': { w: 0, l: 0 } };
+    for (const s of closed) { const b = s.score >= 88 ? '88+' : s.score >= 85 ? '85-87' : s.score >= 83 ? '83-84' : '80-82'; s.simOutcome === 'WIN' ? byScore[b].w++ : byScore[b].l++; }
+    const bySession = {};
+    for (const s of closed) { const ss = s.session || 'unknown'; if (!bySession[ss]) bySession[ss] = { w: 0, l: 0 }; s.simOutcome === 'WIN' ? bySession[ss].w++ : bySession[ss].l++; }
+    const bySymbol = {};
+    for (const s of closed) { if (!bySymbol[s.symbol]) bySymbol[s.symbol] = { w: 0, l: 0 }; s.simOutcome === 'WIN' ? bySymbol[s.symbol].w++ : bySymbol[s.symbol].l++; }
+
+    res.json({
+      summary: { total: simulated.length, closed: closed.length, wins: wins.length, losses: losses.length, expired: simulated.filter(s => s.simOutcome === 'EXPIRED').length, pending: simulated.filter(s => s.simOutcome === 'PENDING').length, winRate, totalPnl, avgWin, avgLoss, profitFactor, maxDrawdown: Math.round(maxDD * 100) / 100, avgRR: simulated.length > 0 ? Math.round(simulated.reduce((a, b) => a + (b.rr || 0), 0) / simulated.length * 10) / 10 : 0 },
+      equity, byScore, bySession, bySymbol, signals: simulated
+    });
+  } catch(e) { console.error('[Backtest]', e.message); res.status(500).json({ error: e.message }); }
 });
 
 // Trade journal — auto-generated entries for every outcome

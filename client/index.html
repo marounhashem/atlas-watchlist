@@ -721,6 +721,7 @@
     <div class="mtab" id="mtab-bias" onclick="switchMainTab('bias')">📊 BIAS</div>
     <div class="mtab" id="mtab-idea" onclick="switchMainTab('idea')">💡 IDEA</div>
     <div class="mtab" id="mtab-stats" onclick="switchMainTab('stats')">📈 STATS</div>
+    <div class="mtab" id="mtab-backtest" onclick="switchMainTab('backtest')">🔬 BACKTEST</div>
     <div class="mtab" id="mtab-intel" onclick="switchMainTab('intel')" style="color:var(--amber,var(--watch))">📡 INTEL</div>
   </div>
 
@@ -772,6 +773,21 @@
   <div class="main-pane" id="pane-bias">
     <div style="padding:8px 0 4px;"><div class="sec" style="margin:0;">📊 Multi-timeframe bias</div></div>
     <div id="bias-content"><div class="empty">Loading bias data...</div></div>
+  </div>
+
+  <!-- Backtest pane -->
+  <div class="main-pane" id="pane-backtest">
+    <div style="padding:8px 0 4px;"><div class="sec" style="margin:0;">🔬 Signal backtester</div></div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr) auto;gap:8px;margin-bottom:12px;align-items:end;">
+      <div><div style="font-size:9px;color:#444466;letter-spacing:.08em;margin-bottom:4px;">SYMBOL</div><select id="bt-symbol" style="width:100%;background:#111120;border:1px solid #2a2a3a;border-radius:4px;color:#8080b8;font-family:'Space Grotesk',sans-serif;font-size:11px;padding:6px 8px;outline:none;"><option value="ALL">All Symbols</option></select></div>
+      <div><div style="font-size:9px;color:#444466;letter-spacing:.08em;margin-bottom:4px;">MIN SCORE: <span id="bt-score-label">80</span></div><input type="range" id="bt-minscore" min="70" max="95" value="80" step="1" style="width:100%;" oninput="document.getElementById('bt-score-label').textContent=this.value"></div>
+      <div><div style="font-size:9px;color:#444466;letter-spacing:.08em;margin-bottom:4px;">SESSION</div><select id="bt-session" style="width:100%;background:#111120;border:1px solid #2a2a3a;border-radius:4px;color:#8080b8;font-family:'Space Grotesk',sans-serif;font-size:11px;padding:6px 8px;outline:none;"><option value="ALL">All Sessions</option><option value="london">London</option><option value="newYork">New York</option><option value="asia">Asia</option></select></div>
+      <div><div style="font-size:9px;color:#444466;letter-spacing:.08em;margin-bottom:4px;">DIRECTION</div><select id="bt-dir" style="width:100%;background:#111120;border:1px solid #2a2a3a;border-radius:4px;color:#8080b8;font-family:'Space Grotesk',sans-serif;font-size:11px;padding:6px 8px;outline:none;"><option value="ALL">Both</option><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
+      <button onclick="runBacktest()" id="bt-run-btn" style="padding:8px 20px;background:transparent;border:1px solid #6644cc;border-radius:5px;color:#8866ff;font-size:11px;font-weight:600;letter-spacing:.07em;cursor:pointer;font-family:'Space Grotesk',sans-serif;white-space:nowrap;">▶ RUN</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;"><input type="checkbox" id="bt-followrecs"><label for="bt-followrecs" style="font-size:10px;color:#555575;cursor:pointer;">Simulate following HIGH urgency CLOSE recs</label></div>
+    <div id="bt-results" style="display:none;"></div>
+    <div id="bt-empty" style="color:#333348;font-size:12px;padding:20px 0;">Set filters and click RUN to simulate</div>
   </div>
 
   <!-- Stats pane -->
@@ -2219,6 +2235,73 @@ function renderStatsTab() {
   }).catch(() => {});
 }
 
+// ── Backtest tab ──────────────────────────────────────────────────────────
+function populateBtSymbols() {
+  const sel = document.getElementById('bt-symbol');
+  if (!sel) return;
+  const syms = [...new Set([...allSignals, ...pastSignals].map(s => s.symbol))].sort();
+  sel.innerHTML = '<option value="ALL">All Symbols</option>' + syms.map(s => '<option value="'+s+'">'+s+'</option>').join('');
+}
+
+async function runBacktest() {
+  const btn = document.getElementById('bt-run-btn');
+  btn.textContent = '⏳ Running...'; btn.disabled = true;
+  const params = new URLSearchParams({ symbol: document.getElementById('bt-symbol').value, minScore: document.getElementById('bt-minscore').value, session: document.getElementById('bt-session').value, direction: document.getElementById('bt-dir').value, followRecs: document.getElementById('bt-followrecs').checked });
+  try {
+    const res = await fetch('/api/backtest?' + params);
+    const data = await res.json();
+    renderBacktestResults(data);
+  } catch(e) { console.error('Backtest error:', e); }
+  btn.textContent = '▶ RUN'; btn.disabled = false;
+}
+
+function renderBacktestResults(data) {
+  const s = data.summary;
+  document.getElementById('bt-results').style.display = 'block';
+  document.getElementById('bt-empty').style.display = 'none';
+  function bCard(l,v,c) { return '<div style="background:#0e0e1b;border:1px solid #1a1a28;border-radius:5px;padding:8px 10px;text-align:center;"><div style="font-size:8px;color:#333348;letter-spacing:.08em;margin-bottom:4px;">'+l+'</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:14px;font-weight:700;color:'+c+';">'+v+'</div></div>'; }
+  const wrc = s.winRate>=55?'#00c880':s.winRate>=45?'#ffb340':'#c07080';
+  const pfc = (s.profitFactor||0)>=1.5?'#00c880':(s.profitFactor||0)>=1?'#ffb340':'#c07080';
+
+  let html = '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px;">'
+    + bCard('Win Rate',s.winRate+'%',wrc)
+    + bCard('Closed',s.closed,'#8888b0')
+    + bCard('Total P&L',(s.totalPnl>=0?'+':'')+s.totalPnl+'%',s.totalPnl>=0?'#00c880':'#c07080')
+    + bCard('Profit Factor',s.profitFactor||'—',pfc)
+    + bCard('Max DD','-'+s.maxDrawdown+'%',s.maxDrawdown>2?'#c07080':'#8888b0')
+    + bCard('Avg Win','+'+s.avgWin+'%','#00c880')
+    + bCard('Avg Loss','-'+s.avgLoss+'%','#c07080')
+    + bCard('Avg R:R','1:'+s.avgRR,'#8888b0')
+    + bCard('Expired',s.expired,'#333348')
+    + bCard('Pending',s.pending,'#4d9eff')
+    + '</div>';
+
+  // By score
+  html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">';
+  html += '<div style="background:#0e0e1b;border:1px solid #1a1a28;border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:#444466;letter-spacing:.1em;margin-bottom:10px;font-weight:700;">WIN RATE BY SCORE</div>';
+  for (const [band, v] of Object.entries(data.byScore)) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:#555575;">'+band+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W/'+v.l+'L)</span></div>'; }
+  html += '</div>';
+
+  // By session
+  html += '<div style="background:#0e0e1b;border:1px solid #1a1a28;border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:#444466;letter-spacing:.1em;margin-bottom:10px;font-weight:700;">WIN RATE BY SESSION</div>';
+  for (const [sess, v] of Object.entries(data.bySession)) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:#555575;text-transform:capitalize;">'+sess+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W/'+v.l+'L)</span></div>'; }
+  html += '</div></div>';
+
+  // By symbol
+  html += '<div style="background:#0e0e1b;border:1px solid #1a1a28;border-radius:6px;padding:12px 14px;margin-bottom:16px;"><div style="font-size:9px;color:#444466;letter-spacing:.1em;margin-bottom:10px;font-weight:700;">BY SYMBOL</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">';
+  for (const [sym, v] of Object.entries(data.bySymbol).sort((a,b)=>(b[1].w+b[1].l)-(a[1].w+a[1].l))) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="background:#111120;border:1px solid #1a1a28;border-radius:4px;padding:5px 8px;display:flex;justify-content:space-between;"><span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:#6868a0;">'+sym+'</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:'+c+';">'+wr+'% <span style="color:#333348;">'+v.w+'W/'+v.l+'L</span></span></div>'; }
+  html += '</div></div>';
+
+  // Signal log
+  html += '<div style="background:#0e0e1b;border:1px solid #1a1a28;border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:#444466;letter-spacing:.1em;margin-bottom:10px;font-weight:700;">SIGNAL LOG</div><div style="max-height:300px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-family:\'JetBrains Mono\',monospace;font-size:9px;"><thead><tr style="color:#333348;border-bottom:1px solid #1a1a28;"><th style="text-align:left;padding:4px;">Sym</th><th>Dir</th><th>Score</th><th>R:R</th><th>MFE</th><th>Result</th><th>P&L</th></tr></thead><tbody>';
+  for (const sig of data.signals.slice(0, 50)) {
+    const oc = sig.simOutcome === 'WIN' ? '#00c880' : sig.simOutcome === 'LOSS' ? '#c07080' : sig.simOutcome === 'PENDING' ? '#4d9eff' : '#333348';
+    html += '<tr style="border-bottom:1px solid #111120;"><td style="padding:3px 4px;color:#6868a0;">'+sig.symbol+'</td><td style="color:'+(sig.direction==='LONG'?'#5bc8a0':'#d46080')+';">'+sig.direction+'</td><td>'+sig.score+'</td><td>1:'+sig.rr+'</td><td>+'+(sig.mfe_pct||0)+'%</td><td style="color:'+oc+';">'+sig.simOutcome+'</td><td style="color:'+oc+';">'+(sig.simPnl>=0?'+':'')+sig.simPnl+'%</td></tr>';
+  }
+  html += '</tbody></table></div></div>';
+  document.getElementById('bt-results').innerHTML = html;
+}
+
 function updateClock() {
   const uae=new Date(Date.now()+4*3600000);
   document.getElementById('clock').textContent=uae.toUTCString().slice(17,25)+' UAE';
@@ -2273,6 +2356,7 @@ function switchMainTab(tab) {
   if (tab === 'intel') loadIntel();
   if (tab === 'bias') renderBiasTab();
   if (tab === 'stats') renderStatsTab();
+  if (tab === 'backtest') populateBtSymbols();
   if (tab === 'settings') loadSettings();
 }
 
