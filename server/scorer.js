@@ -153,7 +153,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260403.9'; // TP1/TP2/TP3, trade journal, bias tab, stats, heatmap
+const SCORER_VERSION = '20260403.10'; // market_data_history for backtesting
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously

@@ -1039,6 +1039,41 @@ app.get('/api/stats', (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// Backtest — replay historical market data through scorer
+app.get('/api/backtest', (req, res) => {
+  try {
+    const { symbol, days } = req.query;
+    if (!symbol) return res.status(400).json({ error: 'Missing symbol query param' });
+    const d = parseInt(days) || 7;
+    const cutoff = Date.now() - d * 86400000;
+    const history = db.getMarketDataHistory(symbol, cutoff);
+    if (!history.length) return res.json({ signals: [], total: 0, note: 'No historical data yet — snapshots start collecting after deploy' });
+
+    // Replay each snapshot through scorer direction inference
+    const signals = [];
+    for (const snap of history) {
+      try {
+        // Basic signal reconstruction from stored data
+        const direction = snap.bias > 0 ? 'LONG' : snap.bias < 0 ? 'SHORT' : null;
+        if (!direction) continue;
+        const score = snap.bias_score ? Math.round(Math.abs(snap.bias_score) * 100) : 0;
+        if (score < 60) continue; // skip weak signals
+        signals.push({
+          ts: snap.snapshot_ts,
+          symbol: snap.symbol,
+          direction,
+          score,
+          close: snap.close,
+          rsi: snap.rsi,
+          fxssi_long: snap.fxssi_long_pct,
+          fxssi_short: snap.fxssi_short_pct
+        });
+      } catch(e) {}
+    }
+    res.json({ signals, total: signals.length, snapshots: history.length, days: d });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // Trade journal — auto-generated entries for every outcome
 app.get('/api/journal', (req, res) => {
   try { res.json(db.getJournalEntries(100)); }
@@ -2150,6 +2185,8 @@ cron.schedule('* * * * *', async () => {
   try {
     const results = scoreAllPriority();
     _lastScoringResults = results; // cache for instant HTTP response
+    // Snapshot market data for backtesting (one per symbol per scoring run)
+    try { for (const sym of Object.keys(SYMBOLS)) db.snapshotMarketData(sym); } catch(e) {}
     const proceeds = results.filter(r => r.verdict === 'PROCEED');
     const watches  = results.filter(r => r.verdict === 'WATCH');
 
@@ -2608,6 +2645,16 @@ cron.schedule('0 0 * * *', () => {
   } catch(e) {
     console.error('[DB] Backup error:', e.message);
   }
+});
+
+// Cleanup market_data_history — keep 14 days max
+cron.schedule('0 1 * * *', () => {
+  try {
+    const cutoff = Date.now() - 14 * 86400000;
+    db.run('DELETE FROM market_data_history WHERE snapshot_ts < ?', [cutoff]);
+    db.persist();
+    console.log('[DB] Cleaned up market_data_history older than 14 days');
+  } catch(e) {}
 });
 
 // Run health check every 30 minutes

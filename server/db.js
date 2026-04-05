@@ -370,6 +370,14 @@ function initSchema() {
     score_trace TEXT, reasoning_summary TEXT,
     ts INTEGER, outcome_ts INTEGER
   )`);
+  // Market data history — snapshots for backtesting
+  db.run(`CREATE TABLE IF NOT EXISTS market_data_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL, snapshot_ts INTEGER NOT NULL,
+    close REAL, high REAL, low REAL, rsi REAL, bias INTEGER, bias_score REAL,
+    structure TEXT, fxssi_long_pct REAL, fxssi_short_pct REAL,
+    raw_payload TEXT, fxssi_analysis TEXT, ts INTEGER
+  )`);
   try { db.run('ALTER TABLE signals ADD COLUMN tp1 REAL DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN tp2 REAL DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN tp3 REAL DEFAULT NULL'); } catch(e) {}
@@ -1200,6 +1208,22 @@ function getAllCOTData() {
   return all('SELECT * FROM cot_data WHERE id IN (SELECT MAX(id) FROM cot_data GROUP BY symbol) ORDER BY symbol');
 }
 
+// ── Market data history — snapshots for backtesting ─────────────────────────
+function snapshotMarketData(symbol) {
+  try {
+    const md = get('SELECT * FROM market_data WHERE symbol=? ORDER BY ts DESC LIMIT 1', [symbol]);
+    if (!md) return;
+    run(`INSERT INTO market_data_history (symbol,snapshot_ts,close,high,low,rsi,bias,bias_score,structure,fxssi_long_pct,fxssi_short_pct,raw_payload,fxssi_analysis,ts)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [symbol, Date.now(), md.close, md.high, md.low, md.rsi, md.bias, md.bias_score,
+       md.structure, md.fxssi_long_pct, md.fxssi_short_pct, md.raw_payload, md.fxssi_analysis, md.ts]);
+  } catch(e) {}
+}
+
+function getMarketDataHistory(symbol, sinceTs) {
+  return all('SELECT * FROM market_data_history WHERE symbol=? AND snapshot_ts>? ORDER BY snapshot_ts ASC LIMIT 2000', [symbol, sinceTs]);
+}
+
 function insertJournalEntry(j) {
   try {
     run(`INSERT INTO trade_journal (signal_id,symbol,direction,outcome,session,score,quality,entry,sl,tp1,tp2,rr,mfe_pct,pnl_pct,hold_hours,breakdown,weighted_struct,macro_available,outcome_category,outcome_notes,recs_total,recs_followed,high_recs_ignored,score_trace,reasoning_summary,ts,outcome_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -1217,7 +1241,7 @@ function getJournalEntries(limit) {
 }
 
 module.exports = {
-  init, isReady, persist, run, insertJournalEntry, getJournalEntries,
+  init, isReady, persist, run, insertJournalEntry, getJournalEntries, snapshotMarketData, getMarketDataHistory,
   upsertMarketData, getLatestMarketData,
   insertSignal, refineSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,
