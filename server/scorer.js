@@ -1347,15 +1347,8 @@ function scoreSymbol(symbol) {
     adjustedMinScore += 3;
   }
 
-  // Ranging daily (dailyBias===0): floor raised further
-  const dailyBiasForThresh = data._dailyBias !== undefined ? data._dailyBias : 0;
-  const rangingPenalty = dailyBiasForThresh === 0 ? 4 : 0;
-  const effectiveMinScore = adjustedMinScore + rangingPenalty;
-  // verdict here is intermediate — final verdict is macroVerdict below
-  const rawVerdict = finalScore >= effectiveMinScore ? 'PROCEED'
-    : finalScore >= effectiveMinScore - 12 ? 'WATCH'
-    : 'SKIP';
-  const verdict = rawVerdict; // structureZero cap applied to macroVerdict below
+  // Intermediate verdict removed — only macroVerdict (computed later) is used in return
+  const _macroNoteSnapshot = macroNote; // capture before buildReasoning — late-stage additions appended after
   const reasoning = buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, data, cfg, regimeNote, macroNote });
 
   const close = data.close || 0;
@@ -2040,6 +2033,11 @@ function scoreSymbol(symbol) {
     }
   }
 
+  // ── Re-cap macroAdjustedScore after all post-score multipliers ──────────────
+  // Post-event ×1.10, consensus ×1.08, forecast ×1.12 can push above structureCap.
+  // LARGE event cap lift is the ONLY intentional exception (handled at lines 1916-1921).
+  macroAdjustedScore = Math.min(95, Math.max(0, macroAdjustedScore));
+
   // ── Bank holiday — force WATCH, add warning ────────────────────────────────
   if (bankHolidayFlag) {
     if (macroVerdict === 'PROCEED') macroVerdict = 'WATCH';
@@ -2050,6 +2048,10 @@ function scoreSymbol(symbol) {
     ? `⚠ Retail Order Book stale (${Math.round(fxssiAge/60000)}m) — OB scoring neutral · ` + reasoning
     : reasoning;
   if (eventRiskNote) finalReasoning = eventRiskNote + ' · ' + finalReasoning;
+  // Append late-stage macroNote additions (momentum, post-event, forecast, bank holiday)
+  // buildReasoning was called with macroNote at line ~1359, but macroNote was modified after
+  const lateNotes = macroNote.slice(_macroNoteSnapshot.length).trim();
+  if (lateNotes) finalReasoning += ' · ' + lateNotes;
 
   // ── Round prices for display ────────────────────────────────────────────────
   // Forex needs more decimals (5dp) to preserve SL distance on low-value pairs
