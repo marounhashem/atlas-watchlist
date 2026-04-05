@@ -1039,6 +1039,12 @@ app.get('/api/stats', (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// Trade journal — auto-generated entries for every outcome
+app.get('/api/journal', (req, res) => {
+  try { res.json(db.getJournalEntries(100)); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/health', (req, res) => {
   const { isMarketOpen } = require('./marketHours');
   const db2 = require('./db');

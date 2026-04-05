@@ -270,6 +270,27 @@ function checkOutcomes(broadcast) {
           console.log(`[Outcome] ${sig.symbol} ${direction} → ${outcome} (${pnlPct > 0 ? '+' : ''}${pnlPct}%)`);
         }
         if (broadcast) broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction, outcome, pnlPct, ts: Date.now() });
+        // Auto-generate journal entry
+        try {
+          const { insertJournalEntry } = require('./db');
+          const recs = (() => { try { return JSON.parse(sig.recommendations || '[]'); } catch(e) { return []; } })();
+          const bd = (() => { try { return JSON.parse(sig.breakdown || '{}'); } catch(e) { return {}; } })();
+          insertJournalEntry({
+            signal_id: id, symbol: sig.symbol, direction, outcome,
+            session: sig.session, score: sig.score, quality: sig.quality,
+            entry: sig.entry, sl: sig.sl, tp1: sig.tp1, tp2: sig.tp2 || sig.tp, rr: sig.rr,
+            mfe_pct: sig.mfe_pct, pnl_pct: pnlPct,
+            hold_hours: sig.outcome_ts && sig.ts ? Math.round((Date.now() - sig.ts) / 360000) / 10 : null,
+            breakdown: { technical: Math.round((bd.bias||0)*100), sentiment: Math.round((bd.fxssi||0)*100), ob_levels: Math.round((bd.ob||0)*100), session: Math.round((bd.session||0)*100) },
+            weighted_struct: sig.weighted_struct_score, macro_available: sig.macro_context_available,
+            outcome_category: sig.outcome_category, outcome_notes: sig.outcome_notes,
+            recs_total: recs.length, recs_followed: recs.filter(r => r.resolved && !r.resolved_reason?.includes('auto-expired')).length,
+            high_recs_ignored: recs.filter(r => r.urgency === 'HIGH' && r.resolved_reason?.includes('auto-expired')).length,
+            score_trace: sig.score_trace,
+            reasoning_summary: (sig.reasoning || '').split(' · ').filter(p => p.startsWith('✓') || p.startsWith('⚠')).slice(0, 5).join(' | '),
+            ts: sig.ts, outcome_ts: Date.now()
+          });
+        } catch(e) { console.error('[Journal] Error:', e.message); }
         // Fire Claude learning automatically
         claudeLearner.onOutcome({ ...sig, pnl_pct: pnlPct }, outcome, broadcast).catch(e =>
           console.error('[Claude] Auto-learning error:', e.message)

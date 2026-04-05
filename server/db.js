@@ -357,6 +357,19 @@ function initSchema() {
   try { db.run('ALTER TABLE signals ADD COLUMN breakdown TEXT DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN quality TEXT DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN score_trace TEXT DEFAULT NULL'); } catch(e) {}
+  // Trade journal — auto-generated snapshot on every WIN/LOSS/EXPIRED
+  db.run(`CREATE TABLE IF NOT EXISTS trade_journal (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id INTEGER, symbol TEXT, direction TEXT, outcome TEXT,
+    session TEXT, score INTEGER, quality TEXT,
+    entry REAL, sl REAL, tp1 REAL, tp2 REAL, rr REAL,
+    mfe_pct REAL, pnl_pct REAL, hold_hours REAL,
+    breakdown TEXT, weighted_struct REAL, macro_available INTEGER,
+    outcome_category TEXT, outcome_notes TEXT,
+    recs_total INTEGER, recs_followed INTEGER, high_recs_ignored INTEGER,
+    score_trace TEXT, reasoning_summary TEXT,
+    ts INTEGER, outcome_ts INTEGER
+  )`);
   try { db.run('ALTER TABLE signals ADD COLUMN tp1 REAL DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN tp2 REAL DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN tp3 REAL DEFAULT NULL'); } catch(e) {}
@@ -1187,8 +1200,24 @@ function getAllCOTData() {
   return all('SELECT * FROM cot_data WHERE id IN (SELECT MAX(id) FROM cot_data GROUP BY symbol) ORDER BY symbol');
 }
 
+function insertJournalEntry(j) {
+  try {
+    run(`INSERT INTO trade_journal (signal_id,symbol,direction,outcome,session,score,quality,entry,sl,tp1,tp2,rr,mfe_pct,pnl_pct,hold_hours,breakdown,weighted_struct,macro_available,outcome_category,outcome_notes,recs_total,recs_followed,high_recs_ignored,score_trace,reasoning_summary,ts,outcome_ts) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [j.signal_id, j.symbol, j.direction, j.outcome, j.session, j.score, j.quality,
+       j.entry, j.sl, j.tp1, j.tp2, j.rr, j.mfe_pct, j.pnl_pct, j.hold_hours,
+       j.breakdown ? JSON.stringify(j.breakdown) : null, j.weighted_struct, j.macro_available ? 1 : 0,
+       j.outcome_category, j.outcome_notes, j.recs_total, j.recs_followed, j.high_recs_ignored,
+       j.score_trace, j.reasoning_summary, j.ts, j.outcome_ts]);
+    persist();
+  } catch(e) { console.error('[DB] Journal insert error:', e.message); }
+}
+
+function getJournalEntries(limit) {
+  return all('SELECT * FROM trade_journal ORDER BY outcome_ts DESC LIMIT ?', [limit || 100]);
+}
+
 module.exports = {
-  init, isReady, persist, run,
+  init, isReady, persist, run, insertJournalEntry, getJournalEntries,
   upsertMarketData, getLatestMarketData,
   insertSignal, refineSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,
