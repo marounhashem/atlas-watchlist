@@ -2796,6 +2796,22 @@ server.listen(PORT, () => {
         try { return JSON.parse(item.affected_symbols || '[]').includes(sym); } catch(e) { return true; }
       }).map(i => i.summary || i.content);
     };
+    // One-time intel seed if table is empty (restore after DB wipe)
+    try {
+      const intel = db.getActiveIntel();
+      if (intel.length === 0) {
+        console.log('[Startup] Intel table empty — seeding known context');
+        const seed = [
+          { content: 'Geopolitical tensions and elevated ISM inflation readings. Tariff war escalation risks. Bearish for risk assets, supportive for safe havens.', symbol: null, expiresInHours: 72 },
+          { content: 'Nikkei Futures at critical technical juncture. Watch for BOJ policy signals.', symbol: 'J225', expiresInHours: 48 },
+        ];
+        for (const item of seed) {
+          db.insertMarketIntel({ content: item.content, symbol: item.symbol, expires_at: Date.now() + item.expiresInHours * 3600000 });
+        }
+        db.persist();
+        console.log(`[Startup] Seeded ${seed.length} intel items`);
+      }
+    } catch(e) {}
     // Macro fetch runs on schedule (07:00 UTC) only — not on startup to save API costs
   }).catch(e => {
     console.error('[DB] Init failed:', e.message);
