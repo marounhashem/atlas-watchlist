@@ -13,9 +13,10 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260403.7'`
+`SCORER_VERSION = '20260403.9'`
 
 Changes since 20260401.15:
+- **20260403.9** — TP1/TP2/TP3 multi-level targets (1:1, full, stretch +50%), trade journal table with auto-snapshot on every outcome, MTF bias tab (6TF direction for 29 symbols), STATS tab (win rate, MFE capture, session/loss breakdowns), 29-symbol score heatmap, correlation risk panel (shared currency exposure warnings), ACTIVE as default tab
 - **20260403.7** — CRITICAL: structureCap enforcement corrected — re-cap uses `Math.min(structureCap, ...)` not `Math.min(95, ...)`. LARGE event lift raises structureCap itself (+5) before re-cap. SL proximity 50% LOW tier removed (noise on healthy trades). Taxonomy backfill removed from startup (was corrupting analytics).
 - **20260403.6** — Structure cap bypass fixed (re-cap after all multipliers). Lost reasoning notes fixed (macroNote snapshot). Dead intermediate verdict removed.
 - **20260403.5** — Quality tier A/B/C (positive vs negative gate count), post-event LARGE cap lift (+5 when beat+trend agree), score trace field (Raw→Cap→Mult→Regime→Post), COT re-enabled with age decay (full <48h, 75% 2-4d, 50% 4-6d, 20% >6d)
@@ -64,6 +65,7 @@ Changes since 20260401.7:
 | rate_data | Central bank interest rates per currency |
 | market_intel | Short-lived user-injected context (24h TTL) with Haiku analysis |
 | dxy_reference | DXY reference data (never traded, used for correlation) |
+| trade_journal | Auto-generated signal snapshots on every WIN/LOSS/EXPIRED |
 
 ### Key columns on signals table
 
@@ -80,6 +82,9 @@ Changes since 20260401.7:
 | breakdown | TEXT | JSON `{bias, fxssi, ob, session}` scores for bar rendering |
 | quality | TEXT | A/B/C quality tier based on positive vs negative gate count |
 | score_trace | TEXT | Score computation path: Raw→Cap→Mult→Regime→Post |
+| tp1 | REAL | 1:1 R:R target (partial close level) |
+| tp2 | REAL | Full target (same as tp) |
+| tp3 | REAL | Stretch target (tp2 + 50% of SL distance) |
 
 ## Weighted structure scoring
 
@@ -301,6 +306,9 @@ Auto-categorised on every WIN/LOSS:
 | GET | /api/cb-calendar | CB meetings + consensus |
 | GET | /api/health | System health per symbol (full DB scan) |
 | GET | /health | Fast health check (no DB, <5ms) for Railway |
+| GET | /api/mtf-bias | Multi-timeframe structure direction for all symbols |
+| GET | /api/stats | Performance analytics (win rate, MFE, sessions, loss cats) |
+| GET | /api/journal | Trade journal — last 100 auto-generated entries |
 | GET | /api/db-status | DB file sizes + signal count |
 | GET | /api/db-recover | Restore from .bak if needed |
 | GET | /api/db-verify | Test persist protection |
