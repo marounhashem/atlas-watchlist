@@ -455,13 +455,19 @@ function initSchema() {
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
   try { db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL'); } catch(e) { console.error('[DB] Backfill error:', e.message); }
 
-  // NO automatic signal deletion on startup — previous cleanup queries were too aggressive
-  // and kept wiping all signals. Only log counts for debugging.
+  // ── WIPE GUARD — permanent signal protection (Rule #15) ─────────────────────
+  // NEVER delete signals on startup. Log counts only. If signals exist,
+  // all destructive operations are skipped. This prevents the data loss
+  // that happened 4 times on Apr 5-6 2026.
   try {
     const totalCount = db.exec("SELECT COUNT(*) FROM signals")[0]?.values?.[0]?.[0] || 0;
     const activeCount = db.exec("SELECT COUNT(*) FROM signals WHERE outcome='ACTIVE'")[0]?.values?.[0]?.[0] || 0;
     const openCount = db.exec("SELECT COUNT(*) FROM signals WHERE outcome='OPEN'")[0]?.values?.[0]?.[0] || 0;
-    console.log(`[DB] Signal counts: ${totalCount} total (${activeCount} ACTIVE, ${openCount} OPEN)`);
+    const intelCount = db.exec("SELECT COUNT(*) FROM market_intel WHERE expires_at > " + Date.now())[0]?.values?.[0]?.[0] || 0;
+    console.log(`[DB] WIPE-GUARD: ${totalCount} signals (${activeCount} ACTIVE, ${openCount} OPEN), ${intelCount} active intel`);
+    if (totalCount > 0) {
+      console.log('[DB] WIPE-GUARD: Signals present — all destructive startup operations SKIPPED');
+    }
   } catch(e) {}
 
   console.log('[DB] Schema initialised, weights seeded');
