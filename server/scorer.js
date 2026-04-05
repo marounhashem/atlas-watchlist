@@ -153,7 +153,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260403.7'; // structureCap enforcement, SL proximity noise fix, taxonomy backfill removed
+const SCORER_VERSION = '20260403.8'; // TP1/TP2/TP3 multi-level targets
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -2077,6 +2077,16 @@ function scoreSymbol(symbol) {
   // Recalculate RR after SL enforcement (SL may have been widened)
   rr = calcRR(entry, sl, tp, direction) || rr;
 
+  // ── Multi-level TP targets ────────────────────────────────────────────────
+  const slDist2 = Math.abs(entry - sl);
+  const tp1 = direction === 'LONG'
+    ? Math.round((entry + slDist2) * dp) / dp
+    : Math.round((entry - slDist2) * dp) / dp;
+  const tp2 = tp; // existing target unchanged
+  const tp3 = direction === 'LONG'
+    ? Math.round((tp2 + slDist2 * 0.5) * dp) / dp
+    : Math.round((tp2 - slDist2 * 0.5) * dp) / dp;
+
   // Diagnostic: catch suspiciously small TP values for indices
   if (cfg.assetClass === 'index' && tp < 10) {
     console.error(`[Scorer] ${symbol} suspicious TP=${tp} (entry=${entry}, sl=${sl}) — likely ATR calculation error`);
@@ -2102,7 +2112,7 @@ function scoreSymbol(symbol) {
 
   return {
     symbol, label: cfg.label, direction, score: macroAdjustedScore, verdict: macroVerdict,
-    entry, sl, tp, rr,
+    entry, sl, tp, tp1, tp2, tp3, rr,
     session: getSessionNow(),
     breakdown: bd,
     reasoning: finalReasoning,

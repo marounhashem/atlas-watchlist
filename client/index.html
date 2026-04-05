@@ -276,6 +276,8 @@
   .lv-entry{color:#9090b0;}
   .lv-sl{color:#c07080;}
   .lv-tp{color:#50b890;}
+  .lv-tp1{color:#c09040;}
+  .lv-tp3{color:#00e5a0;}
   .card-pills{display:flex;gap:5px;align-items:center;flex-wrap:wrap;}
   .card-pill{
     font-family:'JetBrains Mono',monospace;
@@ -1385,7 +1387,9 @@ function renderCard(sig, isPast) {
     + '<div class="card-lvl-grid">'
     + '<div class="card-lvl"><span class="card-lvl-name">Entry</span><span class="card-lvl-val lv-entry">'+(sig.entry||'—')+'</span></div>'
     + '<div class="card-lvl"><span class="card-lvl-name">Stop</span><span class="card-lvl-val lv-sl">'+(sig.sl||'—')+'</span></div>'
-    + '<div class="card-lvl"><span class="card-lvl-name">Target</span><span class="card-lvl-val lv-tp">'+(sig.tp||'—')+'</span></div>'
+    + '<div class="card-lvl"><span class="card-lvl-name">TP1</span><span class="card-lvl-val lv-tp1">'+(sig.tp1||'—')+'</span></div>'
+    + '<div class="card-lvl"><span class="card-lvl-name">TP2</span><span class="card-lvl-val lv-tp">'+(sig.tp2||sig.tp||'—')+'</span></div>'
+    + '<div class="card-lvl"><span class="card-lvl-name">TP3</span><span class="card-lvl-val lv-tp3">'+(sig.tp3||'—')+'</span></div>'
     + '</div>'
     + '<div class="card-pills">'
     + '<span class="card-pill">R:R '+(sig.rr||'—')+'</span>'
