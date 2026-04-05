@@ -4,7 +4,7 @@
   "description": "ATLAS//WATCHLIST — autonomous trading signal system",
   "main": "server/index.js",
   "scripts": {
-    "start": "node server/index.js",
+    "start": "node --max-old-space-size=4096 server/db-cleanup.js && node server/index.js",
     "dev": "nodemon server/index.js"
   },
   "dependencies": {

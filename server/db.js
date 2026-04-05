@@ -19,15 +19,9 @@ async function init() {
     if (fs.existsSync(DB_PATH)) {
       const stat = fs.statSync(DB_PATH);
 
-      // If DB file is over 50MB, it's bloated (market_data_history blobs caused 1.5GB)
-      // Skip the bloated file entirely — use backup which is pre-bloat
-      // Then overwrite the bloated file with the clean backup after loading
-      if (stat.size > 50 * 1024 * 1024) {
-        console.error(`[DB] DB file is ${Math.round(stat.size/1024/1024)}MB — BLOATED, skipping. Will use backup.`);
-        // Rename bloated file so backup recovery can overwrite
-        try { fs.renameSync(DB_PATH, DB_PATH + '.bloated'); } catch(e) {}
-        // Fall through to backup recovery below
-      } else if (stat.size > 0) {
+      // db-cleanup.js runs before this and handles bloated files (>50MB)
+      // By this point the DB should be clean and loadable
+      if (stat.size > 0) {
         try {
           const buf = fs.readFileSync(DB_PATH);
           db = new SQL.Database(buf);
