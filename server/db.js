@@ -449,6 +449,18 @@ function initSchema() {
   // Backfill cycle=NULL → 0 unconditionally (safe no-op if already done)
   try { db.run('UPDATE signals SET cycle=0 WHERE cycle IS NULL'); } catch(e) { console.error('[DB] Backfill error:', e.message); }
 
+  // Emergency cleanup: purge bloated market_data_history (was storing raw_payload blobs)
+  try {
+    const histCount = db.exec("SELECT COUNT(*) FROM market_data_history")[0]?.values?.[0]?.[0] || 0;
+    if (histCount > 50000) {
+      console.warn(`[DB] market_data_history has ${histCount} rows — purging to last 14 days`);
+      db.run('DELETE FROM market_data_history WHERE snapshot_ts < ?', [Date.now() - 14 * 86400000]);
+      // Also drop raw_payload and fxssi_analysis columns if they exist (they bloat the table)
+      // SQLite doesn't support DROP COLUMN, but we can just stop writing to them
+      console.log('[DB] History table cleaned up');
+    }
+  } catch(e) {}
+
   // Fix zero-SL signals — widen SL to minimum instead of expiring
   try {
     const { SYMBOLS } = require('./config');
@@ -1274,15 +1286,14 @@ function getAllCOTData() {
 }
 
 // ── Market data history — snapshots for backtesting ─────────────────────────
-// Snapshot all symbols at once — bulk insert for efficiency
+// Snapshot all symbols at once — store key fields only (NOT raw_payload/fxssi_analysis to prevent DB bloat)
 function snapshotAllMarketData() {
   try {
     const now = Date.now();
-    // Single INSERT...SELECT copies all symbols in one statement
-    db.run(`INSERT INTO market_data_history (symbol,snapshot_ts,close,high,low,rsi,bias,bias_score,structure,fxssi_long_pct,fxssi_short_pct,raw_payload,fxssi_analysis,ts)
-            SELECT symbol,?,close,high,low,rsi,bias,bias_score,structure,fxssi_long_pct,fxssi_short_pct,raw_payload,fxssi_analysis,ts FROM market_data`, [now]);
-    // Cleanup: keep 30 days only
-    db.run('DELETE FROM market_data_history WHERE snapshot_ts < ?', [now - 30 * 86400000]);
+    db.run(`INSERT INTO market_data_history (symbol,snapshot_ts,close,high,low,rsi,bias,bias_score,structure,fxssi_long_pct,fxssi_short_pct,ts)
+            SELECT symbol,?,close,high,low,rsi,bias,bias_score,structure,fxssi_long_pct,fxssi_short_pct,ts FROM market_data`, [now]);
+    // Cleanup: keep 14 days only (reduced from 30 to prevent bloat)
+    db.run('DELETE FROM market_data_history WHERE snapshot_ts < ?', [now - 14 * 86400000]);
   } catch(e) {}
 }
 
@@ -1291,10 +1302,10 @@ function snapshotMarketData(symbol) {
   try {
     const md = get('SELECT * FROM market_data WHERE symbol=? ORDER BY ts DESC LIMIT 1', [symbol]);
     if (!md) return;
-    run(`INSERT INTO market_data_history (symbol,snapshot_ts,close,high,low,rsi,bias,bias_score,structure,fxssi_long_pct,fxssi_short_pct,raw_payload,fxssi_analysis,ts)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    run(`INSERT INTO market_data_history (symbol,snapshot_ts,close,high,low,rsi,bias,bias_score,structure,fxssi_long_pct,fxssi_short_pct,ts)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       [symbol, Date.now(), md.close, md.high, md.low, md.rsi, md.bias, md.bias_score,
-       md.structure, md.fxssi_long_pct, md.fxssi_short_pct, md.raw_payload, md.fxssi_analysis, md.ts]);
+       md.structure, md.fxssi_long_pct, md.fxssi_short_pct, md.ts]);
   } catch(e) {}
 }
 
