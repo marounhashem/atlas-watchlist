@@ -467,13 +467,12 @@ function initSchema() {
     }
   } catch(e) {}
 
-  // Clean corrupted signals from DB restore (zero score, null entry, no data)
+  // Clean only clearly corrupted signals — NEVER delete ACTIVE signals automatically
   try {
-    const before = db.exec("SELECT COUNT(*) FROM signals WHERE (entry IS NULL OR entry = 0 OR score = 0 OR score IS NULL)")[0]?.values?.[0]?.[0] || 0;
-    if (before > 0) {
-      db.run("DELETE FROM signals WHERE (entry IS NULL OR entry = 0 OR score = 0 OR score IS NULL)");
-      persist();
-      console.log(`[DB] Cleaned ${before} corrupted signals (null entry/score)`);
+    const corrupted = db.exec("SELECT COUNT(*) FROM signals WHERE outcome IN ('OPEN','SKIP') AND score = 0 AND entry IS NULL")[0]?.values?.[0]?.[0] || 0;
+    if (corrupted > 0) {
+      db.run("DELETE FROM signals WHERE outcome IN ('OPEN','SKIP') AND score = 0 AND entry IS NULL");
+      console.log(`[DB] Cleaned ${corrupted} corrupted signals (OPEN/SKIP with null entry + zero score)`);
     }
   } catch(e) {}
 
@@ -498,6 +497,14 @@ function initSchema() {
 
   // Eastern→UTC fix is now handled at fetch time in forexCalendar.js easternToUTC()
   // Next calendar scrape (every 5min) will re-upsert all events with correct UTC times
+
+  // Log final signal count after all cleanup
+  try {
+    const finalCount = db.exec("SELECT COUNT(*) FROM signals")[0]?.values?.[0]?.[0] || 0;
+    const activeCount = db.exec("SELECT COUNT(*) FROM signals WHERE outcome='ACTIVE'")[0]?.values?.[0]?.[0] || 0;
+    const openCount = db.exec("SELECT COUNT(*) FROM signals WHERE outcome='OPEN'")[0]?.values?.[0]?.[0] || 0;
+    console.log(`[DB] After cleanup: ${finalCount} total signals (${activeCount} ACTIVE, ${openCount} OPEN)`);
+  } catch(e) {}
 
   console.log('[DB] Schema initialised, weights seeded');
 }
@@ -677,10 +684,11 @@ function expireOldVersionSignals(currentVersion) {
   // 30-minute grace period: recently fired signals survive version bumps
   const thirtyMinAgo = Date.now() - (30 * 60 * 1000);
   const stale = all(
-    "SELECT id FROM signals WHERE outcome='OPEN' AND (scorer_version IS NULL OR scorer_version != ?) AND ts < ?",
+    "SELECT id, symbol, outcome, scorer_version FROM signals WHERE outcome='OPEN' AND (scorer_version IS NULL OR scorer_version != ?) AND ts < ?",
     [currentVersion, thirtyMinAgo]
   );
   if (stale.length === 0) return 0;
+  console.log(`[DB] expireOldVersionSignals: found ${stale.length} OPEN signals from old versions:`, stale.map(s => `${s.symbol}(v:${s.scorer_version||'null'})`).join(', '));
   // Safety cap — refuse to expire more than 50 signals at once
   if (stale.length > 50) {
     console.error(`[DB] expireOldVersionSignals SAFETY ABORT — would expire ${stale.length} signals, limit is 50`);
