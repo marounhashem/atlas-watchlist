@@ -467,6 +467,11 @@ function initSchema() {
     }
   } catch(e) {}
 
+  // Clean corrupted signals from DB restore (zero score, null entry)
+  try {
+    db.run("DELETE FROM signals WHERE outcome IN ('OPEN','ACTIVE') AND (score = 0 OR entry IS NULL OR entry = 0)");
+  } catch(e) {}
+
   // Fix zero-SL signals — widen SL to minimum instead of expiring
   try {
     const { SYMBOLS } = require('./config');
