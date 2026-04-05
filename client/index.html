@@ -897,6 +897,14 @@
     </div>
   </div>
   <div class="panel">
+    <div class="ptitle">Signal heatmap</div>
+    <div id="signal-heatmap" style="display:grid;grid-template-columns:repeat(3,1fr);gap:3px;padding:4px 0;"></div>
+  </div>
+  <div class="panel" id="corr-section" style="display:none;">
+    <div class="ptitle">Correlation risk</div>
+    <div id="correlation-panel"></div>
+  </div>
+  <div class="panel">
     <div class="ptitle">Webhook</div>
     <div style="font-size:9px;color:var(--muted);line-height:2;">
       POST to:<br>
@@ -1167,6 +1175,8 @@ function renderSignals() {
   c.innerHTML=html;
   // Keep forex pane in sync if visible
   if (activeMainTab === 'forex') renderForexSignals();
+  renderHeatmap();
+  renderCorrelation();
 }
 
 function renderRecommendations(sig) {
@@ -2089,6 +2099,65 @@ function requestNotificationPermission() {
   }
 }
 requestNotificationPermission();
+
+// ── Signal heatmap + correlation risk ──────────────────────────────────────
+const ALL_SYMBOLS = ['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD','EURJPY','EURGBP','EURAUD','EURCHF','GBPJPY','GBPCHF','AUDJPY','GOLD','SILVER','OILWTI','BTCUSD','ETHUSD','US30','US100','US500','DE40','UK100','J225','HK50','CN50','COPPER','PLATINUM'];
+
+function renderHeatmap() {
+  const el = document.getElementById('signal-heatmap');
+  if (!el) return;
+  let html = '';
+  for (const sym of ALL_SYMBOLS) {
+    const sig = allSignals.filter(s => s.symbol === sym && !['WIN','LOSS','EXPIRED','IGNORED'].includes(s.outcome)).sort((a,b) => ({ACTIVE:0,OPEN:1}[a.outcome]??2) - ({ACTIVE:0,OPEN:1}[b.outcome]??2))[0];
+    if (!sig) {
+      html += '<div style="border-radius:3px;padding:4px 5px;display:flex;flex-direction:column;align-items:center;gap:1px;background:#0e0e1b;border:1px solid #1a1a28;" title="'+sym+' — no signal"><span style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;color:#444466;">'+sym.slice(0,6)+'</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:700;color:#252538;">--</span></div>';
+      continue;
+    }
+    const isAct = sig.outcome === 'ACTIVE';
+    const bg = isAct ? '#4d9eff15' : sig.verdict === 'PROCEED' ? '#00c88015' : '#ffb34015';
+    const bc = isAct ? '#4d9eff40' : sig.verdict === 'PROCEED' ? '#00c88030' : '#ffb34030';
+    const sc = isAct ? '#4d9eff' : sig.verdict === 'PROCEED' ? '#00c880' : '#ffb340';
+    html += '<div style="border-radius:3px;padding:4px 5px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:1px;background:'+bg+';border:1px solid '+bc+';" title="'+sym+' '+sig.direction+' '+sig.verdict+' '+sig.score+'" onclick="scrollToSignal(\''+sym+'\')"><span style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;color:#6868a0;">'+sym.slice(0,6)+'</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:700;color:'+sc+';">'+sig.score+'</span></div>';
+  }
+  el.innerHTML = html;
+}
+
+function scrollToSignal(sym) {
+  setFilter('ALL');
+  setTimeout(() => {
+    const cards = document.querySelectorAll('.card');
+    for (const c of cards) {
+      if (c.querySelector('.card-sym')?.textContent === sym) {
+        c.scrollIntoView({behavior:'smooth',block:'center'});
+        c.style.outline = '1px solid #4d9eff';
+        setTimeout(() => c.style.outline = 'none', 2000);
+        break;
+      }
+    }
+  }, 100);
+}
+
+function renderCorrelation() {
+  const el = document.getElementById('correlation-panel');
+  const sec = document.getElementById('corr-section');
+  if (!el || !sec) return;
+  const active = allSignals.filter(s => s.outcome === 'ACTIVE');
+  if (active.length < 2) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  const LONG_SYM = active.filter(s => s.direction === 'LONG').map(s => s.symbol);
+  const SHORT_SYM = active.filter(s => s.direction === 'SHORT').map(s => s.symbol);
+  const risks = [];
+  const jpyShort = LONG_SYM.filter(s => ['USDJPY','EURJPY','GBPJPY','AUDJPY'].includes(s));
+  if (jpyShort.length >= 2) risks.push({label:'JPY short ×'+jpyShort.length, symbols:jpyShort});
+  const eurLong = LONG_SYM.filter(s => ['EURUSD','EURJPY','EURGBP','EURCHF','EURAUD'].includes(s));
+  if (eurLong.length >= 2) risks.push({label:'EUR long ×'+eurLong.length, symbols:eurLong});
+  const gbpLong = LONG_SYM.filter(s => ['GBPUSD','GBPJPY','GBPCHF'].includes(s));
+  if (gbpLong.length >= 2) risks.push({label:'GBP long ×'+gbpLong.length, symbols:gbpLong});
+  const idxShort = SHORT_SYM.filter(s => ['US30','US100','US500','DE40','UK100'].includes(s));
+  if (idxShort.length >= 2) risks.push({label:'Index short ×'+idxShort.length, symbols:idxShort});
+  if (!risks.length) { el.innerHTML = '<div style="font-size:10px;color:#252538;padding:4px 0;">✓ No correlated exposure</div>'; return; }
+  el.innerHTML = risks.map(r => '<div style="margin-bottom:6px;"><div style="font-size:9px;font-weight:700;color:#ffb340;letter-spacing:.05em;margin-bottom:2px;">⚠ '+r.label+'</div><div style="font-size:9px;color:#555575;">'+r.symbols.join(' · ')+'</div><div style="font-size:8px;color:#333348;margin-top:1px;">treat as one position</div></div>').join('');
+}
 
 function updateClock() {
   const uae=new Date(Date.now()+4*3600000);
