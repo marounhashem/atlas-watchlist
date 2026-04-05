@@ -1690,35 +1690,48 @@ app.get('/api/calendar-debug', (req, res) => {
 });
 
 // DB recovery — restore from .bak file if signals were lost
-app.get('/api/db-recover', (req, res) => {
+app.get('/api/db-recover', async (req, res) => {
   try {
     const dbPath = process.env.DB_PATH || path.join(__dirname, '../data/atlas.db');
-    const bakPath = dbPath + '.bak';
-    if (fs.existsSync(bakPath) && fs.statSync(bakPath).size > 0) {
-      const initSqlJs = require('sql.js');
-      initSqlJs().then(SQL => {
-        const bakData = fs.readFileSync(bakPath);
-        const bakDb = new SQL.Database(bakData);
-        let bakSignals = 0;
-        try {
-          const row = bakDb.exec("SELECT COUNT(*) as c FROM signals")[0];
-          bakSignals = row?.values?.[0]?.[0] || 0;
-        } catch(e) {}
-        const currentSignals = db.getAllSignals(1000).length;
-        if (bakSignals > currentSignals) {
-          // Backup has more data — restore it
-          fs.copyFileSync(bakPath, dbPath);
-          res.json({ ok: true, recovered: true, bakSignals, currentSignals, message: `Restored from .bak (${bakSignals} signals). Restart server to load.` });
-        } else {
-          res.json({ ok: false, bakSignals, currentSignals, message: 'Backup has same or fewer signals than current DB. No recovery needed.' });
-        }
-        bakDb.close();
-      });
+    const dataDir = path.dirname(dbPath);
+    const initSqlJs = require('sql.js');
+    const SQL = await initSqlJs();
+
+    // Scan ALL files in data directory for potential backups
+    const files = fs.existsSync(dataDir) ? fs.readdirSync(dataDir) : [];
+    const candidates = files
+      .filter(f => f.endsWith('.db') || f.endsWith('.bak') || f.endsWith('.bloated'))
+      .map(f => ({ name: f, path: path.join(dataDir, f), size: fs.statSync(path.join(dataDir, f)).size }))
+      .filter(f => f.size > 1000 && f.size < 50 * 1024 * 1024) // skip empty and bloated (>50MB)
+      .sort((a, b) => b.size - a.size);
+
+    const currentSignals = db.getAllSignals(1000).length;
+    const results = [];
+
+    for (const c of candidates) {
+      try {
+        const buf = fs.readFileSync(c.path);
+        const testDb = new SQL.Database(buf);
+        const check = testDb.exec("PRAGMA integrity_check")[0]?.values?.[0]?.[0];
+        let signals = 0, intel = 0;
+        try { signals = testDb.exec("SELECT COUNT(*) FROM signals")[0]?.values?.[0]?.[0] || 0; } catch(e) {}
+        try { intel = testDb.exec("SELECT COUNT(*) FROM market_intel")[0]?.values?.[0]?.[0] || 0; } catch(e) {}
+        results.push({ name: c.name, sizeKB: Math.round(c.size/1024), integrity: check, signals, intel });
+        testDb.close();
+      } catch(e) {
+        results.push({ name: c.name, sizeKB: Math.round(c.size/1024), error: e.message });
+      }
+    }
+
+    // Find best backup (most signals)
+    const best = results.filter(r => r.integrity === 'ok' && r.signals > currentSignals).sort((a, b) => b.signals - a.signals)[0];
+
+    if (best && req.query.restore === 'true') {
+      const bestPath = path.join(dataDir, best.name);
+      fs.copyFileSync(bestPath, dbPath);
+      res.json({ ok: true, restored: best.name, signals: best.signals, intel: best.intel, message: 'Restored. Restart server to load.' });
     } else {
-      // Check for daily backups
-      const dataDir = path.dirname(dbPath);
-      const backups = fs.readdirSync(dataDir).filter(f => f.includes('_backup_')).sort().reverse();
-      res.json({ ok: false, message: 'No .bak file found', dailyBackups: backups });
+      res.json({ currentSignals, backups: results, best: best || null, hint: best ? 'Add ?restore=true to restore from ' + best.name : 'No backup has more signals than current DB' });
     }
   } catch(e) {
     res.json({ ok: false, error: e.message });
