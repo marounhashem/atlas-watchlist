@@ -467,9 +467,14 @@ function initSchema() {
     }
   } catch(e) {}
 
-  // Clean corrupted signals from DB restore (zero score, null entry)
+  // Clean corrupted signals from DB restore (zero score, null entry, no data)
   try {
-    db.run("DELETE FROM signals WHERE outcome IN ('OPEN','ACTIVE') AND (score = 0 OR entry IS NULL OR entry = 0)");
+    const before = db.exec("SELECT COUNT(*) FROM signals WHERE (entry IS NULL OR entry = 0 OR score = 0 OR score IS NULL)")[0]?.values?.[0]?.[0] || 0;
+    if (before > 0) {
+      db.run("DELETE FROM signals WHERE (entry IS NULL OR entry = 0 OR score = 0 OR score IS NULL)");
+      persist();
+      console.log(`[DB] Cleaned ${before} corrupted signals (null entry/score)`);
+    }
   } catch(e) {}
 
   // Fix zero-SL signals — widen SL to minimum instead of expiring
