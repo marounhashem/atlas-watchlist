@@ -1950,15 +1950,17 @@ function closeModal() {
 function forceCloseSignal(cardId) {
   const sig = allSignals.find(s => String(s.id||s.symbol) === String(cardId));
   if (!sig) return;
+  const sigId = sig.id;
   const label = sig.symbol ? sig.symbol + ' ' + sig.direction : 'Signal #' + cardId;
   showActionModal('Force Close — ' + label, 'Close trade at current price. Records as WIN or LOSS.', async (reason) => {
     try {
-      const res = await fetch('/api/signal-force-close', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:sig.id,reason})});
+      const res = await fetch('/api/signal-force-close', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:sigId,reason})});
       const data = await res.json();
       if (data.ok) {
         showToast('Closed: ' + data.outcome + ' ' + (data.pnl_pct > 0 ? '+' : '') + data.pnl_pct + '%', data.outcome === 'WIN' ? 'win' : 'loss');
-        sig.outcome = data.outcome; sig.pnl_pct = data.pnl_pct;
-        setTimeout(renderSignals, 2000);
+        // Remove from allSignals and move to pastSignals
+        allSignals = allSignals.filter(s => s.id !== sigId);
+        renderSignals();
       }
     } catch(e) { showToast('Close failed: ' + e.message); }
   });
@@ -1967,11 +1969,13 @@ function forceCloseSignal(cardId) {
 function ignoreSignal(cardId) {
   const sig = allSignals.find(s => String(s.id||s.symbol) === String(cardId));
   if (!sig) return;
+  const sigId = sig.id;
   const label = sig.symbol ? sig.symbol + ' ' + (sig.direction||'') : 'Signal #' + cardId;
   showActionModal('Ignore — ' + label, 'Signal marked as not taken. Removed from dashboard. Does not affect win rate.', async (reason) => {
     try {
-      await fetch('/api/signal-ignore', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:sig.id,reason})});
-      sig.outcome = 'EXPIRED';
+      await fetch('/api/signal-ignore', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:sigId,reason})});
+      // Remove from allSignals immediately
+      allSignals = allSignals.filter(s => s.id !== sigId);
       renderSignals();
       showToast('Signal ignored — removed from view');
     } catch(e) {}
