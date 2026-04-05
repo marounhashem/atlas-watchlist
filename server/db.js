@@ -18,11 +18,20 @@ async function init() {
     let loaded = false;
     if (fs.existsSync(DB_PATH)) {
       const stat = fs.statSync(DB_PATH);
-      if (stat.size > 0) {
+
+      // If DB file is over 50MB, it's bloated (market_data_history blobs caused 1.5GB)
+      // Skip the bloated file entirely — use backup which is pre-bloat
+      // Then overwrite the bloated file with the clean backup after loading
+      if (stat.size > 50 * 1024 * 1024) {
+        console.error(`[DB] DB file is ${Math.round(stat.size/1024/1024)}MB — BLOATED, skipping. Will use backup.`);
+        // Rename bloated file so backup recovery can overwrite
+        try { fs.renameSync(DB_PATH, DB_PATH + '.bloated'); } catch(e) {}
+        // Fall through to backup recovery below
+      } else if (stat.size > 0) {
         try {
           const buf = fs.readFileSync(DB_PATH);
           db = new SQL.Database(buf);
-          // Integrity check — detect corruption before proceeding
+          // Integrity check
           const check = db.exec("PRAGMA integrity_check")[0];
           const result = check?.values?.[0]?.[0];
           if (result !== 'ok') {
@@ -147,20 +156,23 @@ function persist() {
   }
 
   // Layer 2: check disk file is not larger than memory export
+  // If disk is bloated (>100MB), DON'T try to reload — it will OOM
+  // Instead just skip persist and let the current in-memory DB continue
   try {
     if (fs.existsSync(DB_PATH)) {
       const diskSize = fs.statSync(DB_PATH).size;
       const memData = db.export();
       if (diskSize > 0 && memData.length > 0 && diskSize > memData.length * 1.5) {
-        console.error(`[DB] ABORT persist — disk (${Math.round(diskSize/1024)}KB) larger than memory (${Math.round(memData.length/1024)}KB). Reloading from disk.`);
-        const diskData = fs.readFileSync(DB_PATH);
-        db = new SQL.Database(diskData);
-        initSchema();
-        try {
-          const row = db.exec("SELECT COUNT(*) as c FROM signals")[0];
-          _startupSignalCount = row?.values?.[0]?.[0] || 0;
-        } catch(e) {}
-        return;
+        // If disk is much larger, it's either bloated or memory DB lost data
+        // If memory has signals, it's safe — disk was just bloated with history
+        const memSignals = (() => { try { return db.exec("SELECT COUNT(*) FROM signals")[0]?.values?.[0]?.[0] || 0; } catch(e) { return 0; } })();
+        if (memSignals > 0) {
+          console.warn(`[DB] Disk (${Math.round(diskSize/1024)}KB) > memory (${Math.round(memData.length/1024)}KB) but memory has ${memSignals} signals — overwriting disk with clean DB`);
+          // Safe to overwrite — memory DB has real data, disk was just bloated
+        } else {
+          console.error(`[DB] ABORT persist — disk (${Math.round(diskSize/1024)}KB) larger than memory (${Math.round(memData.length/1024)}KB) and memory has 0 signals. NOT overwriting.`);
+          return;
+        }
       }
     }
   } catch(e) {}
