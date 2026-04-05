@@ -964,6 +964,11 @@ function handleMessage(msg) {
   if (msg.type==='INIT') {
     allSignals  = msg.signals||[];
     pastSignals = msg.pastSignals||[];
+    // Default to ACTIVE tab if any active positions exist
+    if (activeFilter === 'ALL') {
+      const hasActive = allSignals.some(s => s.outcome === 'ACTIVE');
+      if (hasActive) setFilter('ACTIVE');
+    }
     updatePastCount();
     renderSignals(); fetchStats(); fetchLearningLog(); fetchMarketStatus(); fetchRegime();
     document.getElementById('symbol-count').textContent=(msg.symbols||[]).length+' symbols';
