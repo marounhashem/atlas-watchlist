@@ -2215,9 +2215,10 @@ cron.schedule('* * * * *', async () => {
   try {
     const results = scoreAllPriority();
     _lastScoringResults = results; // cache for instant HTTP response
-    // Snapshot market data every 5 minutes (not every minute — prevents DB bloat)
+    // Snapshot market data every 5 minutes — offset to :03/:08/:13/… to avoid
+    // colliding with the FXSSI 20-min scrape at :01/:21/:41
     const minNow = new Date().getMinutes();
-    if (minNow % 5 === 0) { try { db.snapshotAllMarketData(); } catch(e) {} }
+    if (minNow % 5 === 3) { try { db.snapshotAllMarketData(); } catch(e) {} }
     const proceeds = results.filter(r => r.verdict === 'PROCEED');
     const watches  = results.filter(r => r.verdict === 'WATCH');
 
