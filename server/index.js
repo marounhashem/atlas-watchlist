@@ -2821,7 +2821,7 @@ server.listen(PORT, () => {
           { content: 'Nikkei Futures at critical technical juncture. Watch for BOJ policy signals.', symbol: 'J225', expiresInHours: 48 },
         ];
         for (const item of seed) {
-          db.insertMarketIntel({ content: item.content, symbol: item.symbol, expires_at: Date.now() + item.expiresInHours * 3600000 });
+          db.insertMarketIntel(item.content, item.symbol, null, item.expiresInHours);
         }
         db.persist();
         console.log(`[Startup] Seeded ${seed.length} intel items`);
