@@ -73,7 +73,7 @@ const MARKET_HOURS = {
 // Forex pairs with affected currencies may have thin liquidity on Easter Monday
 const BANK_HOLIDAYS = {
   '2026-04-03': ['GOLD','SILVER','OILWTI','COPPER','PLATINUM','UK100','DE40'], // Good Friday
-  '2026-04-06': ['COPPER','PLATINUM','UK100','DE40'], // Easter Monday — EU/LME only, CME+forex open
+  // Easter Monday 2026-04-06 — all symbols trading, removed entirely
   '2026-05-01': ['DE40'], // Labour Day EU
   '2026-05-25': ['UK100'], // Spring Bank Holiday UK
   '2026-07-04': ['US30','US100','US500'], // Independence Day US
