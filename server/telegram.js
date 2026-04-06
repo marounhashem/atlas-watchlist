@@ -4,26 +4,29 @@
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
-async function sendMessage(text, parseMode = 'HTML') {
+async function sendMessage(text, parseMode = 'HTML', retries = 2) {
   if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) return false;
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
-        text,
-        parse_mode: parseMode,
-        disable_web_page_preview: true
-      })
-    });
-    const data = await res.json();
-    if (!data.ok) console.error('[Telegram] Send error:', data.description);
-    return data.ok;
-  } catch(e) {
-    console.error('[Telegram] Error:', e.message);
-    return false;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: TELEGRAM_CHAT_ID,
+          text,
+          parse_mode: parseMode,
+          disable_web_page_preview: true
+        })
+      });
+      const data = await res.json();
+      if (!data.ok) console.error('[Telegram] Send error:', data.description);
+      return data.ok;
+    } catch(e) {
+      console.error(`[Telegram] fetch failed (attempt ${attempt + 1}/${retries + 1}):`, e.message);
+      if (attempt < retries) await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+    }
   }
+  return false;
 }
 
 // Signal alert — fires when a new PROCEED signal is saved
@@ -87,9 +90,32 @@ async function sendRecAlert(signal, rec) {
   return sendMessage(text);
 }
 
-// Morning brief
+// Morning brief — splits into multiple messages if >4096 chars (Telegram limit)
 async function sendMorningBrief(brief) {
-  return sendMessage(brief, 'HTML');
+  if (!brief) return false;
+  const MAX = 4000; // leave margin for safety
+  if (brief.length <= MAX) return sendMessage(brief, 'HTML');
+
+  // Split on double-newline section boundaries to keep sections intact
+  const sections = brief.split('\n\n');
+  const chunks = [];
+  let current = '';
+  for (const section of sections) {
+    if (current.length + section.length + 2 > MAX && current.length > 0) {
+      chunks.push(current.trim());
+      current = '';
+    }
+    current += (current ? '\n\n' : '') + section;
+  }
+  if (current.trim()) chunks.push(current.trim());
+
+  let allOk = true;
+  for (let i = 0; i < chunks.length; i++) {
+    const ok = await sendMessage(chunks[i], 'HTML');
+    if (!ok) allOk = false;
+    if (i < chunks.length - 1) await new Promise(r => setTimeout(r, 300)); // rate limit
+  }
+  return allOk;
 }
 
 // Health alert

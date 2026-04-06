@@ -167,7 +167,13 @@ function getMarketStatus() {
 function getClosedReason(symbol) {
   const now = new Date();
   const utcDay = now.getUTCDay();
-  if (utcDay === 0 || utcDay === 6) return 'Weekend';
+  if (utcDay === 6) return 'Weekend';
+  if (utcDay === 0) {
+    const utcHour = now.getUTCHours();
+    // Sunday 22:00+ is trading week start — show "before open" not "Weekend"
+    if (utcHour >= 22) return 'Before weekly open';
+    return 'Weekend';
+  }
   return 'Outside market hours';
 }
 

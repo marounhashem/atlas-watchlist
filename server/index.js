@@ -2300,10 +2300,11 @@ cron.schedule('0 5 * * *', async () => {
   console.log('[Telegram] Sending morning brief...');
   try {
     const brief = await buildMorningBrief();
-    await sendMorningBrief(brief);
-    console.log('[Telegram] Morning brief sent');
+    console.log(`[Telegram] Morning brief built — ${brief.length} chars`);
+    const ok = await sendMorningBrief(brief);
+    console.log(`[Telegram] Morning brief ${ok ? 'sent' : 'FAILED to send'}`);
   } catch(e) {
-    console.error('[Telegram] Morning brief error:', e.message);
+    console.error('[Telegram] Morning brief error:', e.message, e.stack);
   }
 });
 
