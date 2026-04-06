@@ -180,9 +180,14 @@ function processPineWebhook(data) {
   // DXY — reference signal only, do not score
   if (sym === 'DXY') {
     try {
-      const trend = data.bias > 0 ? 'bullish' : data.bias < 0 ? 'bearish' : 'neutral';
-      db.upsertDXY({ close: data.close, bias: data.bias, ema_score: data.biasScore, trend });
-      console.log(`[Webhook] DXY reference updated: ${data.close} trend:${trend}`);
+      // bias may arrive as number or object {score, bull, bear} from Pine
+      const rawBias = typeof data.bias === 'object' && data.bias !== null ? data.bias.score : data.bias;
+      const biasNum = Number(rawBias) || 0;
+      const trend = biasNum > 0 ? 'bullish' : biasNum < 0 ? 'bearish' : 'neutral';
+      const close = data.close || data.price;
+      if (close == null) { console.warn('[Webhook] DXY missing close/price:', JSON.stringify(data)); return; }
+      db.upsertDXY({ close, bias: biasNum, ema_score: data.biasScore || 0, trend });
+      console.log(`[Webhook] DXY reference updated: ${close} bias:${biasNum} trend:${trend}`);
     } catch(e) { console.error('[Webhook] DXY error:', e.message); }
     return;
   }

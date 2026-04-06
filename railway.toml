@@ -1,5 +1,6 @@
 [build]
 builder = "NIXPACKS"
+installCommand = "npm install --omit=dev"
 
 [deploy]
 region = "us-west1"
