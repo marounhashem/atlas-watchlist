@@ -192,13 +192,52 @@ function getClosedReason(symbol) {
 
 function minutesUntilOpen(symbol) {
   if (isMarketOpen(symbol)) return 0;
-  const probe = new Date();
-  for (let i = 1; i <= 72 * 60; i++) {
-    probe.setTime(Date.now() + i * 60000);
-    const d = probe.getUTCDay();
-    const h = probe.getUTCHours();
-    const m = probe.getUTCMinutes();
-    if (_isOpenAt(symbol, d, h * 60 + m)) return i;
+  const cfg = MARKET_HOURS[symbol];
+  if (!cfg) return null;
+  if (cfg.alwaysOpen) return 0;
+
+  const now = new Date();
+  const utcDay = now.getUTCDay();
+  const utcMins = now.getUTCHours() * 60 + now.getUTCMinutes();
+
+  // Calculate directly from weeklyOpen config instead of brute-force probing
+  if (cfg.weeklyOpen) {
+    const openDay = cfg.weeklyOpen.day;
+    const openMins = cfg.weeklyOpen.hour * 60 + (cfg.weeklyOpen.minute || 0);
+
+    // Days until open day (wrapping around week)
+    let daysUntil = (openDay - utcDay + 7) % 7;
+
+    // Same day: check if we're before open or in a daily break
+    if (daysUntil === 0) {
+      if (utcMins < openMins) return openMins - utcMins;
+      // In daily break — find break end
+      if (cfg.dailyBreak) {
+        const breakEnd = cfg.dailyBreak.end.hour * 60 + cfg.dailyBreak.end.minute;
+        if (utcMins < breakEnd) return breakEnd - utcMins;
+      }
+      // Past close on Friday — next week
+      daysUntil = 7;
+    }
+
+    // Weekend: jump to open day
+    if (utcDay === 6 || utcDay === 0) {
+      if (utcDay === 6) daysUntil = (openDay === 0) ? 1 : (openDay + 1); // Sat → Sun or Mon+
+      if (utcDay === 0) {
+        if (openDay === 0 && utcMins < openMins) return openMins - utcMins;
+        if (openDay === 0 && utcMins >= openMins) {
+          // Sunday after open but in daily break
+          if (cfg.dailyBreak) {
+            const breakEnd = cfg.dailyBreak.end.hour * 60 + cfg.dailyBreak.end.minute;
+            if (utcMins < breakEnd) return breakEnd - utcMins;
+          }
+          return null;
+        }
+        daysUntil = 1; // Monday
+      }
+    }
+
+    return daysUntil * 1440 + (openMins - utcMins);
   }
   return null;
 }

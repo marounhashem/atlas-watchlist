@@ -6,6 +6,7 @@ const WebSocket = require('ws');
 const cron = require('node-cron');
 const path = require('path');
 const fs = require('fs');
+const zlib = require('zlib');
 
 const db = require('./db');
 const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome, updatePaperOutcome, getPaperTradeStats, retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals } = db;
@@ -114,6 +115,22 @@ app.use((req, res, next) => {
     }
     next();
   });
+});
+// Gzip compression for static files + JSON responses (159KB HTML → ~30KB)
+app.use((req, res, next) => {
+  if (!req.headers['accept-encoding']?.includes('gzip')) return next();
+  const origJson = res.json.bind(res);
+  res.json = (body) => {
+    const raw = JSON.stringify(body);
+    if (raw.length < 1024) return origJson(body); // skip small responses
+    res.setHeader('Content-Encoding', 'gzip');
+    res.setHeader('Content-Type', 'application/json');
+    zlib.gzip(raw, (err, compressed) => {
+      if (err) return origJson(body);
+      res.end(compressed);
+    });
+  };
+  next();
 });
 app.use(express.static(path.join(__dirname, '../client')));
 
@@ -572,12 +589,18 @@ app.post('/api/signal-ignore', (req, res) => {
   res.json({ ok: true });
 });
 
+// Cache market status for 60s — minutesUntilOpen doesn't need per-second precision
+let _marketStatusCache = null;
+let _marketStatusTs = 0;
 app.get('/api/market-status', (req, res) => {
+  const now = Date.now();
+  if (_marketStatusCache && now - _marketStatusTs < 60000) return res.json(_marketStatusCache);
   const status = getMarketStatus();
-  // Attach minutes until open for closed symbols
   for (const [sym, s] of Object.entries(status)) {
     if (!s.open) s.minutesUntilOpen = minutesUntilOpen(sym);
   }
+  _marketStatusCache = status;
+  _marketStatusTs = now;
   res.json(status);
 });
 
