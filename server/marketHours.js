@@ -73,8 +73,7 @@ const MARKET_HOURS = {
 // Forex pairs with affected currencies may have thin liquidity on Easter Monday
 const BANK_HOLIDAYS = {
   '2026-04-03': ['GOLD','SILVER','OILWTI','COPPER','PLATINUM','UK100','DE40'], // Good Friday
-  '2026-04-06': ['GOLD','SILVER','OILWTI','COPPER','PLATINUM','UK100','DE40',
-                 'EURGBP','GBPJPY','GBPCHF','GBPUSD','EURUSD','EURJPY','EURCHF','EURAUD'], // Easter Monday
+  '2026-04-06': ['COPPER','PLATINUM','UK100','DE40'], // Easter Monday — EU/LME only, CME+forex open
   '2026-05-01': ['DE40'], // Labour Day EU
   '2026-05-25': ['UK100'], // Spring Bank Holiday UK
   '2026-07-04': ['US30','US100','US500'], // Independence Day US
@@ -89,7 +88,9 @@ const BANK_HOLIDAYS = {
 function isBankHoliday(symbol) {
   const today = new Date().toISOString().slice(0, 10);
   const affected = BANK_HOLIDAYS[today] || [];
-  return affected.includes(symbol);
+  const hit = affected.includes(symbol);
+  if (hit) console.log(`[Holiday] ${symbol} flagged as bank holiday — ${today} (${getBankHolidayName() || 'unnamed'})`);
+  return hit;
 }
 
 function getBankHolidayName() {
