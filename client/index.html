@@ -6,7 +6,6 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <title>ATLAS // WATCHLIST</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
 
   *{box-sizing:border-box;margin:0;padding:0;}
   :root{
@@ -979,6 +978,7 @@ document.getElementById('account-size').addEventListener('change', e => {
 });
 
 let _wsBackoff = 1000;
+let _initLoaded = false; // prevent duplicate data fetches on initial load
 function connect() {
   ws = new WebSocket(WS_URL);
   ws.onopen = () => {
@@ -986,8 +986,10 @@ function connect() {
     document.getElementById('conn-status').textContent = 'LIVE';
     document.getElementById('dot').style.background = 'var(--proceed)';
     document.getElementById('webhook-url').textContent = location.origin+'/webhook/pine';
-    // Refetch signals on reconnect — don't wait for next broadcast
-    fetch('/api/signals').then(r=>r.json()).then(data=>{if(data?.length){allSignals=data;renderSignals();}}).catch(()=>{});
+    // Only refetch on reconnect, not initial connect (WS INIT handles that)
+    if (_initLoaded) {
+      fetch('/api/signals').then(r=>r.json()).then(data=>{if(data?.length){allSignals=data;renderSignals();}}).catch(()=>{});
+    }
   };
   ws.onmessage = e => handleMessage(JSON.parse(e.data));
   ws.onclose = () => {
@@ -1000,6 +1002,7 @@ function connect() {
 
 function handleMessage(msg) {
   if (msg.type==='INIT') {
+    _initLoaded = true;
     allSignals  = msg.signals||[];
     pastSignals = msg.pastSignals||[];
     // Default to ACTIVE tab if any active positions exist
@@ -1990,8 +1993,8 @@ async function logOutcome(signalId, outcome) {
   renderSignals(); fetchStats();
 }
 
-async function fetchStats() {
-  const signals = await fetch('/api/signals').then(r=>r.json()).catch(()=>[]);
+function fetchStats() {
+  const signals = allSignals || [];
   const by={};
   for(const s of signals){
     if(s.outcome==='OPEN') continue;
@@ -2140,9 +2143,18 @@ const ALL_SYMBOLS = ['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDU
 function renderHeatmap() {
   const el = document.getElementById('signal-heatmap');
   if (!el) return;
+  // Build symbol→signal map once (O(n)) instead of filtering per symbol (O(n×m))
+  const sigMap = {};
+  for (const s of allSignals) {
+    if (['WIN','LOSS','EXPIRED','IGNORED'].includes(s.outcome)) continue;
+    const prev = sigMap[s.symbol];
+    if (!prev) { sigMap[s.symbol] = s; continue; }
+    const rank = o => ({ACTIVE:0,OPEN:1}[o]??2);
+    if (rank(s.outcome) < rank(prev.outcome)) sigMap[s.symbol] = s;
+  }
   let html = '';
   for (const sym of ALL_SYMBOLS) {
-    const sig = allSignals.filter(s => s.symbol === sym && !['WIN','LOSS','EXPIRED','IGNORED'].includes(s.outcome)).sort((a,b) => ({ACTIVE:0,OPEN:1}[a.outcome]??2) - ({ACTIVE:0,OPEN:1}[b.outcome]??2))[0];
+    const sig = sigMap[sym];
     if (!sig) {
       html += '<div style="border-radius:3px;padding:4px 5px;display:flex;flex-direction:column;align-items:center;gap:1px;background:#0e0e1b;border:1px solid #1a1a28;" title="'+sym+' — no signal"><span style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;color:#444466;">'+sym.slice(0,6)+'</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:700;color:#252538;">--</span></div>';
       continue;
@@ -2329,20 +2341,28 @@ updateClock();
   if (c) c.innerHTML = Array(3).fill(`<div style="background:var(--surface,#0f0f18);border:1px solid var(--border,#2a2a3a);border-radius:10px;padding:20px;margin-bottom:10px;height:160px;position:relative;overflow:hidden;"><div style="position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,#ffffff08,transparent);animation:shimmer 1.5s infinite;"></div></div>`).join('');
   connect();
 
-  // Step 2: HTTP fetch (parallel) — non-blocking, populates while WS connects
-  try {
-    const [sigRes, pastRes] = await Promise.all([
-      fetch('/api/signals').then(r=>r.json()).catch(()=>[]),
-      fetch('/api/past-signals').then(r=>r.json()).catch(()=>[])
-    ]);
-    console.log('[Init] signals:', sigRes?.length, 'past:', pastRes?.length);
-    if (sigRes?.length > 0) { allSignals = sigRes; renderSignals(); }
-    else if (c) c.innerHTML = '<div class="empty">Waiting for signals...<br>Scoring runs every minute.</div>';
-    if (pastRes?.length > 0) { pastSignals = pastRes; updatePastCount(); }
-  } catch(e) { console.error('Initial load error:', e); }
+  // Step 2: HTTP fetch — fallback if WS INIT hasn't arrived yet (e.g. slow WS handshake)
+  // Wait briefly for WS INIT to arrive first, then fetch only if needed
+  await new Promise(r => setTimeout(r, 300));
+  if (!_initLoaded) {
+    try {
+      const [sigRes, pastRes] = await Promise.all([
+        fetch('/api/signals').then(r=>r.json()).catch(()=>[]),
+        fetch('/api/past-signals').then(r=>r.json()).catch(()=>[])
+      ]);
+      console.log('[Init] HTTP fallback — signals:', sigRes?.length, 'past:', pastRes?.length);
+      if (!_initLoaded) { // double-check WS didn't arrive while fetching
+        if (sigRes?.length > 0) { allSignals = sigRes; renderSignals(); }
+        else if (c) c.innerHTML = '<div class="empty">Waiting for signals...<br>Scoring runs every minute.</div>';
+        if (pastRes?.length > 0) { pastSignals = pastRes; updatePastCount(); }
+      }
+    } catch(e) { console.error('Initial load error:', e); }
+  }
 
-  // Step 3: secondary data — deferred so it doesn't compete with signals fetch
-  setTimeout(() => { fetchStats(); fetchLearningLog(); fetchMarketStatus(); fetchRegime(); }, 500);
+  // Step 3: secondary data — deferred so it doesn't compete with signals
+  if (!_initLoaded) {
+    setTimeout(() => { fetchStats(); fetchLearningLog(); fetchMarketStatus(); fetchRegime(); }, 200);
+  }
 })();
 
 // ── Main tab switcher ──────────────────────────────────────────────────────

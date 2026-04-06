@@ -1,6 +1,7 @@
 console.log('[Startup] 1 — process started', Date.now());
 require('dotenv').config();
 const express = require('express');
+const compression = require('compression');
 const http = require('http');
 const WebSocket = require('ws');
 const cron = require('node-cron');
@@ -115,7 +116,12 @@ app.use((req, res, next) => {
     next();
   });
 });
-app.use(express.static(path.join(__dirname, '../client')));
+// Gzip/deflate compression — 156KB HTML → ~30KB over the wire
+app.use(compression());
+app.use(express.static(path.join(__dirname, '../client'), {
+  maxAge: '10m',              // cache static assets for 10 minutes
+  etag: true
+}));
 
 console.log('[Startup] 3 — Express + WS ready', Date.now());
 
