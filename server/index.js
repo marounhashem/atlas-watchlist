@@ -10,7 +10,7 @@ const zlib = require('zlib');
 
 const db = require('./db');
 const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome, updatePaperOutcome, getPaperTradeStats, retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals } = db;
-const { isMarketOpen, getMarketStatus, minutesUntilOpen } = require('./marketHours');
+const { isMarketOpen, getMarketStatus } = require('./marketHours');
 const { scoreAllPriority, saveSignal } = require('./scorer');
 const { checkOutcomes } = require('./outcome');
 const { runLearningCycle } = require('./learner');
@@ -589,19 +589,8 @@ app.post('/api/signal-ignore', (req, res) => {
   res.json({ ok: true });
 });
 
-// Cache market status for 60s — minutesUntilOpen doesn't need per-second precision
-let _marketStatusCache = null;
-let _marketStatusTs = 0;
 app.get('/api/market-status', (req, res) => {
-  const now = Date.now();
-  if (_marketStatusCache && now - _marketStatusTs < 60000) return res.json(_marketStatusCache);
-  const status = getMarketStatus();
-  for (const [sym, s] of Object.entries(status)) {
-    if (!s.open) s.minutesUntilOpen = minutesUntilOpen(sym);
-  }
-  _marketStatusCache = status;
-  _marketStatusTs = now;
-  res.json(status);
+  res.json(getMarketStatus());
 });
 
 // Agent endpoint — runs Research, Predict, or Risk agent for a signal
