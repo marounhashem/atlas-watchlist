@@ -16,6 +16,7 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 `SCORER_VERSION = '20260403.10'`
 
 Changes since 20260401.15:
+- **20260406.1** — Telegram sendMessage retries (2 retries with 2s/4s backoff on fetch failure), morning brief splits >4000 chars on section boundaries with hard-split fallback for oversized sections, market_data_history snapshot offset to :03/:08/:13/… (was :00/:05/:10/… colliding with FXSSI at :01), DXY webhook handles object bias `{score,bull,bear}` from Pine (extracts .score), getClosedReason now symbol-aware (checks actual weeklyOpen config per symbol), Easter Monday removed from bank holidays (all symbols open), isBankHoliday diagnostic log, minutesUntilOpen removed from /api/market-status (just open/closed), WebSocket connects first on page load (before HTTP fetches), secondary API calls deferred 500ms
 - **20260403.10** — market_data_history (14-day retention, every 5min, no blob storage), BACKTEST tab, auto-recover corrupted DB from backup on startup (PRAGMA integrity_check), correct market hours (forex 22:00, commodities 23:00, EU/Asia indices Monday), db-cleanup.js runs before server with 4GB heap for bloated DB recovery, ALL automatic signal deletion on startup REMOVED (expireOldVersionSignals disabled, cleanup queries removed — signals expire naturally via expires_at)
 - **20260403.9** — TP1/TP2/TP3 multi-level targets (1:1, full, stretch +50%), trade journal table with auto-snapshot on every outcome, MTF bias tab (6TF direction for 29 symbols), STATS tab (win rate, MFE capture, session/loss breakdowns), 29-symbol score heatmap, correlation risk panel (shared currency exposure warnings), ACTIVE as default tab
 - **20260403.7** — CRITICAL: structureCap enforcement corrected — re-cap uses `Math.min(structureCap, ...)` not `Math.min(95, ...)`. LARGE event lift raises structureCap itself (+5) before re-cap. SL proximity 50% LOW tier removed (noise on healthy trades). Taxonomy backfill removed from startup (was corrupting analytics).
@@ -48,6 +49,7 @@ Changes since 20260401.7:
 - **Position sizing:** moved to ANALYSE panel (not shown on card)
 - **Breakdown fallback:** when DB signals have null breakdown, bars show score-based estimates
 - **noOB detection:** hardcoded `NO_OB_SYMBOLS` set + reasoning text fallback
+- **Load order:** WebSocket connects first (before HTTP fetches), skeleton cards shown immediately, signals+past-signals fetched in parallel, secondary data (stats, learning log, market status, regime) deferred 500ms
 
 ## Database tables
 
@@ -179,6 +181,8 @@ On startup: auto-expire any OPEN/ACTIVE signals with zero SL distance.
 - **Signal alert:** PROCEED signals pushed to spot channel
 - **Swing alert:** pushed to swing channel when criteria met
 - **Recommendations:** PARTIAL_CLOSE, TIME_STOP, MOVE_SL, CLOSE
+- **Morning brief:** splits into multiple messages if >4000 chars (Telegram 4096 limit), hard-splits oversized sections on newlines
+- **Retry:** `sendMessage` retries up to 2 times with backoff (2s, 4s) on fetch failure
 - **Arrow format:** `🟢 USDJPY ↑  USDCHF ↑` / `🔴 EURUSD ↓  GBPUSD ↓` — single lines grouped by direction
 - **Special cases:** GOLD, OIL, indices get context lines for USD events
 
@@ -200,8 +204,11 @@ On startup: auto-expire any OPEN/ACTIVE signals with zero SL distance.
 ## Bank holiday awareness
 
 `BANK_HOLIDAYS` map in `marketHours.js` with 2026 dates:
-- Good Friday, Easter Monday, Labour Day, UK bank holidays, US Independence Day, Thanksgiving, Christmas, Boxing Day, New Year
-- `isBankHoliday(symbol)` + `getBankHolidayName()` exported
+- Good Friday, Labour Day, UK bank holidays, US Independence Day, Thanksgiving, Christmas, Boxing Day, New Year
+- Easter Monday removed — all symbols confirmed trading
+- `isBankHoliday(symbol)` + `getBankHolidayName()` exported, diagnostic log on match
+- `getClosedReason(symbol)` is symbol-aware — checks actual `weeklyOpen` config per symbol (not generic day-of-week), returns "Daily break", "Before weekly open", "Bank holiday", or "Weekend"
+- Sunday 22:00+ UTC treated as trading week start (not "Weekend")
 - Scorer: session score halved, force WATCH, macroNote warning
 - Card: 🏦 Bank Holiday tag in header
 
@@ -272,6 +279,7 @@ Auto-categorised on every WIN/LOSS:
 | 07:00 | Macro context fetch (Claude web search + intel key levels) + CB consensus |
 | Every min | Score all symbols → PROCEED signals → Telegram |
 | Every min | Outcome check + PARTIAL_CLOSE + TIME_STOP + MOVE_SL |
+| :03/:08/:13/… | market_data_history snapshot (every 5min, offset from FXSSI) |
 | */5 min | Economic calendar poll (4 feeds) + fire detection + forecast alerts |
 | :01/:21/:41 | FXSSI 20-min order book scrape |
 | :02/:22/:42 | Signal retirement cycle |
