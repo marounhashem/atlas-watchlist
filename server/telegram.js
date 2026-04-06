@@ -101,6 +101,21 @@ async function sendMorningBrief(brief) {
   const chunks = [];
   let current = '';
   for (const section of sections) {
+    // If a single section exceeds MAX, hard-split it on newlines
+    if (section.length > MAX) {
+      if (current.trim()) { chunks.push(current.trim()); current = ''; }
+      const lines = section.split('\n');
+      let part = '';
+      for (const line of lines) {
+        if (part.length + line.length + 1 > MAX && part.length > 0) {
+          chunks.push(part.trim());
+          part = '';
+        }
+        part += (part ? '\n' : '') + line;
+      }
+      if (part.trim()) current = part;
+      continue;
+    }
     if (current.length + section.length + 2 > MAX && current.length > 0) {
       chunks.push(current.trim());
       current = '';

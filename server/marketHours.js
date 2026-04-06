@@ -168,12 +168,24 @@ function getMarketStatus() {
 function getClosedReason(symbol) {
   const now = new Date();
   const utcDay = now.getUTCDay();
+  const utcHour = now.getUTCHours();
+  if (isBankHoliday(symbol)) return 'Bank holiday';
   if (utcDay === 6) return 'Weekend';
   if (utcDay === 0) {
-    const utcHour = now.getUTCHours();
-    // Sunday 22:00+ is trading week start — show "before open" not "Weekend"
-    if (utcHour >= 22) return 'Before weekly open';
+    const cfg = MARKET_HOURS[symbol];
+    if (!cfg || cfg.alwaysOpen) return 'Weekend';
+    // Check against this symbol's actual weekly open time
+    if (cfg.weeklyOpen?.day === 0 && utcHour >= cfg.weeklyOpen.hour) return 'Daily break';
+    if (cfg.weeklyOpen?.day === 0 && utcHour < cfg.weeklyOpen.hour) return 'Weekend';
+    if (cfg.weeklyOpen?.day === 1) return utcHour >= 22 ? 'Before weekly open' : 'Weekend';
     return 'Weekend';
+  }
+  if (utcDay === 1) {
+    const cfg = MARKET_HOURS[symbol];
+    if (cfg?.weeklyOpen?.day === 1) {
+      const openMins = cfg.weeklyOpen.hour * 60 + (cfg.weeklyOpen.minute || 0);
+      if (utcHour * 60 + now.getUTCMinutes() < openMins) return 'Before weekly open';
+    }
   }
   return 'Outside market hours';
 }
