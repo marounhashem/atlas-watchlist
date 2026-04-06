@@ -6,7 +6,6 @@ const WebSocket = require('ws');
 const cron = require('node-cron');
 const path = require('path');
 const fs = require('fs');
-const zlib = require('zlib');
 
 const db = require('./db');
 const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome, updatePaperOutcome, getPaperTradeStats, retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals } = db;
@@ -115,22 +114,6 @@ app.use((req, res, next) => {
     }
     next();
   });
-});
-// Gzip compression for static files + JSON responses (159KB HTML → ~30KB)
-app.use((req, res, next) => {
-  if (!req.headers['accept-encoding']?.includes('gzip')) return next();
-  const origJson = res.json.bind(res);
-  res.json = (body) => {
-    const raw = JSON.stringify(body);
-    if (raw.length < 1024) return origJson(body); // skip small responses
-    res.setHeader('Content-Encoding', 'gzip');
-    res.setHeader('Content-Type', 'application/json');
-    zlib.gzip(raw, (err, compressed) => {
-      if (err) return origJson(body);
-      res.end(compressed);
-    });
-  };
-  next();
 });
 app.use(express.static(path.join(__dirname, '../client')));
 
