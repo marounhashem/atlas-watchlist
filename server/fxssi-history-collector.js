@@ -37,9 +37,17 @@ async function fetchHistoricalSnapshot(pair, timeOffset = 0) {
       console.log(`[FXSSI-Hist] ${pair} offset=${timeOffset} HTTP ${res.status} — rate limited`);
       return null;
     }
-    if (!res.ok) return null;
+    if (!res.ok) {
+      console.log(`[FXSSI-Hist] ERROR ${pair} offset=${timeOffset} HTTP ${res.status}`);
+      return null;
+    }
     const data = await res.json();
-    if (!data.time || !data.levels?.length) return null;
+    if (!data.time || !data.levels?.length) {
+      if (timeOffset <= 3 || timeOffset % 50 === 0) {
+        console.log(`[FXSSI-Hist] EMPTY ${pair} offset=${timeOffset} time=${data.time || 'null'} levels=${data.levels?.length || 0}`);
+      }
+      return null;
+    }
 
     const analysed = analyseOrderBook(data);
     if (!analysed) return null;
