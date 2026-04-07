@@ -449,6 +449,22 @@ function initSchema() {
     structure TEXT, fxssi_long_pct REAL, fxssi_short_pct REAL,
     raw_payload TEXT, fxssi_analysis TEXT, ts INTEGER
   )`);
+  db.run(`CREATE TABLE IF NOT EXISTS fxssi_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT NOT NULL,
+    snapshot_time INTEGER NOT NULL,
+    long_pct REAL,
+    short_pct REAL,
+    sentiment TEXT,
+    trapped TEXT,
+    gravity_price REAL,
+    sr_wall_price REAL,
+    ob_imbalance REAL,
+    ob_absorption INTEGER,
+    full_analysis TEXT,
+    fetched_at INTEGER NOT NULL,
+    UNIQUE(symbol, snapshot_time)
+  )`);
   try { db.run('ALTER TABLE signals ADD COLUMN tp1 REAL DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN tp2 REAL DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN tp3 REAL DEFAULT NULL'); } catch(e) {}
@@ -1298,6 +1314,35 @@ function getJournalEntries(limit) {
   return all('SELECT * FROM trade_journal ORDER BY outcome_ts DESC LIMIT ?', [limit || 100]);
 }
 
+function insertFxssiHistory(row) {
+  try {
+    run(`INSERT OR IGNORE INTO fxssi_history
+      (symbol, snapshot_time, long_pct, short_pct, sentiment, trapped,
+       gravity_price, sr_wall_price, ob_imbalance, ob_absorption, full_analysis, fetched_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [row.symbol, row.snapshot_time, row.long_pct, row.short_pct,
+       row.sentiment, row.trapped, row.gravity_price, row.sr_wall_price,
+       row.ob_imbalance, row.ob_absorption ? 1 : 0,
+       typeof row.full_analysis === 'string' ? row.full_analysis : JSON.stringify(row.full_analysis),
+       row.fetched_at]);
+    return true;
+  } catch(e) {
+    if (e?.message?.includes('UNIQUE constraint')) return false;
+    console.error('[DB] insertFxssiHistory error:', e?.message);
+    return false;
+  }
+}
+
+function getFxssiHistorySnapshot(symbol, snapshotTime) {
+  return get('SELECT * FROM fxssi_history WHERE symbol=? AND snapshot_time=?', [symbol, snapshotTime]);
+}
+
+function getFxssiHistoryStatus() {
+  return all(`SELECT symbol, COUNT(*) as count,
+    MIN(snapshot_time) as earliest, MAX(snapshot_time) as latest
+    FROM fxssi_history GROUP BY symbol ORDER BY symbol`);
+}
+
 module.exports = {
   init, isReady, persist, run, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
   upsertMarketData, getLatestMarketData,
@@ -1317,5 +1362,6 @@ module.exports = {
   upsertMacroContext, getStoredMacroContext, getMacroContextAge,
   upsertCOTData, getCOTData, getAllCOTData,
   upsertRateData, getRateData, getAllRateData,
-  upsertConsensus, getConsensus, getAllConsensus
+  upsertConsensus, getConsensus, getAllConsensus,
+  insertFxssiHistory, getFxssiHistorySnapshot, getFxssiHistoryStatus
 };
