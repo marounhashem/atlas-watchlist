@@ -1,4 +1,4 @@
-//@version=5
+//@version=6
 strategy("ATLAS // BACKTEST", overlay=true, pyramiding=0,
      default_qty_type=strategy.percent_of_equity, default_qty_value=2,
      initial_capital=10000, commission_value=0.02, slippage=1,
@@ -11,8 +11,17 @@ atrLen   = input.int(14, "ATR Length")
 macdFast = input.int(12, "MACD Fast")
 macdSlow = input.int(26, "MACD Slow")
 macdSig  = input.int(9, "MACD Signal")
-minRR    = input.float(1.5, "Min R:R Filter")
 startDate = input.time(timestamp("2026-03-31"), "Start Date")
+
+// ── OPTIMIZABLE INPUTS ─────────────────────────────────────────────────────
+minRR             = input.float(1.5, "Min R:R Filter",          minval=1.0, maxval=3.0, step=0.5)
+minBiasScore      = input.float(2.0, "Min Bias Score",          minval=1.0, maxval=5.0, step=0.5)
+minWeightedStruct = input.float(1.0, "Min Weighted Structure",  minval=0.5, maxval=5.0, step=0.5)
+rsiGateLong       = input.int(40,    "RSI Gate Long",           minval=30,  maxval=55,  step=5)
+rsiGateShort      = input.int(75,    "RSI Gate Short",          minval=55,  maxval=80,  step=5)
+atrEntryMult      = input.float(0.35,"ATR Entry Multiplier",    minval=0.1, maxval=0.8, step=0.1)
+atrSlMult         = input.float(1.5, "ATR SL Multiplier",       minval=0.8, maxval=2.5, step=0.1)
+atrTpMult         = input.float(3.0, "ATR TP Multiplier",       minval=1.5, maxval=5.0, step=0.5)
 
 // ── INDICATORS — CURRENT TF ────────────────────────────────────────────────
 ema200  = ta.ema(close, emaLen)
@@ -39,25 +48,24 @@ struct_1h  = request.security(syminfo.tickerid, "60",  f_struct(close, high, low
 struct_15m = request.security(syminfo.tickerid, "15",  f_struct(close, high, low), lookahead=barmerge.lookahead_off)
 
 // ── BIAS SCORE (-8 to +8) ──────────────────────────────────────────────────
-biasScore = 0.0
-biasScore += close > ema200_1d ? 3.0 : -3.0   // 1d EMA direction
-biasScore += close > ema200_4h ? 2.0 : -2.0   // 4h EMA direction
-biasScore += close > ema200_1h ? 1.5 : -1.5   // 1h EMA direction
-biasScore += rsi14 > 50 ? 1.0 : -1.0          // RSI bias (applied twice per scorer)
-biasScore += rsi14 > 50 ? 1.0 : -1.0
-biasScore += macdHist > 0 ? 1.0 : -1.0        // MACD histogram
-biasScore += close > vwapVal ? 0.5 : -0.5     // VWAP
+biasScore = (close > ema200_1d ? 3.0 : -3.0)
+     + (close > ema200_4h ? 2.0 : -2.0)
+     + (close > ema200_1h ? 1.5 : -1.5)
+     + (rsi14 > 50 ? 1.0 : -1.0)
+     + (rsi14 > 50 ? 1.0 : -1.0)
+     + (macdHist > 0 ? 1.0 : -1.0)
+     + (close > vwapVal ? 0.5 : -0.5)
 
 // ── DIRECTION ───────────────────────────────────────────────────────────────
-isLong  = biasScore >= 2.0
-isShort = biasScore <= -2.0
+isLong  = biasScore >= minBiasScore
+isShort = biasScore <= -minBiasScore
 
 // ── HARD GATES ──────────────────────────────────────────────────────────────
-longBlocked  = rsi14 < 40
+longBlocked  = rsi14 < rsiGateLong
 longBlocked := longBlocked or (struct_1d == -1)
 longBlocked := longBlocked or (struct_1h == -1 and struct_4h == -1)
 
-shortBlocked  = rsi14 > 75
+shortBlocked  = rsi14 > rsiGateShort
 shortBlocked := shortBlocked or (struct_1d == 1)
 shortBlocked := shortBlocked or (struct_1h == 1 and struct_4h == 1)
 
@@ -67,21 +75,21 @@ longStructScore  = (struct_1d  == 1 ? 3.0 : 0.0) + (struct_4h == 1 ? 2.0 : 0.0) 
 shortStructScore = (struct_1d  == -1 ? 3.0 : 0.0) + (struct_4h == -1 ? 2.0 : 0.0) + (struct_1h == -1 ? 1.5 : 0.0) + (struct_15m == -1 ? 1.0 : 0.0)
 weightedStruct   = isLong ? longStructScore : isShort ? shortStructScore : 0.0
 
-structGate = weightedStruct >= 1.0
+structGate = weightedStruct >= minWeightedStruct
 
 // ── ENTRY / SL / TP ────────────────────────────────────────────────────────
-longEntry  = close + atr14 * 0.35
-shortEntry = close - atr14 * 0.35
+longEntry  = close + atr14 * atrEntryMult
+shortEntry = close - atr14 * atrEntryMult
 
-longSL  = longEntry  - atr14 * 1.5
-shortSL = shortEntry + atr14 * 1.5
+longSL  = longEntry  - atr14 * atrSlMult
+shortSL = shortEntry + atr14 * atrSlMult
 
 longTP1  = longEntry  + math.abs(longEntry  - longSL)            // 1:1 RR
-longTP2  = longEntry  + atr14 * 3.0                              // main target
+longTP2  = longEntry  + atr14 * atrTpMult                        // main target
 longTP3  = longTP2    + math.abs(longEntry  - longSL) * 0.5      // stretch
 
 shortTP1 = shortEntry - math.abs(shortEntry - shortSL)
-shortTP2 = shortEntry - atr14 * 3.0
+shortTP2 = shortEntry - atr14 * atrTpMult
 shortTP3 = shortTP2   - math.abs(shortEntry - shortSL) * 0.5
 
 // ── RR GATE ─────────────────────────────────────────────────────────────────
