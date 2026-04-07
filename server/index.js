@@ -695,6 +695,8 @@ app.post('/api/backtest-analyze', (req, res) => {
   const gravBelow = { count: 0, wins: 0, losses: 0 };
   const gravAbove = { count: 0, wins: 0, losses: 0 };
   const gravAgainst = { count: 0, wins: 0, losses: 0 };
+  const comboTrappedAbs = { count: 0, wins: 0, losses: 0 };
+  const comboTrappedOb = { count: 0, wins: 0, losses: 0 };
   let noSnapshot = 0;
   const results = [];
 
@@ -717,12 +719,13 @@ app.post('/api/backtest-analyze', (req, res) => {
       let fullAnalysis = null;
       try { fullAnalysis = typeof snap.match.full_analysis === 'string' ? JSON.parse(snap.match.full_analysis) : snap.match.full_analysis; } catch(e) {}
 
-      const sent = snap.match.sentiment || fullAnalysis?.sentiment || null;
       const longPct = snap.match.long_pct ?? fullAnalysis?.longPct ?? null;
       const shortPct = snap.match.short_pct ?? fullAnalysis?.shortPct ?? null;
+      // Recompute sentiment from long_pct/short_pct with tighter 52/53 thresholds
+      const sent = longPct > 52 ? 'BEARISH' : (shortPct > 53 ? 'BULLISH' : 'NEUTRAL');
 
       if (results.length < 3) {
-        console.log(`[backtest-analyze] trade ${results.length}: snapshot found=true sentiment=${sent} long_pct=${longPct}`);
+        console.log(`[backtest-analyze] trade ${results.length}: snapshot found=true sentiment=${sent} long_pct=${longPct} gravity_raw=${JSON.stringify(fullAnalysis?.gravity)}`);
       }
 
       // Extract trapped trader data from full_analysis JSON
@@ -733,6 +736,9 @@ app.post('/api/backtest-analyze', (req, res) => {
       const losingClusters = fullAnalysis?.losingClusters || [];
       const nearestLosingCluster = losingClusters[0] || null;
 
+      // gravity is stored as object {price, volume} in full_analysis, scalar in row
+      const gravityPrice = fullAnalysis?.gravity?.price ?? snap.match.gravity_price ?? null;
+
       fxssi_data = {
         snapshot_time: snap.match.snapshot_time,
         raw_sentiment: snap.match.sentiment,
@@ -740,7 +746,7 @@ app.post('/api/backtest-analyze', (req, res) => {
         trapped: snap.match.trapped || fullAnalysis?.trapped || null,
         long_pct: longPct,
         short_pct: shortPct,
-        gravity_price: snap.match.gravity_price,
+        gravity_price: gravityPrice,
         ob_imbalance: snap.match.ob_imbalance,
         gap_minutes: snap.gap_minutes,
         in_profit_pct: inProfitPct,
@@ -795,10 +801,10 @@ app.post('/api/backtest-analyze', (req, res) => {
       const obImb = fullAnalysis?.obImbalance ?? snap.match.ob_imbalance ?? null;
       let obImbAlignment = 'ob_imbalance_neutral';
       if (obImb != null) {
-        if ((trade.direction === 'LONG' && obImb >= 0.2) || (trade.direction === 'SHORT' && obImb <= -0.2)) {
+        if ((trade.direction === 'LONG' && obImb >= 0.1) || (trade.direction === 'SHORT' && obImb <= -0.1)) {
           obImbAlignment = 'ob_imbalance_aligned';
           obImbAligned.count++; if (isWin) obImbAligned.wins++; if (isLoss) obImbAligned.losses++;
-        } else if ((trade.direction === 'LONG' && obImb <= -0.2) || (trade.direction === 'SHORT' && obImb >= 0.2)) {
+        } else if ((trade.direction === 'LONG' && obImb <= -0.1) || (trade.direction === 'SHORT' && obImb >= 0.1)) {
           obImbAlignment = 'ob_imbalance_conflicted';
           obImbConflicted.count++; if (isWin) obImbConflicted.wins++; if (isLoss) obImbConflicted.losses++;
         } else {
@@ -824,7 +830,7 @@ app.post('/api/backtest-analyze', (req, res) => {
       fxssi_data.absorption_alignment = absAlignment;
 
       // Gravity proximity + direction
-      const gravPrice = snap.match.gravity_price ?? fullAnalysis?.gravity?.price ?? null;
+      const gravPrice = gravityPrice; // already extracted above from full_analysis.gravity.price
       const entryPrice = trade.entry || trade.entry_price || null;
       let gravProximity = 'gravity_none';
       let gravDirection = 'gravity_against';
@@ -847,6 +853,13 @@ app.post('/api/backtest-analyze', (req, res) => {
       fxssi_data.gravity_proximity = gravProximity;
       fxssi_data.gravity_direction = gravDirection;
       fxssi_data.gravity_price = gravPrice;
+
+      // Combination analysis
+      const isTrAligned = fxssi_data.trapped_alignment === 'trapped_aligned';
+      const isAbsAligned = absAlignment === 'absorption_aligned';
+      const isObAligned = obImbAlignment === 'ob_imbalance_aligned';
+      if (isTrAligned && isAbsAligned) { comboTrappedAbs.count++; if (isWin) comboTrappedAbs.wins++; if (isLoss) comboTrappedAbs.losses++; }
+      if (isTrAligned && isObAligned) { comboTrappedOb.count++; if (isWin) comboTrappedOb.wins++; if (isLoss) comboTrappedOb.losses++; }
     } else {
       noSnapshot++;
       if (results.length < 3) {
@@ -882,6 +895,8 @@ app.post('/api/backtest-analyze', (req, res) => {
     gravity_below: { ...gravBelow, win_rate: wr(gravBelow) },
     gravity_above: { ...gravAbove, win_rate: wr(gravAbove) },
     gravity_against: { ...gravAgainst, win_rate: wr(gravAgainst) },
+    trapped_AND_absorption: { ...comboTrappedAbs, win_rate: wr(comboTrappedAbs) },
+    trapped_AND_ob: { ...comboTrappedOb, win_rate: wr(comboTrappedOb) },
     no_snapshot: { count: noSnapshot },
     trades: results
   });
