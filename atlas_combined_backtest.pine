@@ -170,10 +170,12 @@ goShort = (classA_Short or classB_Short or classC_Short) and strategy.position_s
 if goLong
     strategy.entry("Long", strategy.long)
     strategy.exit("Long Exit", "Long", stop=slLong, limit=tpLong)
+    alert('{"symbol":"' + syminfo.ticker + '","direction":"LONG","class":"' + (classA_Long ? "A" : classB_Long ? "B" : "C") + '","entry":' + str.tostring(close) + ',"sl":' + str.tostring(slLong) + ',"tp":' + str.tostring(tpLong) + ',"rr":' + str.tostring(minRR) + ',"score":' + str.tostring(scoreLong) + ',"time":"' + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ss") + '"}', alert.freq_once_per_bar)
 
 if goShort
     strategy.entry("Short", strategy.short)
     strategy.exit("Short Exit", "Short", stop=slShort, limit=tpShort)
+    alert('{"symbol":"' + syminfo.ticker + '","direction":"SHORT","class":"' + (classA_Short ? "A" : classB_Short ? "B" : "C") + '","entry":' + str.tostring(close) + ',"sl":' + str.tostring(slShort) + ',"tp":' + str.tostring(tpShort) + ',"rr":' + str.tostring(minRR) + ',"score":' + str.tostring(scoreShort) + ',"time":"' + str.format_time(time, "yyyy-MM-dd'T'HH:mm:ss") + '"}', alert.freq_once_per_bar)
 
 // ── PLOTS ───────────────────────────────────────────────────────────────────
 // Cloud
