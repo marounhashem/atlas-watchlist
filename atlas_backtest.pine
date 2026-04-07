@@ -130,34 +130,35 @@ plot(inLong ? longTP3  : inShort ? shortTP3  : na, "TP3", color=color.teal,    s
 plotshape(goLong,  "Long Signal",  shape.triangleup,   location.belowbar, color.green, size=size.small)
 plotshape(goShort, "Short Signal", shape.triangledown,  location.abovebar, color.red,   size=size.small)
 
-// ── DEBUG LABEL — last bar diagnostic (remove after troubleshooting) ────────
-if barstate.islast
-    debugTxt = "=== ATLAS DEBUG ===\n"
-     + "biasScore: " + str.tostring(biasScore, "#.#") + "\n"
-     + "weightedStruct: " + str.tostring(weightedStruct, "#.#") + "\n"
-     + "isLong: " + str.tostring(isLong) + "  isShort: " + str.tostring(isShort) + "\n"
-     + "longBlocked: " + str.tostring(longBlocked) + "  shortBlocked: " + str.tostring(shortBlocked) + "\n"
-     + "structGate: " + str.tostring(structGate) + "\n"
-     + "rrPass: " + str.tostring(rrPass) + "\n"
-     + "goLong: " + str.tostring(goLong) + "  goShort: " + str.tostring(goShort) + "\n"
-     + "afterStart: " + str.tostring(afterStart) + "  noPos: " + str.tostring(noPosition) + "\n"
-     + "--- COMPONENTS ---\n"
-     + "ema200_1d: " + str.tostring(ema200_1d, "#.##") + (na(ema200_1d) ? " [NA!]" : "") + "\n"
-     + "ema200_4h: " + str.tostring(ema200_4h, "#.##") + (na(ema200_4h) ? " [NA!]" : "") + "\n"
-     + "ema200_1h: " + str.tostring(ema200_1h, "#.##") + (na(ema200_1h) ? " [NA!]" : "") + "\n"
-     + "rsi14: " + str.tostring(rsi14, "#.#") + "\n"
-     + "macdHist: " + str.tostring(macdHist, "#.####") + "\n"
-     + "vwap: " + str.tostring(vwapVal, "#.##") + (na(vwapVal) ? " [NA!]" : "") + "\n"
-     + "atr14: " + str.tostring(atr14, "#.##") + (na(atr14) ? " [NA!]" : "") + "\n"
-     + "--- STRUCTURE ---\n"
-     + "1d:" + str.tostring(struct_1d) + (na(struct_1d) ? "[NA!]" : "")
-     + "  4h:" + str.tostring(struct_4h) + (na(struct_4h) ? "[NA!]" : "")
-     + "  1h:" + str.tostring(struct_1h) + (na(struct_1h) ? "[NA!]" : "")
-     + "  15m:" + str.tostring(struct_15m) + (na(struct_15m) ? "[NA!]" : "") + "\n"
-     + "--- LEVELS ---\n"
-     + "longRR: " + str.tostring(longRR, "#.##") + "  shortRR: " + str.tostring(shortRR, "#.##") + "\n"
-     + "close: " + str.tostring(close) + "  entry_L: " + str.tostring(longEntry, "#.##") + "  sl_L: " + str.tostring(longSL, "#.##")
-    label.new(bar_index, high, debugTxt, style=label.style_label_down, color=color.new(color.black, 20), textcolor=color.white, size=size.normal)
+// ── DEBUG TABLE — top right, updates every bar ──────────────────────────────
+var debugTable = table.new(position.top_right, 2, 10, bgcolor=color.new(color.black, 80), border_width=1)
+direction = goLong ? "LONG" : goShort ? "SHORT" : "NONE"
+dirColor  = goLong ? color.green : goShort ? color.red : color.gray
+
+f_structStr(v) => v == 1 ? "BULL" : v == -1 ? "BEAR" : "FLAT"
+f_structClr(v) => v == 1 ? color.green : v == -1 ? color.red : color.gray
+f_boolClr(v)   => v ? color.red : color.green
+
+table.cell(debugTable, 0, 0, "biasScore",      text_color=color.gray,  text_size=size.small)
+table.cell(debugTable, 1, 0, str.tostring(biasScore, "#.#"), text_color=biasScore >= 4 ? color.green : biasScore <= -4 ? color.red : color.yellow, text_size=size.small)
+table.cell(debugTable, 0, 1, "weightedStruct",  text_color=color.gray,  text_size=size.small)
+table.cell(debugTable, 1, 1, str.tostring(weightedStruct, "#.#"), text_color=weightedStruct >= 1 ? color.green : color.red, text_size=size.small)
+table.cell(debugTable, 0, 2, "struct 1d",       text_color=color.gray,  text_size=size.small)
+table.cell(debugTable, 1, 2, f_structStr(struct_1d), text_color=f_structClr(struct_1d), text_size=size.small)
+table.cell(debugTable, 0, 3, "struct 4h",       text_color=color.gray,  text_size=size.small)
+table.cell(debugTable, 1, 3, f_structStr(struct_4h), text_color=f_structClr(struct_4h), text_size=size.small)
+table.cell(debugTable, 0, 4, "struct 1h",       text_color=color.gray,  text_size=size.small)
+table.cell(debugTable, 1, 4, f_structStr(struct_1h), text_color=f_structClr(struct_1h), text_size=size.small)
+table.cell(debugTable, 0, 5, "goLong",          text_color=color.gray,  text_size=size.small)
+table.cell(debugTable, 1, 5, str.tostring(goLong), text_color=goLong ? color.green : color.gray, text_size=size.small)
+table.cell(debugTable, 0, 6, "goShort",         text_color=color.gray,  text_size=size.small)
+table.cell(debugTable, 1, 6, str.tostring(goShort), text_color=goShort ? color.red : color.gray, text_size=size.small)
+table.cell(debugTable, 0, 7, "longBlocked",     text_color=color.gray,  text_size=size.small)
+table.cell(debugTable, 1, 7, str.tostring(longBlocked), text_color=f_boolClr(longBlocked), text_size=size.small)
+table.cell(debugTable, 0, 8, "shortBlocked",    text_color=color.gray,  text_size=size.small)
+table.cell(debugTable, 1, 8, str.tostring(shortBlocked), text_color=f_boolClr(shortBlocked), text_size=size.small)
+table.cell(debugTable, 0, 9, "DIRECTION",       text_color=color.white, text_size=size.small)
+table.cell(debugTable, 1, 9, direction,         text_color=dirColor,    text_size=size.small, bgcolor=color.new(dirColor, 80))
 
 // ── PLOTS — SEPARATE PANES ─────────────────────────────────────────────────
 plot(biasScore,     "Bias Score",      color=biasScore > 0 ? color.green : color.red, display=display.pane)
