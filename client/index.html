@@ -722,6 +722,7 @@
     <div class="mtab" id="mtab-stats" onclick="switchMainTab('stats')">📈 STATS</div>
     <div class="mtab" id="mtab-backtest" onclick="switchMainTab('backtest')">🔬 BACKTEST</div>
     <div class="mtab" id="mtab-intel" onclick="switchMainTab('intel')" style="color:var(--amber,var(--watch))">📡 INTEL</div>
+    <div class="mtab" id="mtab-abc" onclick="switchMainTab('abc')" style="color:var(--teal)">⭐ ABC</div>
   </div>
 
   <!-- Signals pane -->
@@ -809,6 +810,21 @@
 
   <!-- Settings pane -->
   <!-- Intel pane -->
+  <div class="main-pane" id="pane-abc">
+    <div style="padding:12px 0;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div class="sec" style="margin:0;color:var(--teal);">⭐ ABC SIGNALS</div>
+        <div id="abc-class-filters" style="display:flex;gap:4px;">
+          <button class="filter-btn active" onclick="setAbcClass('ALL')" style="font-size:10px;padding:3px 8px;">ALL</button>
+          <button class="filter-btn" onclick="setAbcClass('A')" style="font-size:10px;padding:3px 8px;">⭐ A</button>
+          <button class="filter-btn" onclick="setAbcClass('B')" style="font-size:10px;padding:3px 8px;">🔷 B</button>
+          <button class="filter-btn" onclick="setAbcClass('C')" style="font-size:10px;padding:3px 8px;">🔹 C</button>
+        </div>
+      </div>
+      <div id="abc-container"><div class="empty">No ABC signals yet — waiting for Pine alerts on /webhook/pine-abc</div></div>
+    </div>
+  </div>
+
   <div class="main-pane" id="pane-intel">
     <div style="padding:12px 0;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -946,6 +962,7 @@
 <script>
 const WS_URL = `${location.protocol==='https:'?'wss':'ws'}://${location.host}`;
 let allSignals=[], pastSignals=[], activeFilter='ALL', ws;
+let abcSignals=[], abcClassFilter='ALL';
 
 
 const agentCache = {};
@@ -1001,10 +1018,16 @@ function connect() {
 }
 
 function handleMessage(msg) {
+  if (msg.type==='ABC_SIGNAL') {
+    abcSignals.unshift(msg);
+    if (activeMainTab === 'abc') renderAbcSignals();
+    return;
+  }
   if (msg.type==='INIT') {
     _initLoaded = true;
     allSignals  = msg.signals||[];
     pastSignals = msg.pastSignals||[];
+    abcSignals  = msg.abcSignals||[];
     // Default to ACTIVE tab if any active positions exist
     if (activeFilter === 'ALL') {
       const hasActive = allSignals.some(s => s.outcome === 'ACTIVE');
@@ -2382,6 +2405,7 @@ function switchMainTab(tab) {
   if (tab === 'stats') renderStatsTab();
   if (tab === 'backtest') populateBtSymbols();
   if (tab === 'settings') loadSettings();
+  if (tab === 'abc') renderAbcSignals();
 }
 
 // ── Forex data ─────────────────────────────────────────────────────────────
@@ -2728,6 +2752,74 @@ function copyIdeaExport() {
   const btn = document.getElementById('idea-copy-btn');
   btn.textContent = '✓ Copied! Paste into Claude.ai';
   setTimeout(() => btn.textContent = '📋 COPY FOR CLAUDE', 3000);
+}
+
+// ── ABC signals ─────────────────────────────────────────────────────────────
+function setAbcClass(cls) {
+  abcClassFilter = cls;
+  document.querySelectorAll('#abc-class-filters .filter-btn').forEach(b => {
+    b.classList.toggle('active', b.textContent.includes(cls) || (cls === 'ALL' && b.textContent === 'ALL'));
+  });
+  renderAbcSignals();
+}
+
+function renderAbcSignals() {
+  const container = document.getElementById('abc-container');
+  if (!container) return;
+  // Fetch from API if empty
+  if (!abcSignals.length) {
+    fetch('/api/abc-signals').then(r=>r.json()).then(data => {
+      if (Array.isArray(data)) { abcSignals = data; renderAbcSignals(); }
+    }).catch(()=>{});
+    return;
+  }
+  let filtered = abcSignals;
+  if (abcClassFilter !== 'ALL') {
+    filtered = abcSignals.filter(s => (s.pine_class || s.pineClass) === abcClassFilter);
+  }
+  if (!filtered.length) {
+    container.innerHTML = '<div class="empty">No ABC signals' + (abcClassFilter !== 'ALL' ? ' for Class ' + abcClassFilter : '') + '</div>';
+    return;
+  }
+  container.innerHTML = filtered.map(s => {
+    const cls = s.pine_class || s.pineClass || '?';
+    const clsColor = cls === 'A' ? 'var(--proceed)' : cls === 'B' ? '#4d9eff' : '#888';
+    const clsLabel = cls === 'A' ? '⭐ A' : cls === 'B' ? '🔷 B' : '🔹 C';
+    const vColor = s.verdict === 'PROCEED' ? 'var(--proceed)' : 'var(--watch)';
+    const dColor = s.direction === 'LONG' ? 'var(--proceed)' : 'var(--short)';
+    const age = Math.round((Date.now() - s.ts) / 60000);
+    return `<div class="signal-card" style="border-left:4px solid ${vColor}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#eeeef5;">${esc(s.symbol)}</span>
+          <span style="margin-left:8px;color:${dColor};font-size:12px;font-weight:600;">${esc(s.direction)}</span>
+          <span style="margin-left:8px;background:${clsColor}22;color:${clsColor};border:1px solid ${clsColor}44;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:700;">${clsLabel}</span>
+        </div>
+        <div style="color:${vColor};font-size:11px;font-weight:600;">${esc(s.verdict)}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px;">
+        <div style="background:#0a0a18;border-radius:4px;padding:5px 8px;text-align:center;">
+          <div style="font-size:8px;color:#444466;letter-spacing:.06em;margin-bottom:2px;">ENTRY</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#eeeef5;">${s.entry}</div>
+        </div>
+        <div style="background:#0a0a18;border-radius:4px;padding:5px 8px;text-align:center;">
+          <div style="font-size:8px;color:#444466;letter-spacing:.06em;margin-bottom:2px;">STOP</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--short);">${s.sl}</div>
+        </div>
+        <div style="background:#0a0a18;border-radius:4px;padding:5px 8px;text-align:center;">
+          <div style="font-size:8px;color:#444466;letter-spacing:.06em;margin-bottom:2px;">TARGET</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--proceed);">${s.tp}</div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#444466;">
+        <span>RR: <span style="color:#8888b0;">${s.rr}R</span></span>
+        <span>Score: <span style="color:#8888b0;">${s.score}</span></span>
+        <span>Session: <span style="color:#8888b0;">${esc(s.session)}</span></span>
+        <span style="color:#333348;">${age}m ago</span>
+      </div>
+      ${s.reasoning ? `<div style="font-size:10px;color:#555575;margin-top:6px;padding-top:6px;border-top:1px solid #111120;">${esc(s.reasoning)}</div>` : ''}
+    </div>`;
+  }).join('');
 }
 
 </script>

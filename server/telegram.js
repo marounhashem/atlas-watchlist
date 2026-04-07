@@ -210,9 +210,26 @@ async function sendSwingSignalAlert(signal) {
   return sendSwingMessage(text);
 }
 
+// ── ABC signal alert → swing Telegram channel ─────────────────────────────────
+async function sendAbcSignalAlert(sig) {
+  const dir     = sig.direction === 'LONG' ? '🟢 LONG' : '🔴 SHORT';
+  const verdict = sig.verdict === 'PROCEED' ? '✅ PROCEED' : '👁 WATCH';
+  const cls     = sig.pineClass === 'A' ? '⭐ Class A' : sig.pineClass === 'B' ? '🔷 Class B' : '🔹 Class C';
+
+  const msg = [
+    `${dir} ${sig.symbol} — ${cls}`,
+    `${verdict} | Score: ${sig.score} | RR: ${sig.rr}R`,
+    `Entry: ${sig.entry} | SL: ${sig.sl} | TP: ${sig.tp}`,
+    `Session: ${sig.session}`,
+    sig.reasoning ? `${sig.reasoning}` : ''
+  ].filter(Boolean).join('\n');
+
+  return sendSwingMessage(msg);
+}
+
 // Test message
 async function sendTest() {
   return sendMessage('✅ <b>ATLAS // WATCHLIST</b>\nTelegram connected successfully.');
 }
 
-module.exports = { sendMessage, sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendEventFiredAlert, sendSwingSignalAlert, sendTest };
+module.exports = { sendMessage, sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendEventFiredAlert, sendSwingSignalAlert, sendAbcSignalAlert, sendTest };

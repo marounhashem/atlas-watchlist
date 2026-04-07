@@ -239,6 +239,30 @@ function initSchema() {
     entry REAL, sl REAL, tp REAL, rr REAL, session TEXT, reasoning TEXT,
     outcome TEXT DEFAULT 'OPEN', outcome_ts INTEGER, pnl_pct REAL)`);
 
+  // ── ABC signals table ─────────────────────────────────────────────────────────
+  db.run(`CREATE TABLE IF NOT EXISTS abc_signals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol      TEXT,
+    direction   TEXT,
+    pine_class  TEXT,
+    score       INTEGER,
+    verdict     TEXT,
+    entry       REAL,
+    sl          REAL,
+    tp          REAL,
+    rr          REAL,
+    session     TEXT,
+    reasoning   TEXT,
+    outcome     TEXT DEFAULT 'OPEN',
+    outcome_ts  INTEGER,
+    mfe_pct     REAL,
+    ts          INTEGER,
+    expires_at  INTEGER,
+    fxssi_stale INTEGER DEFAULT 0,
+    raw_payload TEXT
+  )`);
+  console.log('[DB] abc_signals table ready');
+
   db.run(`CREATE TABLE IF NOT EXISTS weights (
     id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL, ts INTEGER NOT NULL,
     pine REAL DEFAULT 0.40, fxssi REAL DEFAULT 0.45,
@@ -1335,9 +1359,34 @@ function getFxssiHistoryStatus() {
     FROM fxssi_history GROUP BY symbol ORDER BY symbol`);
 }
 
+// ── ABC signals ─────────────────────────────────────────────────────────────
+function insertAbcSignal(sig) {
+  try {
+    run(`INSERT INTO abc_signals
+      (symbol, direction, pine_class, score, verdict, entry, sl, tp, rr,
+       session, reasoning, outcome, ts, expires_at, fxssi_stale, raw_payload)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [sig.symbol, sig.direction, sig.pineClass, sig.score || 0, sig.verdict,
+       sig.entry, sig.sl, sig.tp, sig.rr, sig.session, sig.reasoning,
+       'OPEN', sig.ts || Date.now(), sig.expiresAt || (Date.now() + 8 * 3600000),
+       sig.fxssiStale ? 1 : 0, sig.rawPayload || null]);
+    persist();
+    // Get last inserted id
+    const row = get('SELECT last_insert_rowid() as id');
+    return row?.id || null;
+  } catch(e) {
+    console.error('[DB] insertAbcSignal error:', e?.message);
+    return null;
+  }
+}
+
+function getAbcSignals(limit = 100) {
+  return all('SELECT * FROM abc_signals ORDER BY ts DESC LIMIT ?', [limit]);
+}
+
 module.exports = {
   init, isReady, persist, persistNow, run, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
-  upsertMarketData, getLatestMarketData,
+  upsertMarketData, getLatestMarketData, insertAbcSignal, getAbcSignals,
   insertSignal, refineSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,
   getWeights, updateWeights,

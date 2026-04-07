@@ -151,7 +151,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260407.2'; // simplified multipliers, weight rebalance, raised floor
+const SCORER_VERSION = '20260407.3'; // ABC parallel system added
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -2319,13 +2319,8 @@ function saveSignal(scored) {
 
   const signalId = insertSignal({ ...scored, scorerVersion: SCORER_VERSION });
 
-  // Swing channel alert — silent fail if token not set
-  if (scored.isSwing && signalId) {
-    try {
-      const { sendSwingSignalAlert } = require('./telegram');
-      sendSwingSignalAlert(scored).catch(() => {});
-    } catch(e) {}
-  }
+  // Swing channel now used exclusively for ABC signals (Tab 2)
+  // Current system sends all PROCEED signals to main channel only
 
   return signalId;
 }

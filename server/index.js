@@ -19,9 +19,10 @@ const { runFXSSIScrape, processBridgePayload, getFxssiCacheAge } = require('./fx
 const { runCOTFetch, getLatestCOT, getCOTSummary, getCOTCurrencies } = require('./cotFetcher');
 const { runRateFetch, loadRatesFromDB, getLatestRates, getRateDifferential } = require('./rateFetcher');
 const { getUpcomingMeetings, isPairEventRisk, getMeetingContext } = require('./centralBankCalendar');
-const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTest } = require('./telegram');
+const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTest, sendAbcSignalAlert } = require('./telegram');
 const { runCalendarCheck, runCalendarFetch, isPreEventRisk, isPostEventSuppressed, getUpcomingHighImpactEvents } = require('./forexCalendar');
 const { collectFullHistory, collectRecentHistory, querySnapshot, cancelCollection, isCollecting } = require('./fxssi-history-collector');
+const { runAbcGates } = require('./abcGates');
 const { SYMBOLS } = require('./config');
 
 console.log('[Startup] 2 — modules loaded', Date.now());
@@ -55,6 +56,9 @@ const server = http.createServer((req, res) => {
       if (req.url === '/webhook/pine') {
         try { processPineWebhook(parsed); }
         catch(e) { console.error('[Webhook] Pine error:', e.message); }
+      } else if (req.url === '/webhook/pine-abc') {
+        try { processAbcWebhook(parsed); }
+        catch(e) { console.error('[Webhook] ABC error:', e.message); }
       } else if (req.url === '/webhook/fxssi') {
         try { processFxssiWebhook(parsed); }
         catch(e) { console.error('[Webhook] FXSSI error:', e.message); }
@@ -269,6 +273,114 @@ function processPineWebhook(data) {
   const check = require('./db').getLatestMarketData(sym);
   console.log('[Webhook] ' + sym + ':', check ? 'SAVED @ ' + check.close : 'FAILED');
   broadcast({ type: 'MARKET_UPDATE', symbol: sym, close: price, ts: Date.now() });
+}
+
+// ── Webhook: ABC Pine signals ────────────────────────────────────────────────
+function processAbcWebhook(data) {
+  if (!data || !Object.keys(data).length) { console.log('[ABC] Empty body — skipping'); return; }
+  if (!dbReady) { console.log('[ABC] DB not ready — skipping'); return; }
+
+  const ws = process.env.WEBHOOK_SECRET;
+  if (ws && data.secret !== ws) { console.warn('[ABC] Auth failed'); return; }
+
+  const rawSym = data.symbol || data.ticker || null;
+  if (!rawSym) { console.log('[ABC] No symbol'); return; }
+  const sym = rawSym.toUpperCase()
+    .replace('XAUUSD','GOLD').replace('XAGUSD','SILVER')
+    .replace('USOIL','OILWTI').replace('WTI','OILWTI').replace('OIL_CRUDE','OILWTI')
+    .replace('SPX500USD','US500').replace('ETHUSDT','ETHUSD')
+    .replace('NAS100USD','US100').replace('DE30EUR','DE40')
+    .replace('UK100GBP','UK100').replace('JP225USD','J225')
+    .replace('HK50USD','HK50').replace('CN50USD','CN50');
+
+  if (!SYMBOLS[sym]) { console.log('[ABC] Not in priority list:', sym); return; }
+
+  const pineClass = data.class;
+  if (!['A','B','C'].includes(pineClass)) {
+    console.log(`[ABC] ${sym} — missing or invalid class field: ${pineClass}`); return;
+  }
+
+  const direction = (data.direction || '').toUpperCase();
+  if (!['LONG','SHORT'].includes(direction)) {
+    console.log(`[ABC] ${sym} — invalid direction: ${direction}`); return;
+  }
+
+  const entry = parseFloat(data.entry);
+  const sl    = parseFloat(data.sl);
+  const tp    = parseFloat(data.tp);
+  const rr    = parseFloat(data.rr) || null;
+  const score = parseInt(data.score) || (pineClass === 'A' ? 88 : pineClass === 'B' ? 75 : 62);
+
+  if (!entry || !sl || !tp) { console.log(`[ABC] ${sym} — missing entry/sl/tp`); return; }
+
+  // Cooldown — 30min same symbol + direction
+  try {
+    const recent = db.getAbcSignals(20).find(s =>
+      s.symbol === sym && s.direction === direction && (Date.now() - s.ts) < 30 * 60 * 1000
+    );
+    if (recent) {
+      console.log(`[ABC] ${sym} ${direction} cooldown (${Math.round((Date.now() - recent.ts) / 60000)}m) — skipping`);
+      return;
+    }
+  } catch(e) {}
+
+  // Get FXSSI data
+  const fxssiData = (() => {
+    try {
+      const md = db.getLatestMarketData(sym);
+      if (!md) return null;
+      return {
+        fxssi_long_pct:  md.fxssi_long_pct,
+        fxssi_short_pct: md.fxssi_short_pct,
+        fxssi_trapped:   md.fxssi_trapped,
+        gravity_price:   md.gravity_price
+      };
+    } catch(e) { return null; }
+  })();
+
+  // Run gates
+  const payload = { pineClass, direction, entry, sl, tp, rr };
+  const gates   = runAbcGates(sym, payload, fxssiData, db);
+
+  console.log(`[ABC] ${sym} ${direction} Class${pineClass} → ${gates.verdict} | ${gates.reason}`);
+
+  if (gates.blocked || gates.verdict === 'SKIP') return;
+
+  // Expiry
+  const cfg = SYMBOLS[sym];
+  const expiryHours = cfg?.type?.includes('forex') ? 4 : cfg?.type?.includes('crypto') ? 8 : 6;
+  const expiresAt = Date.now() + expiryHours * 3600000;
+
+  const { getSessionNow } = require('./config');
+  const session = getSessionNow ? getSessionNow() : 'unknown';
+
+  // Save
+  const signalId = db.insertAbcSignal({
+    symbol: sym, direction, pineClass, score,
+    verdict: gates.verdict, entry, sl, tp,
+    rr: gates.rr || rr, session,
+    reasoning: gates.reason, expiresAt,
+    fxssiStale: !fxssiData, rawPayload: JSON.stringify(data)
+  });
+
+  if (!signalId) { console.log(`[ABC] ${sym} — failed to save`); return; }
+  console.log(`[ABC] Saved to abc_signals id:${signalId}`);
+
+  // Telegram — A+B to swing channel
+  if (pineClass === 'A' || pineClass === 'B') {
+    sendAbcSignalAlert({
+      symbol: sym, direction, pineClass, score,
+      verdict: gates.verdict, entry, sl, tp,
+      rr: gates.rr || rr, session, reasoning: gates.reason
+    }).catch(e => console.error('[Telegram] ABC alert error:', e.message));
+  }
+
+  // WebSocket
+  broadcast({
+    type: 'ABC_SIGNAL', signalId, symbol: sym, direction, pineClass,
+    verdict: gates.verdict, entry, sl, tp,
+    rr: gates.rr || rr, score, session, reasoning: gates.reason, ts: Date.now()
+  });
 }
 
 // ── Webhook: FXSSI manual paste ──────────────────────────────────────────────
@@ -517,6 +629,11 @@ app.get('/api/debug', (req, res) => {
 
 app.get('/api/past-signals', (req, res) => {
   res.json(getPastCycleSignals(200));
+});
+
+app.get('/api/abc-signals', (req, res) => {
+  try { res.json(db.getAbcSignals(200)); }
+  catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // Manual retirement trigger
