@@ -129,13 +129,38 @@ async function init() {
 let _persistPending = false;
 let _persistWriting = false;
 
+// Debounce persist — max once every 30 seconds to prevent event loop blocking.
+// db.export() serializes the entire in-memory DB synchronously. With fxssi_history
+// + market_data_history growing, calling it on every single DB write was starving
+// the event loop. Now: mark dirty, flush on next 30s tick.
+let _persistDirty = false;
+let _persistTimer = null;
+const PERSIST_INTERVAL_MS = 30000;
+
 function persist() {
   if (!db) return;
+  if (!_startupComplete) return;
 
-  // Layer 1: suppress persist during startup window
-  if (!_startupComplete) {
-    return; // silently skip — will flush when startup completes
+  // Mark dirty — actual write happens on the timer
+  _persistDirty = true;
+
+  // Start the timer if not already running
+  if (!_persistTimer) {
+    _persistTimer = setInterval(_flushToDisk, PERSIST_INTERVAL_MS);
+    // Also flush once immediately on first call (startup)
+    setImmediate(_flushToDisk);
   }
+}
+
+// Force immediate persist — used by shutdown hooks or explicit flush
+function persistNow() {
+  _persistDirty = true;
+  _flushToDisk();
+}
+
+function _flushToDisk() {
+  if (!db || !_persistDirty) return;
+  _persistDirty = false;
 
   // Layer 3: never overwrite if we had signals at startup but now have 0
   if (_startupSignalCount > 0) {
@@ -143,51 +168,31 @@ function persist() {
       const row = db.exec("SELECT COUNT(*) as c FROM signals")[0];
       const currentCount = row?.values?.[0]?.[0] || 0;
       if (currentCount === 0) {
-        console.error(`[DB] ABORT persist — had ${_startupSignalCount} signals at startup, now 0. DB was reset in memory.`);
+        console.error(`[DB] ABORT persist — had ${_startupSignalCount} signals at startup, now 0.`);
         return;
       }
     } catch(e) {}
   }
 
-  // Layer 2: check disk file is not larger than memory export
-  // If disk is bloated (>100MB), DON'T try to reload — it will OOM
-  // Instead just skip persist and let the current in-memory DB continue
-  try {
-    if (fs.existsSync(DB_PATH)) {
-      const diskSize = fs.statSync(DB_PATH).size;
-      const memData = db.export();
-      if (diskSize > 0 && memData.length > 0 && diskSize > memData.length * 1.5) {
-        // If disk is much larger, it's either bloated or memory DB lost data
-        // If memory has signals, it's safe — disk was just bloated with history
-        const memSignals = (() => { try { return db.exec("SELECT COUNT(*) FROM signals")[0]?.values?.[0]?.[0] || 0; } catch(e) { return 0; } })();
-        if (memSignals > 0) {
-          console.warn(`[DB] Disk (${Math.round(diskSize/1024)}KB) > memory (${Math.round(memData.length/1024)}KB) but memory has ${memSignals} signals — overwriting disk with clean DB`);
-          // Safe to overwrite — memory DB has real data, disk was just bloated
-        } else {
-          console.error(`[DB] ABORT persist — disk (${Math.round(diskSize/1024)}KB) larger than memory (${Math.round(memData.length/1024)}KB) and memory has 0 signals. NOT overwriting.`);
-          return;
-        }
-      }
-    }
-  } catch(e) {}
-
-  // Layer 4: pre-persist backup
-  try {
-    if (fs.existsSync(DB_PATH) && fs.statSync(DB_PATH).size > 0) {
-      fs.copyFileSync(DB_PATH, DB_PATH + '.bak');
-    }
-  } catch(e) {}
-
-  // Coalesce: if a write is already in flight, just flag that another is needed
   if (_persistWriting) { _persistPending = true; return; }
   _persistWriting = true;
   try {
     const data = db.export();
+    const buf = Buffer.from(data);
+
+    // Pre-persist backup (async to avoid blocking)
+    try {
+      if (fs.existsSync(DB_PATH) && fs.statSync(DB_PATH).size > 0) {
+        fs.copyFile(DB_PATH, DB_PATH + '.bak', () => {}); // fire and forget
+      }
+    } catch(e) {}
+
     fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    fs.writeFile(DB_PATH, Buffer.from(data), (err) => {
+    fs.writeFile(DB_PATH, buf, (err) => {
       _persistWriting = false;
       if (err) console.error('[DB] Persist error:', err.message);
-      if (_persistPending) { _persistPending = false; persist(); }
+      else console.log(`[DB] Persisted ${Math.round(buf.length / 1024)}KB`);
+      if (_persistPending) { _persistPending = false; setImmediate(_flushToDisk); }
     });
   } catch (e) {
     _persistWriting = false;
@@ -1349,7 +1354,7 @@ function getFxssiHistoryStatus() {
 }
 
 module.exports = {
-  init, isReady, persist, run, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
+  init, isReady, persist, persistNow, run, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
   upsertMarketData, getLatestMarketData,
   insertSignal, refineSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,

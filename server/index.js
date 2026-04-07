@@ -2892,3 +2892,7 @@ server.listen(PORT, () => {
     console.error('[DB] Init failed:', e.message);
   });
 });
+
+// Graceful shutdown — flush DB to disk before exit
+process.on('SIGTERM', () => { console.log('[Shutdown] SIGTERM — flushing DB...'); db.persistNow(); setTimeout(() => process.exit(0), 2000); });
+process.on('SIGINT',  () => { console.log('[Shutdown] SIGINT — flushing DB...');  db.persistNow(); setTimeout(() => process.exit(0), 2000); });
