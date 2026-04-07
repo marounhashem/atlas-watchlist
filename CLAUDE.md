@@ -116,45 +116,40 @@ Dynamic minScore floor:
 | weightedStruct < 5.0 | 80 |
 | noOrderBook + < 5.0 | +3 additive |
 
-## Scoring penalty stack (cumulative)
+## Scoring penalty stack (cumulative) — simplified 20260407.2
 
 | Gate | Condition | Effect |
 |------|-----------|--------|
 | Macro conflict | Strength 8-10 against | ×0.70 |
 | Macro conflict | Strength 6-7 against | ×0.78 |
 | Macro conflict | Strength 4-5 against | ×0.88 |
-| COT extreme | >100k crowded against | ×0.88 |
-| COT extreme | >100k favours direction | ×1.05 |
-| Carry fight | >500bps against | ×0.80 |
-| Carry fight | >300bps against | ×0.88 |
-| Carry with | >300bps with | ×1.05 |
-| Forward guidance | CB consensus confirms | ×1.08 |
-| Forward guidance | CB consensus contradicts | ×0.88 |
-| Forecast bias | Pre-release confirms (strength 3) | ×1.12 |
-| Forecast bias | Pre-release confirms (strength 2) | ×1.07 |
-| Forecast bias | Pre-release contradicts | ×0.88–0.97 |
 | Event sentiment | Beat confirms + trend confirms | ×1.10–1.20 (+5% trend bonus) |
 | Event sentiment | Miss contradicts direction | ×0.85–0.95 |
 | noOrderBook | No FXSSI data | ×0.92 |
 | Pre-event | HIGH impact within 10min | ×0.75 + cap WATCH |
 | Post-event VOLATILITY | 0-5min after fire | Hard block (null) |
 | Post-event OPPORTUNITY | 5-120min after fire | ×1.10 confirms / ×0.90 against |
-| FXSSI stale | OB data >25min old | ×0.82 |
-| Gravity against | Gravity pulls against direction | ×0.88 |
-| Cluster proximity | Losing cluster within 0.3% of entry | ×0.85 |
-| Multiplier floor | All penalties combined | min 0.65 |
-| Momentum <15% | momScore critically weak | ×0.88 + force WATCH |
-| Momentum <25% | momScore weak | force WATCH |
-| DXY confirms | Direct USD pair (7 majors) | ×1.07 |
-| DXY confirms | Cross/commodity USD pair | ×1.03 |
-| DXY conflicts | Direct USD pair | ×0.92 |
-| DXY conflicts | Cross/commodity USD pair | ×0.97 |
-| Macro superseded | HIGH event fired after macro update | decay factor 0.25 |
 | Intel key levels | Price at resistance vs LONG | ×0.80 |
 | Intel key levels | Price at support confirms LONG | ×1.08 |
 | Intel approaching | Price approaching key level | ×0.92 |
 | Bank holiday | Symbol affected by bank holiday | session ×0.5 + force WATCH |
-| Nikkei-JPY | J225 bearish + JPY LONG | ×0.93 |
+| Momentum <15% | momScore critically weak | ×0.88 + force WATCH |
+| Momentum <25% | momScore weak | force WATCH |
+| Multiplier floor | All penalties combined | min 0.70 |
+
+### Hard gates (return null — no signal)
+
+| Gate | Condition |
+|------|-----------|
+| Trapped trader | LONG + buyersInProfitPct <35% |
+| Trapped trader | SHORT + sellersInProfitPct <35% |
+| Gravity proximity | Entry within 0.3% of gravity price |
+| RR kill | R:R < 1.5 |
+| RSI extreme | LONG + RSI < 40, SHORT + RSI > 75 |
+
+### Removed multipliers (20260407.2)
+
+COT positioning, carry rate, CB consensus, forecast bias, Nikkei-JPY correlation, macro superseded decay, cluster proximity, DXY confirms/conflicts, long% crowd positioning, absorption scoring.
 
 ## Minimum SL enforcement
 

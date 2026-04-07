@@ -4,9 +4,7 @@ const { getLatestMarketData, getWeights, insertSignal, getOpenSignals, getLatest
 const { isMarketOpen } = require('./marketHours');
 
 // Lazy-loaded modules (avoid circular deps at startup)
-let _cotFetcher, _rateFetcher, _claudeLearner, _cbCalendar;
-function getCotFetcher()   { return _cotFetcher   || (_cotFetcher   = require('./cotFetcher')); }
-function getRateFetcher()  { return _rateFetcher  || (_rateFetcher  = require('./rateFetcher')); }
+let _claudeLearner, _cbCalendar;
 function getClaudeLearner(){ return _claudeLearner|| (_claudeLearner= require('./claudeLearner')); }
 function getCbCalendar()   { return _cbCalendar   || (_cbCalendar   = require('./centralBankCalendar')); }
 
@@ -539,7 +537,6 @@ function estimateATR(data, assetClass) {
 }
 
 const FXSSI_MAX_AGE_MS = 25 * 60 * 1000; // 25 minutes — FXSSI updates at :00/:20/:40, we fetch at :01/:21/:41
-const FXSSI_STALE_PENALTY = 0.90; // spot: one cycle late is barely stale
 
 function scoreSymbol(symbol) {
   let data;
@@ -637,9 +634,12 @@ function scoreSymbol(symbol) {
   // If the side we're trading has <35% of positions in profit, they're trapped
   // and will capitulate — don't enter with them
   try {
-    const fxssiTrap = JSON.parse(data.fxssi_analysis || '{}');
-    const buyersInProfit = fxssiTrap.buyersInProfitPct ?? null;
-    const sellersInProfit = fxssiTrap.sellersInProfitPct ?? null;
+    const rawTrap = JSON.parse(data.fxssi_analysis || '{}');
+    const fxssiTrap = rawTrap.fxssiAnalysis
+      ? (typeof rawTrap.fxssiAnalysis === 'string' ? JSON.parse(rawTrap.fxssiAnalysis) : rawTrap.fxssiAnalysis)
+      : (rawTrap.longPct != null ? rawTrap : null);
+    const buyersInProfit = fxssiTrap?.buyersInProfitPct ?? null;
+    const sellersInProfit = fxssiTrap?.sellersInProfitPct ?? null;
     if (direction === 'LONG' && buyersInProfit !== null && buyersInProfit < 35) {
       console.log(`[Scorer] ${symbol} LONG blocked — buyers only ${buyersInProfit}% in profit (trapped)`);
       return null;
@@ -1359,8 +1359,11 @@ function scoreSymbol(symbol) {
   // If entry is within 0.3% of the gravity (SL hunt target), price is likely
   // to be swept before the trade can develop — skip entirely
   try {
-    const fxssiGrav = JSON.parse(data.fxssi_analysis || '{}');
-    const gravityPrice = fxssiGrav.gravity?.price ?? null;
+    const rawGrav = JSON.parse(data.fxssi_analysis || '{}');
+    const fxssiGrav = rawGrav.fxssiAnalysis
+      ? (typeof rawGrav.fxssiAnalysis === 'string' ? JSON.parse(rawGrav.fxssiAnalysis) : rawGrav.fxssiAnalysis)
+      : (rawGrav.longPct != null ? rawGrav : null);
+    const gravityPrice = fxssiGrav?.gravity?.price ?? null;
     if (gravityPrice && entry) {
       const gravityDist = Math.abs(entry - gravityPrice) / entry;
       if (gravityDist < 0.003) {
@@ -1926,7 +1929,7 @@ function scoreSymbol(symbol) {
   const bd = { bias: biasSc, fxssi: fxssiSc, ob: obSc, session: sessionSc };
   let qPos = 0, qNeg = 0;
   if (bd.fxssi > 0.75) qPos++; if (bd.bias > 0.80) qPos++; if (bd.ob > 0.80) qPos++;
-  if (macroContextAvailable) qPos++; if (data.ob_absorption) qPos++;
+  if (macroContextAvailable) qPos++;
   if (bd.fxssi < 0.45) qNeg++; if (bd.ob < 0.40) qNeg++; if (!macroContextAvailable) qNeg++;
   if (momentumForceWatch) qNeg++; if (bankHolidayFlag) qNeg++;
   const quality = (qPos - qNeg >= 2) ? 'A' : (qPos - qNeg >= 0) ? 'B' : 'C';
@@ -2031,7 +2034,7 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
   if (fxssiSc > 0.7) parts.push(`Crowd trapped (${direction === 'LONG' ? shortPct + '% short' : longPct + '% long'}) — contrarian favour`);
   else if (fxssiSc < 0.35) parts.push(`Crowd aligned with trade — stop hunt risk`);
 
-  if (data.ob_absorption) parts.push(`Order book absorption detected at level`);
+  // ob_absorption reasoning removed (20260407.2)
   if (data.fvg_present)   parts.push(`FVG present — entry zone active`);
   try {
     const raw = data.fxssi_analysis || data.raw_payload;
