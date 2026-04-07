@@ -676,6 +676,9 @@ app.post('/api/backtest-analyze', (req, res) => {
   const aligned = { count: 0, wins: 0, losses: 0 };
   const conflicted = { count: 0, wins: 0, losses: 0 };
   const neutral = { count: 0, wins: 0, losses: 0 };
+  const lpAligned = { count: 0, wins: 0, losses: 0 };
+  const lpConflicted = { count: 0, wins: 0, losses: 0 };
+  const lpNeutral = { count: 0, wins: 0, losses: 0 };
   let noSnapshot = 0;
   const results = [];
 
@@ -719,6 +722,21 @@ app.post('/api/backtest-analyze', (req, res) => {
         alignment = 'neutral';
         neutral.count++; if (isWin) neutral.wins++; if (isLoss) neutral.losses++;
       }
+
+      // long_pct alignment — uses raw percentages for more granular signal
+      let lpAlignment = 'long_pct_neutral';
+      if (longPct != null) {
+        if ((trade.direction === 'SHORT' && longPct >= 52) || (trade.direction === 'LONG' && longPct <= 48)) {
+          lpAlignment = 'long_pct_aligned';
+          lpAligned.count++; if (isWin) lpAligned.wins++; if (isLoss) lpAligned.losses++;
+        } else if ((trade.direction === 'SHORT' && longPct <= 48) || (trade.direction === 'LONG' && longPct >= 52)) {
+          lpAlignment = 'long_pct_conflicted';
+          lpConflicted.count++; if (isWin) lpConflicted.wins++; if (isLoss) lpConflicted.losses++;
+        } else {
+          lpNeutral.count++; if (isWin) lpNeutral.wins++; if (isLoss) lpNeutral.losses++;
+        }
+      }
+      fxssi_data.long_pct_alignment = lpAlignment;
     } else {
       noSnapshot++;
     }
@@ -732,6 +750,9 @@ app.post('/api/backtest-analyze', (req, res) => {
     fxssi_aligned: { ...aligned, win_rate: wr(aligned) },
     fxssi_conflicted: { ...conflicted, win_rate: wr(conflicted) },
     fxssi_neutral: { ...neutral, win_rate: wr(neutral) },
+    long_pct_aligned: { ...lpAligned, win_rate: wr(lpAligned) },
+    long_pct_conflicted: { ...lpConflicted, win_rate: wr(lpConflicted) },
+    long_pct_neutral: { ...lpNeutral, win_rate: wr(lpNeutral) },
     no_snapshot: { count: noSnapshot },
     trades: results
   });
