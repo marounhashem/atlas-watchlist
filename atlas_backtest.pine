@@ -128,6 +128,35 @@ plot(inLong ? longTP3  : inShort ? shortTP3  : na, "TP3", color=color.teal,    s
 plotshape(goLong,  "Long Signal",  shape.triangleup,   location.belowbar, color.green, size=size.small)
 plotshape(goShort, "Short Signal", shape.triangledown,  location.abovebar, color.red,   size=size.small)
 
+// ── DEBUG LABEL — last bar diagnostic (remove after troubleshooting) ────────
+if barstate.islast
+    debugTxt = "=== ATLAS DEBUG ===\n"
+     + "biasScore: " + str.tostring(biasScore, "#.#") + "\n"
+     + "weightedStruct: " + str.tostring(weightedStruct, "#.#") + "\n"
+     + "isLong: " + str.tostring(isLong) + "  isShort: " + str.tostring(isShort) + "\n"
+     + "longBlocked: " + str.tostring(longBlocked) + "  shortBlocked: " + str.tostring(shortBlocked) + "\n"
+     + "structGate: " + str.tostring(structGate) + "\n"
+     + "rrPass: " + str.tostring(rrPass) + "\n"
+     + "goLong: " + str.tostring(goLong) + "  goShort: " + str.tostring(goShort) + "\n"
+     + "afterStart: " + str.tostring(afterStart) + "  noPos: " + str.tostring(noPosition) + "\n"
+     + "--- COMPONENTS ---\n"
+     + "ema200_1d: " + str.tostring(ema200_1d, "#.##") + (na(ema200_1d) ? " [NA!]" : "") + "\n"
+     + "ema200_4h: " + str.tostring(ema200_4h, "#.##") + (na(ema200_4h) ? " [NA!]" : "") + "\n"
+     + "ema200_1h: " + str.tostring(ema200_1h, "#.##") + (na(ema200_1h) ? " [NA!]" : "") + "\n"
+     + "rsi14: " + str.tostring(rsi14, "#.#") + "\n"
+     + "macdHist: " + str.tostring(macdHist, "#.####") + "\n"
+     + "vwap: " + str.tostring(vwapVal, "#.##") + (na(vwapVal) ? " [NA!]" : "") + "\n"
+     + "atr14: " + str.tostring(atr14, "#.##") + (na(atr14) ? " [NA!]" : "") + "\n"
+     + "--- STRUCTURE ---\n"
+     + "1d:" + str.tostring(struct_1d) + (na(struct_1d) ? "[NA!]" : "")
+     + "  4h:" + str.tostring(struct_4h) + (na(struct_4h) ? "[NA!]" : "")
+     + "  1h:" + str.tostring(struct_1h) + (na(struct_1h) ? "[NA!]" : "")
+     + "  15m:" + str.tostring(struct_15m) + (na(struct_15m) ? "[NA!]" : "") + "\n"
+     + "--- LEVELS ---\n"
+     + "longRR: " + str.tostring(longRR, "#.##") + "  shortRR: " + str.tostring(shortRR, "#.##") + "\n"
+     + "close: " + str.tostring(close) + "  entry_L: " + str.tostring(longEntry, "#.##") + "  sl_L: " + str.tostring(longSL, "#.##")
+    label.new(bar_index, high, debugTxt, style=label.style_label_down, color=color.new(color.black, 20), textcolor=color.white, size=size.normal)
+
 // ── PLOTS — SEPARATE PANES ─────────────────────────────────────────────────
 plot(biasScore,     "Bias Score",      color=biasScore > 0 ? color.green : color.red, display=display.pane)
 hline(2,  "Long Threshold",  color=color.gray, linestyle=hline.style_dotted, display=display.all)
