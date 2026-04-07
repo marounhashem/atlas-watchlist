@@ -2455,6 +2455,11 @@ async function callClaudeWithSearch(prompt) {
   return (data1.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
 }
 
+// ── MACRO CONTEXT FETCH ─────────────────────────────────────────────────────
+// ONLY called by 07:00 UTC cron — NEVER call on startup or restart.
+// On startup, macro context is loaded from DB only (no API calls).
+// This function makes Anthropic API calls for every symbol — calling it on
+// startup wastes API budget and has caused billing incidents repeatedly.
 async function runMacroContextFetch(broadcast) {
   if (!process.env.ANTHROPIC_API_KEY) return;
 
@@ -2810,7 +2815,8 @@ server.listen(PORT, () => {
         console.error('[Startup] Calendar seed error:', e.message);
       }
     }, 9000);
-    // Load macro context from DB on startup (10s — after COT and rates are loaded)
+    // Load macro context from DB on startup — DB only, NO API calls
+    // Macro fetch is ONLY triggered by the 07:00 UTC cron, never on startup
     setTimeout(() => {
       try {
         const stored = db.getStoredMacroContext();
@@ -2818,13 +2824,8 @@ server.listen(PORT, () => {
         if (count > 0) {
           Object.assign(macroContext, stored);
           console.log(`[Startup] Loaded ${count} macro contexts from DB`);
-        }
-        const age = db.getMacroContextAge();
-        if (count === 0 || age > 26 * 3600000) {
-          console.log(`[Startup] Macro context ${count === 0 ? 'empty' : 'stale'} — fetching...`);
-          runMacroContextFetch(broadcast)
-            .then(() => console.log('[Startup] Macro context fetch complete'))
-            .catch(e => console.error('[Startup] Macro context fetch error:', e.message));
+        } else {
+          console.log('[Startup] No macro context in DB — will be populated at 07:00 UTC cron');
         }
       } catch(e) {
         console.error('[Startup] Macro context load error:', e.message);
