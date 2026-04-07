@@ -668,6 +668,66 @@ app.get('/api/fxssi-history/query', (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// Backtest analysis — correlate trades with FXSSI historical snapshots
+app.post('/api/backtest-analyze', (req, res) => {
+  const trades = req.body;
+  if (!Array.isArray(trades) || trades.length === 0) return res.status(400).json({ error: 'Expected array of trades' });
+
+  const aligned = { count: 0, wins: 0, losses: 0 };
+  const conflicted = { count: 0, wins: 0, losses: 0 };
+  const neutral = { count: 0, wins: 0, losses: 0 };
+  let noSnapshot = 0;
+  const results = [];
+
+  for (const trade of trades) {
+    const ts = Math.floor(new Date(trade.entry_time).getTime() / 1000);
+    const snap = querySnapshot(trade.symbol, ts);
+    const isWin = trade.outcome === 'WIN';
+    const isLoss = trade.outcome === 'LOSS';
+
+    let alignment = 'no_snapshot';
+    let fxssi_data = null;
+
+    if (snap.match) {
+      fxssi_data = {
+        sentiment: snap.match.sentiment,
+        trapped: snap.match.trapped,
+        long_pct: snap.match.long_pct,
+        short_pct: snap.match.short_pct,
+        gravity_price: snap.match.gravity_price,
+        ob_imbalance: snap.match.ob_imbalance,
+        gap_minutes: snap.gap_minutes
+      };
+
+      const sent = snap.match.sentiment;
+      if ((trade.direction === 'LONG' && sent === 'BULLISH') || (trade.direction === 'SHORT' && sent === 'BEARISH')) {
+        alignment = 'aligned';
+        aligned.count++; if (isWin) aligned.wins++; if (isLoss) aligned.losses++;
+      } else if ((trade.direction === 'LONG' && sent === 'BEARISH') || (trade.direction === 'SHORT' && sent === 'BULLISH')) {
+        alignment = 'conflicted';
+        conflicted.count++; if (isWin) conflicted.wins++; if (isLoss) conflicted.losses++;
+      } else {
+        alignment = 'neutral';
+        neutral.count++; if (isWin) neutral.wins++; if (isLoss) neutral.losses++;
+      }
+    } else {
+      noSnapshot++;
+    }
+
+    results.push({ ...trade, fxssi_data, alignment, snapshot_reason: snap.reason || null });
+  }
+
+  const wr = (b) => b.count > 0 ? Math.round(b.wins / (b.wins + b.losses || 1) * 100) : null;
+  res.json({
+    total: trades.length,
+    fxssi_aligned: { ...aligned, win_rate: wr(aligned) },
+    fxssi_conflicted: { ...conflicted, win_rate: wr(conflicted) },
+    fxssi_neutral: { ...neutral, win_rate: wr(neutral) },
+    no_snapshot: { count: noSnapshot },
+    trades: results
+  });
+});
+
 app.get('/api/fxssi-history/stop', (req, res) => {
   if (!isCollecting()) return res.json({ stopped: false, reason: 'not_running' });
   cancelCollection();
