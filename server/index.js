@@ -21,6 +21,7 @@ const { runRateFetch, loadRatesFromDB, getLatestRates, getRateDifferential } = r
 const { getUpcomingMeetings, isPairEventRisk, getMeetingContext } = require('./centralBankCalendar');
 const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTest } = require('./telegram');
 const { runCalendarCheck, runCalendarFetch, isPreEventRisk, isPostEventSuppressed, getUpcomingHighImpactEvents } = require('./forexCalendar');
+const { collectFullHistory, collectRecentHistory, querySnapshot } = require('./fxssi-history-collector');
 const { SYMBOLS } = require('./config');
 
 console.log('[Startup] 2 — modules loaded', Date.now());
@@ -637,27 +638,32 @@ app.get('/api/fxssi-fetch', async (req, res) => {
   }
 });
 
-// TEMPORARY: compare FXSSI with/without timeOffset param
-app.get('/api/fxssi-timeoffset-test', async (req, res) => {
-  const token = process.env.FXSSI_TOKEN;
-  const userId = process.env.FXSSI_USER_ID || '118460';
-  if (!token) return res.json({ error: 'No FXSSI_TOKEN' });
-  const headers = {
-    'Accept': 'application/json, text/javascript, */*; q=0.01',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
-    'Referer': 'https://fxssi.com/'
-  };
-  const base = `https://c.fxssi.com/api/order-book?pair=EURUSD&view=all&period=1200&token=${token}&user_id=${userId}`;
+// FXSSI historical data collection for backtesting
+app.get('/api/fxssi-history/collect', (req, res) => {
+  if (!dbReady) return res.json({ error: 'DB not ready' });
+  const mode = req.query.mode === 'recent' ? 'recent' : 'full';
+  res.json({ started: true, mode });
+  // Run async — don't block response
+  (mode === 'recent' ? collectRecentHistory() : collectFullHistory())
+    .then(r => console.log(`[FXSSI-Hist] ${mode} collection done:`, r))
+    .catch(e => console.error(`[FXSSI-Hist] ${mode} collection error:`, e.message));
+});
+
+app.get('/api/fxssi-history/status', (req, res) => {
+  if (!dbReady) return res.json({ error: 'DB not ready' });
   try {
-    const [r1, r2] = await Promise.all([
-      fetch(`${base}&rand=${Math.random()}`, { headers }).then(r => r.json()),
-      fetch(`${base}&timeOffset=10&rand=${Math.random()}`, { headers }).then(r => r.json())
-    ]);
-    res.json({
-      withoutOffset: { time: r1.time, price: r1.price, levels: r1.levels?.length },
-      withOffset:    { time: r2.time, price: r2.price, levels: r2.levels?.length },
-      timeDiffSeconds: (r2.time || 0) - (r1.time || 0)
-    });
+    const rows = db.getFxssiHistoryStatus();
+    const total = rows.reduce((sum, r) => sum + r.count, 0);
+    res.json({ total, symbols: rows });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/fxssi-history/query', (req, res) => {
+  const { symbol, timestamp } = req.query;
+  if (!symbol || !timestamp) return res.status(400).json({ error: 'Missing symbol or timestamp' });
+  try {
+    const result = querySnapshot(symbol, Number(timestamp));
+    res.json(result);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2310,6 +2316,15 @@ cron.schedule('0 23 * * *', async () => {
     await claudeLearner.dailySessionSummary(broadcast);
     console.log('[Cron] Nightly review complete');
   } catch(e) { console.error('[Cron] Nightly review error:', e.message); }
+});
+
+// Nightly FXSSI history collection — 23:30 UTC
+cron.schedule('30 23 * * *', async () => {
+  try {
+    console.log('[Cron] FXSSI history collection starting...');
+    const result = await collectRecentHistory();
+    console.log(`[Cron] FXSSI history collection done — collected:${result.collected} skipped:${result.skipped} errors:${result.errors}`);
+  } catch(e) { console.error('[Cron] FXSSI history error:', e.message); }
 });
 
 // Weekly entry optimisation — Sunday 22:00 UTC (before Monday open)
