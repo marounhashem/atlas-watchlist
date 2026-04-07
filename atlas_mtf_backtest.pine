@@ -5,8 +5,8 @@ strategy("ATLAS // MTF BACKTEST", overlay=true, pyramiding=0,
      calc_on_every_tick=false)
 
 // ── INPUTS ──────────────────────────────────────────────────────────────────
-dailyLookback = input.int(24,    "Daily Bars",   minval=16, maxval=48,  step=4)
-htfLookback   = input.int(4,     "4H Bars",      minval=2,  maxval=8,   step=1)
+dailyLookback = input.int(144,   "Daily Bars (144=24h on 10m)", minval=96, maxval=288, step=24)
+htfLookback   = input.int(24,    "4H Bars (24=4h on 10m)",    minval=12, maxval=48,  step=6)
 swingLen      = input.int(10,    "Swing Length",  minval=5,  maxval=20,  step=5)
 atrLen        = input.int(14,    "ATR Length")
 minRR         = input.float(2.0, "Min R:R",      minval=1.5, maxval=4.0, step=0.5)
@@ -27,8 +27,8 @@ dailySupport    = dailyLow
 htfHigh = ta.highest(high, htfLookback)
 htfLow  = ta.lowest(low,   htfLookback)
 
-supportZoneTop = dailyLow  + (dailyHigh - dailyLow) * 0.35
-resistZoneBot  = dailyHigh - (dailyHigh - dailyLow) * 0.35
+supportZoneTop = dailyLow  + (dailyHigh - dailyLow) * 0.45
+resistZoneBot  = dailyHigh - (dailyHigh - dailyLow) * 0.45
 
 bullishSetup = dailyBullish and close <= supportZoneTop
 bearishSetup = dailyBearish and close >= resistZoneBot
@@ -39,14 +39,14 @@ candleRange = high - low
 lowerWick   = math.min(open, close) - low
 upperWick   = high - math.max(open, close)
 
-bullRejection = candleRange > 0 and lowerWick > candleRange * 0.5 and close > (low + candleRange * 0.6)
-bearRejection = candleRange > 0 and upperWick > candleRange * 0.5 and close < (high - candleRange * 0.6)
+bullRejection = candleRange > 0 and lowerWick > candleRange * 0.3 and close > (low + candleRange * 0.4)
+bearRejection = candleRange > 0 and upperWick > candleRange * 0.3 and close < (high - candleRange * 0.4)
 
 // ── STEP 4 — CONFLUENCE ENTRY ───────────────────────────────────────────────
 notAtDailyExtreme = close > dailyLow + atr14 and close < dailyHigh - atr14
 
-longSignal  = bullishSetup and bullRejection and notAtDailyExtreme
-shortSignal = bearishSetup and bearRejection and notAtDailyExtreme
+longSignal  = bullishSetup and bullRejection
+shortSignal = bearishSetup and bearRejection
 
 // ── STEP 5 — SL AND TP ─────────────────────────────────────────────────────
 slLong  = low  - atr14 * 0.1
