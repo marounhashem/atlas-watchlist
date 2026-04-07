@@ -736,8 +736,9 @@ app.post('/api/backtest-analyze', (req, res) => {
       const losingClusters = fullAnalysis?.losingClusters || [];
       const nearestLosingCluster = losingClusters[0] || null;
 
-      // gravity is stored as object {price, volume} in full_analysis, scalar in row
-      const gravityPrice = fullAnalysis?.gravity?.price ?? snap.match.gravity_price ?? null;
+      // gravity: row has scalar gravity_price; full_analysis has object {price,volume} or scalar
+      const rawGrav = fullAnalysis?.gravity;
+      const gravityPrice = (typeof rawGrav === 'object' && rawGrav !== null) ? rawGrav.price : (rawGrav ?? snap.match.gravity_price ?? null);
 
       fxssi_data = {
         snapshot_time: snap.match.snapshot_time,
@@ -830,8 +831,8 @@ app.post('/api/backtest-analyze', (req, res) => {
       fxssi_data.absorption_alignment = absAlignment;
 
       // Gravity proximity + direction
-      const gravPrice = gravityPrice; // already extracted above from full_analysis.gravity.price
-      const entryPrice = trade.entry || trade.entry_price || null;
+      const gravPrice = gravityPrice;
+      const entryPrice = Number(trade.entry_price) || Number(trade.entry) || Number(trade.price) || null;
       let gravProximity = 'gravity_none';
       let gravDirection = 'gravity_against';
       if (gravPrice && entryPrice) {
