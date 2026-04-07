@@ -47,6 +47,13 @@ struct_4h  = request.security(syminfo.tickerid, "240", f_struct(close, high, low
 struct_1h  = request.security(syminfo.tickerid, "60",  f_struct(close, high, low), lookahead=barmerge.lookahead_off)
 struct_15m = request.security(syminfo.tickerid, "15",  f_struct(close, high, low), lookahead=barmerge.lookahead_off)
 
+// na fallback — derive from EMA direction when HTF structure unavailable
+ema200_1d := na(ema200_1d) ? ema200_1h * 1.001 : ema200_1d
+ema200_4h := na(ema200_4h) ? ema200_1h : ema200_4h
+struct_1d := na(struct_1d) ? (close > ema200_1d ? 1 : -1) : struct_1d
+struct_4h := na(struct_4h) ? (close > ema200_4h ? 1 : -1) : struct_4h
+struct_15m := na(struct_15m) ? struct_1h : struct_15m
+
 // ── BIAS SCORE (-8 to +8) ──────────────────────────────────────────────────
 biasScore = (close > ema200_1d ? 3.0 : -3.0)
      + (close > ema200_4h ? 2.0 : -2.0)
