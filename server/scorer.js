@@ -153,7 +153,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260403.10'; // market_data_history for backtesting
+const SCORER_VERSION = '20260407.1'; // raised RR gates, trapped trader + gravity hard gates
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -644,6 +644,23 @@ function scoreSymbol(symbol) {
     console.log(`[Scorer] ${symbol} SHORT blocked — RSI ${rsiCheck} > 75 (extreme overbought, chase risk)`);
     return null;
   }
+
+  // ── Trapped trader hard gate (FXSSI profit split) ─────────────────────────
+  // If the side we're trading has <35% of positions in profit, they're trapped
+  // and will capitulate — don't enter with them
+  try {
+    const fxssiTrap = JSON.parse(data.fxssi_analysis || '{}');
+    const buyersInProfit = fxssiTrap.buyersInProfitPct ?? null;
+    const sellersInProfit = fxssiTrap.sellersInProfitPct ?? null;
+    if (direction === 'LONG' && buyersInProfit !== null && buyersInProfit < 35) {
+      console.log(`[Scorer] ${symbol} LONG blocked — buyers only ${buyersInProfit}% in profit (trapped)`);
+      return null;
+    }
+    if (direction === 'SHORT' && sellersInProfit !== null && sellersInProfit < 35) {
+      console.log(`[Scorer] ${symbol} SHORT blocked — sellers only ${sellersInProfit}% in profit (trapped)`);
+      return null;
+    }
+  } catch(e) {}
 
   // ── EMA + Structure trend filter ─────────────────────────────────────────
   // Block when BOTH higher TFs agree against direction — either via EMA or structure
@@ -1489,6 +1506,21 @@ function scoreSymbol(symbol) {
     entrySource = 'atr_buffer';
   }
 
+  // ── Gravity proximity hard gate ────────────────────────────────────────────
+  // If entry is within 0.3% of the gravity (SL hunt target), price is likely
+  // to be swept before the trade can develop — skip entirely
+  try {
+    const fxssiGrav = JSON.parse(data.fxssi_analysis || '{}');
+    const gravityPrice = fxssiGrav.gravity?.price ?? null;
+    if (gravityPrice && entry) {
+      const gravityDist = Math.abs(entry - gravityPrice) / entry;
+      if (gravityDist < 0.003) {
+        console.log(`[Scorer] ${symbol} blocked — price within 0.3% of gravity ${gravityPrice} (SL hunt risk)`);
+        return null;
+      }
+    }
+  } catch(e) {}
+
   // ── SL/TP from order book ─────────────────────────────────────────────────
   // SL: place beyond the NEXT level after the nearest cluster — not just 0.3 ATR past it.
   //     This avoids getting stopped during a cluster sweep before the real move.
@@ -1754,7 +1786,7 @@ function scoreSymbol(symbol) {
   } catch(e) {}
 
   const rrMin = claudeOpt?.ideal_rr_min || 1.5;
-  const rrMax = claudeOpt?.ideal_rr_max || 4.0;
+  const rrMax = claudeOpt?.ideal_rr_max || 5.0;
 
   if (!rr || rr < rrMin || rr > rrMax) {
     const risk = Math.abs(entry - sl);
@@ -1771,7 +1803,7 @@ function scoreSymbol(symbol) {
       } else {
         // rr is null/NaN — fall back to ATR-based recalc
         const slMult = claudeOpt?.sl_multiplier || 1.5;
-        const tpMult = claudeOpt?.tp_multiplier || 3.0;
+        const tpMult = claudeOpt?.tp_multiplier || 4.0;
         if (direction === 'LONG') {
           sl = Math.round((entry - atr * slMult) * 10000) / 10000;
           tp = Math.round((entry + atr * tpMult) * 10000) / 10000;
@@ -1783,7 +1815,7 @@ function scoreSymbol(symbol) {
     } else {
       // No valid SL — full ATR recalc
       const slMult = claudeOpt?.sl_multiplier || 1.5;
-      const tpMult = claudeOpt?.tp_multiplier || 3.0;
+      const tpMult = claudeOpt?.tp_multiplier || 4.0;
       if (direction === 'LONG') {
         sl = Math.round((entry - atr * slMult) * 10000) / 10000;
         tp = Math.round((entry + atr * tpMult) * 10000) / 10000;
@@ -1807,8 +1839,8 @@ function scoreSymbol(symbol) {
   // Below 1.5 R:R is not worth taking regardless of score
   // Recalculate after all level adjustments are done
   rr = calcRR(entry, sl, tp, direction);
-  // Minimum R:R: 2.0 for PROCEED, 1.5 for WATCH (below 1.5 = skip entirely)
-  const MIN_RR_PROCEED = 2.0;
+  // Minimum R:R: 2.5 for PROCEED, 1.5 for WATCH (below 1.5 = skip entirely)
+  const MIN_RR_PROCEED = 2.5;
   const MIN_RR_WATCH = 1.5;
   if (!rr || rr < MIN_RR_WATCH) {
     console.log(`[Scorer] ${symbol} ${direction} — R:R ${rr} below ${MIN_RR_WATCH}, skipping`);
