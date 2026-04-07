@@ -690,9 +690,14 @@ app.post('/api/backtest-analyze', (req, res) => {
 
     let alignment = 'no_snapshot';
     let fxssi_data = null;
+    let lpAlignment = 'long_pct_neutral';
+
+    // Debug first 3 trades
+    if (results.length < 3) {
+      console.log(`[backtest-analyze] trade ${results.length}: symbol=${trade.symbol} ts=${ts} snap.match=${!!snap.match} snap.reason=${snap.reason || 'none'} snap.rounded_to=${snap.rounded_to || 'n/a'} snap.fuzzy=${snap.fuzzy || false}`);
+    }
 
     if (snap.match) {
-      // sentiment lives in the row column; also parse full_analysis for richer data
       let fullAnalysis = null;
       try { fullAnalysis = typeof snap.match.full_analysis === 'string' ? JSON.parse(snap.match.full_analysis) : snap.match.full_analysis; } catch(e) {}
 
@@ -700,22 +705,26 @@ app.post('/api/backtest-analyze', (req, res) => {
       const longPct = snap.match.long_pct ?? fullAnalysis?.longPct ?? null;
       const shortPct = snap.match.short_pct ?? fullAnalysis?.shortPct ?? null;
 
+      if (results.length < 3) {
+        console.log(`[backtest-analyze] trade ${results.length}: snapshot found=true sentiment=${sent} long_pct=${longPct}`);
+      }
+
       fxssi_data = {
+        snapshot_time: snap.match.snapshot_time,
+        raw_sentiment: snap.match.sentiment,
         sentiment: sent,
         trapped: snap.match.trapped || fullAnalysis?.trapped || null,
         long_pct: longPct,
         short_pct: shortPct,
         gravity_price: snap.match.gravity_price,
         ob_imbalance: snap.match.ob_imbalance,
-        gap_minutes: snap.gap_minutes,
-        raw_sentiment: snap.match.sentiment,
-        raw_full_sentiment: fullAnalysis?.sentiment
+        gap_minutes: snap.gap_minutes
       };
 
-      if (sent === 'BULLISH' && trade.direction === 'LONG' || sent === 'BEARISH' && trade.direction === 'SHORT') {
+      if ((sent === 'BULLISH' && trade.direction === 'LONG') || (sent === 'BEARISH' && trade.direction === 'SHORT')) {
         alignment = 'aligned';
         aligned.count++; if (isWin) aligned.wins++; if (isLoss) aligned.losses++;
-      } else if (sent === 'BEARISH' && trade.direction === 'LONG' || sent === 'BULLISH' && trade.direction === 'SHORT') {
+      } else if ((sent === 'BEARISH' && trade.direction === 'LONG') || (sent === 'BULLISH' && trade.direction === 'SHORT')) {
         alignment = 'conflicted';
         conflicted.count++; if (isWin) conflicted.wins++; if (isLoss) conflicted.losses++;
       } else {
@@ -723,8 +732,6 @@ app.post('/api/backtest-analyze', (req, res) => {
         neutral.count++; if (isWin) neutral.wins++; if (isLoss) neutral.losses++;
       }
 
-      // long_pct alignment — uses raw percentages for more granular signal
-      let lpAlignment = 'long_pct_neutral';
       if (longPct != null) {
         if ((trade.direction === 'SHORT' && longPct >= 52) || (trade.direction === 'LONG' && longPct <= 48)) {
           lpAlignment = 'long_pct_aligned';
@@ -736,12 +743,14 @@ app.post('/api/backtest-analyze', (req, res) => {
           lpNeutral.count++; if (isWin) lpNeutral.wins++; if (isLoss) lpNeutral.losses++;
         }
       }
-      fxssi_data.long_pct_alignment = lpAlignment;
     } else {
       noSnapshot++;
+      if (results.length < 3) {
+        console.log(`[backtest-analyze] trade ${results.length}: NO snapshot — reason=${snap.reason} rounded_to=${snap.rounded_to}`);
+      }
     }
 
-    results.push({ ...trade, fxssi_data, alignment, snapshot_reason: snap.reason || null });
+    results.push({ ...trade, fxssi_data, alignment, long_pct_alignment: lpAlignment, snapshot_reason: snap.reason || null });
   }
 
   const wr = (b) => b.count > 0 ? Math.round(b.wins / (b.wins + b.losses || 1) * 100) : null;
