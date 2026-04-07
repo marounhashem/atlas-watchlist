@@ -23,18 +23,18 @@ dailyBearish = close < dailyMid
 dailyResistance = dailyHigh
 dailySupport    = dailyLow
 
-// ── STEP 2 — 4H SETUP (pullback to level) ──────────────────────────────────
-htfHigh = ta.highest(high, htfLookback)
-htfLow  = ta.lowest(low,   htfLookback)
+atr14 = ta.atr(atrLen)
 
-supportZoneTop = dailyLow  + (dailyHigh - dailyLow) * 0.45
-resistZoneBot  = dailyHigh - (dailyHigh - dailyLow) * 0.45
+// ── STEP 2 — 4H SETUP (pullback from recent extreme) ────────────────────────
+htfHighest = ta.highest(high, htfLookback)
+htfLowest  = ta.lowest(low,   htfLookback)
+pulledBackBull = close < htfHighest - atr14 * 0.3
+pulledBackBear = close > htfLowest  + atr14 * 0.3
 
-bullishSetup = dailyBullish and close <= supportZoneTop
-bearishSetup = dailyBearish and close >= resistZoneBot
+bullishSetup = dailyBullish and pulledBackBull
+bearishSetup = dailyBearish and pulledBackBear
 
 // ── STEP 3 — 1H ENTRY TRIGGER ──────────────────────────────────────────────
-atr14       = ta.atr(atrLen)
 candleRange = high - low
 lowerWick   = math.min(open, close) - low
 upperWick   = high - math.max(open, close)
@@ -76,8 +76,8 @@ if goShort
 plot(dailyHigh,      "Daily High",   color.new(color.red,   60), 1, plot.style_line)
 plot(dailyLow,       "Daily Low",    color.new(color.green, 60), 1, plot.style_line)
 plot(dailyMid,       "Daily Mid",    color.new(color.gray,  60), 1, plot.style_circles)
-plot(supportZoneTop, "Support Zone", color.new(color.green, 80), 1, plot.style_line)
-plot(resistZoneBot,  "Resist Zone",  color.new(color.red,   80), 1, plot.style_line)
+plot(htfHighest, "4H High", color.new(color.blue, 70), 1, plot.style_line)
+plot(htfLowest,  "4H Low",  color.new(color.blue, 70), 1, plot.style_line)
 
 plotshape(goLong,  "Long",  shape.triangleup,   location.belowbar, color.green, size=size.normal)
 plotshape(goShort, "Short", shape.triangledown,  location.abovebar, color.red,   size=size.normal)
