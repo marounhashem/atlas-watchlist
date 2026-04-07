@@ -57,14 +57,10 @@ biasScore = (close > ema200_1d ? 3.0 : -3.0)
      + (close > vwapVal ? 0.5 : -0.5)
 
 // ── DIRECTION ───────────────────────────────────────────────────────────────
-isLong  = biasScore >= minBiasScore
-isShort = biasScore <= -minBiasScore
-// Structure fallback: when biasScore is in dead zone (-2 to +2), use 1d+1h structure agreement
-if not isLong and not isShort
-    if struct_1d == 1 and struct_1h == 1
-        isLong := true
-    if struct_1d == -1 and struct_1h == -1
-        isShort := true
+// Primary: bias score threshold. Fallback: 1d+1h structure agreement in dead zone.
+inDeadZone = biasScore > -minBiasScore and biasScore < minBiasScore
+isLong  = biasScore >= minBiasScore or (inDeadZone and struct_1d == 1 and struct_1h == 1)
+isShort = biasScore <= -minBiasScore or (inDeadZone and struct_1d == -1 and struct_1h == -1)
 
 // ── HARD GATES ──────────────────────────────────────────────────────────────
 longBlocked  = rsi14 < rsiGateLong
