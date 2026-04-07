@@ -689,21 +689,30 @@ app.post('/api/backtest-analyze', (req, res) => {
     let fxssi_data = null;
 
     if (snap.match) {
+      // sentiment lives in the row column; also parse full_analysis for richer data
+      let fullAnalysis = null;
+      try { fullAnalysis = typeof snap.match.full_analysis === 'string' ? JSON.parse(snap.match.full_analysis) : snap.match.full_analysis; } catch(e) {}
+
+      const sent = snap.match.sentiment || fullAnalysis?.sentiment || null;
+      const longPct = snap.match.long_pct ?? fullAnalysis?.longPct ?? null;
+      const shortPct = snap.match.short_pct ?? fullAnalysis?.shortPct ?? null;
+
       fxssi_data = {
-        sentiment: snap.match.sentiment,
-        trapped: snap.match.trapped,
-        long_pct: snap.match.long_pct,
-        short_pct: snap.match.short_pct,
+        sentiment: sent,
+        trapped: snap.match.trapped || fullAnalysis?.trapped || null,
+        long_pct: longPct,
+        short_pct: shortPct,
         gravity_price: snap.match.gravity_price,
         ob_imbalance: snap.match.ob_imbalance,
-        gap_minutes: snap.gap_minutes
+        gap_minutes: snap.gap_minutes,
+        raw_sentiment: snap.match.sentiment,
+        raw_full_sentiment: fullAnalysis?.sentiment
       };
 
-      const sent = snap.match.sentiment;
-      if ((trade.direction === 'LONG' && sent === 'BULLISH') || (trade.direction === 'SHORT' && sent === 'BEARISH')) {
+      if (sent === 'BULLISH' && trade.direction === 'LONG' || sent === 'BEARISH' && trade.direction === 'SHORT') {
         alignment = 'aligned';
         aligned.count++; if (isWin) aligned.wins++; if (isLoss) aligned.losses++;
-      } else if ((trade.direction === 'LONG' && sent === 'BEARISH') || (trade.direction === 'SHORT' && sent === 'BULLISH')) {
+      } else if (sent === 'BEARISH' && trade.direction === 'LONG' || sent === 'BULLISH' && trade.direction === 'SHORT') {
         alignment = 'conflicted';
         conflicted.count++; if (isWin) conflicted.wins++; if (isLoss) conflicted.losses++;
       } else {
@@ -726,6 +735,23 @@ app.post('/api/backtest-analyze', (req, res) => {
     no_snapshot: { count: noSnapshot },
     trades: results
   });
+});
+
+// Debug: sample raw fxssi_history rows to inspect sentiment values
+app.get('/api/fxssi-history/sample', (req, res) => {
+  try {
+    const rows = db.run ? null : null; // use all() directly
+    const samples = require('./db').isReady() ?
+      (() => { const db2 = require('./db'); return [
+        ...(['GOLD','EURUSD','GBPUSD'].flatMap(sym => {
+          const r = db2.getFxssiHistorySnapshot(sym,
+            (() => { const s = db2.getFxssiHistoryStatus().find(s => s.symbol === sym); return s ? s.latest : 0; })()
+          );
+          return r ? [{ symbol: sym, snapshot_time: r.snapshot_time, sentiment: r.sentiment, long_pct: r.long_pct, short_pct: r.short_pct, trapped: r.trapped }] : [];
+        }))
+      ]; })() : [];
+    res.json({ samples });
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get('/api/fxssi-history/stop', (req, res) => {
