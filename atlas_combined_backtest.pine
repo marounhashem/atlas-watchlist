@@ -5,8 +5,6 @@ strategy("ATLAS // COMBINED", overlay=true, pyramiding=0,
          calc_on_every_tick=false)
 
 // ── INPUTS ──────────────────────────────────────────────────────────────────
-dailyBars    = input.int(1440,  "Daily Bars (1440=24h on 1m)",  minval=720,  maxval=2880, step=144)
-htfBars      = input.int(240,   "4H Bars (240=4h on 1m)",      minval=120,  maxval=480,  step=60)
 swingLen     = input.int(10,    "Swing Lookback",               minval=5,    maxval=20,   step=5)
 obLookback   = input.int(5,     "Order Block Lookback",  minval=3,   maxval=10,  step=1)
 rsiLen       = input.int(14,    "RSI Length")
@@ -28,12 +26,14 @@ cloudBot    = math.min(spanA, spanB)
 aboveCloud  = close > cloudTop
 belowCloud  = close < cloudBot
 
-// ── LAYER 2 — DAILY BIAS ────────────────────────────────────────────────────
-dailyHigh = ta.highest(high, dailyBars)
-dailyLow  = ta.lowest(low,   dailyBars)
-dailyMid  = (dailyHigh + dailyLow) / 2
-dailyBull = close > dailyMid
-dailyBear = close < dailyMid
+// ── LAYER 2 — DAILY BIAS (via request.security, no heavy lookback) ──────────
+dailyClose = request.security(syminfo.tickerid, "D", close[1], lookahead=barmerge.lookahead_off)
+dailyOpen  = request.security(syminfo.tickerid, "D", open[1],  lookahead=barmerge.lookahead_off)
+dailyHigh  = request.security(syminfo.tickerid, "D", high[1],  lookahead=barmerge.lookahead_off)
+dailyLow   = request.security(syminfo.tickerid, "D", low[1],   lookahead=barmerge.lookahead_off)
+dailyMid   = (dailyHigh + dailyLow) / 2
+dailyBull  = close > dailyMid
+dailyBear  = close < dailyMid
 
 // ── LAYER 3 — BREAK OF STRUCTURE ────────────────────────────────────────────
 swingHigh = ta.pivothigh(high, swingLen, swingLen)
@@ -75,13 +75,13 @@ if bearBOS
             obBearBot := low[i]
             break
 
-// ── LAYER 5 — 4H PULLBACK TO ORDER BLOCK ───────────────────────────────────
-htfHighest = ta.highest(high, htfBars)
-htfLowest  = ta.lowest(low,   htfBars)
-atr14 = ta.atr(atrLen)
+// ── LAYER 5 — 4H PULLBACK (via request.security) ───────────────────────────
+atr14   = ta.atr(atrLen)
+htfHigh = request.security(syminfo.tickerid, "240", high[1], lookahead=barmerge.lookahead_off)
+htfLow  = request.security(syminfo.tickerid, "240", low[1],  lookahead=barmerge.lookahead_off)
 
-pulledBackBull = close < htfHighest - atr14 * 0.3
-pulledBackBear = close > htfLowest  + atr14 * 0.3
+pulledBackBull = close < htfHigh - atr14 * 0.3
+pulledBackBear = close > htfLow  + atr14 * 0.3
 
 inObBull = not na(obBullTop) and close <= obBullTop and close >= obBullBot
 inObBear = not na(obBearTop) and close >= obBearBot and close <= obBearTop
