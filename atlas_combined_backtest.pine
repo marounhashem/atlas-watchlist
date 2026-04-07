@@ -114,39 +114,59 @@ if useRsiDiv
 volMA   = ta.sma(volume, volLen)
 highVol = useVolume ? volume > volMA * 1.3 : true
 
-// ── LAYER 9 — ENTRY CONDITIONS ─────────────────────────────────────────────
-longCond = dailyBull
-     and (not useCloud or aboveCloud)
-     and bosDir == 1
-     and pulledBackBull
-     and inObBull
-     and bullRej
-     and (not useRsiDiv or rsiDivBull)
-     and highVol
+// ── LAYER 9 — THREE-CLASS ENTRY SYSTEM ──────────────────────────────────────
+// TIER 1: Hard requirements (mandatory)
+tier1Long  = dailyBull and bosDir == 1 and bullRej
+tier1Short = dailyBear and bosDir == -1 and bearRej
 
-shortCond = dailyBear
-     and (not useCloud or belowCloud)
-     and bosDir == -1
-     and pulledBackBear
-     and inObBear
-     and bearRej
-     and (not useRsiDiv or rsiDivBear)
-     and highVol
+// TIER 2: Strong filters (count 0-3)
+tier2Long  = (aboveCloud ? 1 : 0) + (inObBull ? 1 : 0) + (pulledBackBull ? 1 : 0)
+tier2Short = (belowCloud ? 1 : 0) + (inObBear ? 1 : 0) + (pulledBackBear ? 1 : 0)
+
+// BONUS: Confirmation (count 0-2)
+bonusLong  = (rsiDivBull ? 1 : 0) + (highVol ? 1 : 0)
+bonusShort = (rsiDivBear ? 1 : 0) + (highVol ? 1 : 0)
+
+// Class assignment
+classA_Long  = tier1Long  and tier2Long  == 3 and bonusLong  >= 1
+classB_Long  = tier1Long  and tier2Long  >= 2 and not classA_Long
+classC_Long  = tier1Long  and tier2Long  == 1
+
+classA_Short = tier1Short and tier2Short == 3 and bonusShort >= 1
+classB_Short = tier1Short and tier2Short >= 2 and not classA_Short
+classC_Short = tier1Short and tier2Short == 1
+
+// Score
+scoreLong  = classA_Long  ? 88 : classB_Long  ? 75 : classC_Long  ? 62 : 0
+scoreShort = classA_Short ? 88 : classB_Short ? 75 : classC_Short ? 62 : 0
 
 // ── LAYER 10 — SL AND TP ───────────────────────────────────────────────────
-slLong  = not na(obBullBot) ? obBullBot - atr14 * 0.1 : close - atr14 * 1.5
-slShort = not na(obBearTop) ? obBearTop + atr14 * 0.1 : close + atr14 * 1.5
+// Class A: SL at OB (tightest). Class B: SL at swing. Class C: SL at ATR.
+slLong = classA_Long ?
+     (not na(obBullBot) ? obBullBot - atr14 * 0.1 : close - atr14 * 1.0) :
+     classB_Long ?
+     (not na(lastSwingLow) ? lastSwingLow - atr14 * 0.1 : close - atr14 * 1.2) :
+     close - atr14 * 1.5
+
+slShort = classA_Short ?
+     (not na(obBearTop) ? obBearTop + atr14 * 0.1 : close + atr14 * 1.0) :
+     classB_Short ?
+     (not na(lastSwingHigh) ? lastSwingHigh + atr14 * 0.1 : close + atr14 * 1.2) :
+     close + atr14 * 1.5
+
 slLong  := math.min(slLong,  close - atr14 * 0.5)
 slShort := math.max(slShort, close + atr14 * 0.5)
 
 slDistL = close - slLong
 slDistS = slShort - close
-
 tpLong  = close + slDistL * minRR
 tpShort = close - slDistS * minRR
 
-goLong  = longCond  and strategy.position_size == 0 and time >= startDate
-goShort = shortCond and strategy.position_size == 0 and time >= startDate
+// Class A and B enter. Class C is WATCH only.
+goLong   = (classA_Long  or classB_Long)  and strategy.position_size == 0 and time >= startDate
+goShort  = (classA_Short or classB_Short) and strategy.position_size == 0 and time >= startDate
+watchLong  = classC_Long  and strategy.position_size == 0 and time >= startDate
+watchShort = classC_Short and strategy.position_size == 0 and time >= startDate
 
 // ── STRATEGY EXECUTION ─────────────────────────────────────────────────────
 if goLong
@@ -182,48 +202,74 @@ if bearBOS and not na(obBearTop)
     obBearBox := box.new(bar_index - obLookback, obBearTop, bar_index + 30, obBearBot,
                          border_color=color.red, bgcolor=color.new(color.red, 85))
 
-// Signals
-plotshape(goLong,  "Long",  shape.triangleup,   location.belowbar, color.green, size=size.normal)
-plotshape(goShort, "Short", shape.triangledown,  location.abovebar, color.red,   size=size.normal)
+// Class A — large triangles
+plotshape(goLong  and classA_Long,  "A Long",  shape.triangleup,   location.belowbar, color.green,               size=size.large)
+plotshape(goShort and classA_Short, "A Short", shape.triangledown,  location.abovebar, color.red,                 size=size.large)
+// Class B — normal triangles
+plotshape(goLong  and classB_Long,  "B Long",  shape.triangleup,   location.belowbar, color.new(color.green, 30), size=size.normal)
+plotshape(goShort and classB_Short, "B Short", shape.triangledown,  location.abovebar, color.new(color.red,   30), size=size.normal)
+// Class C — watch circles
+plotshape(watchLong,  "C Long Watch",  shape.circle, location.belowbar, color.new(color.blue, 50), size=size.small)
+plotshape(watchShort, "C Short Watch", shape.circle, location.abovebar, color.new(color.blue, 50), size=size.small)
+
+// Class labels
+if goLong
+    label.new(bar_index, low - atr14,
+              classA_Long ? "A" : "B",
+              color=classA_Long ? color.green : color.new(color.green, 30),
+              textcolor=color.white, size=size.small, style=label.style_label_up)
+if goShort
+    label.new(bar_index, high + atr14,
+              classA_Short ? "A" : "B",
+              color=classA_Short ? color.red : color.new(color.red, 30),
+              textcolor=color.white, size=size.small, style=label.style_label_down)
 
 // Rejection dots
 plotshape(bullRej and bosDir == 1,  "Bull Rej", shape.circle, location.belowbar, color.new(color.green, 50), size=size.tiny)
 plotshape(bearRej and bosDir == -1, "Bear Rej", shape.circle, location.abovebar, color.new(color.red,   50), size=size.tiny)
 
 // ── DEBUG TABLE ─────────────────────────────────────────────────────────────
+classLong  = classA_Long ? "A" : classB_Long ? "B" : classC_Long ? "C" : "NONE"
+classShort = classA_Short ? "A" : classB_Short ? "B" : classC_Short ? "C" : "NONE"
+classStr   = classLong != "NONE" ? classLong : classShort != "NONE" ? classShort : "NONE"
+classClr   = classStr == "A" ? color.green : classStr == "B" ? color.yellow : classStr == "C" ? color.blue : color.gray
+
 var table dbg = table.new(position.top_right, 2, 10,
                            bgcolor=color.new(color.black, 70), border_width=1)
-table.cell(dbg, 0, 0, "Daily",     text_color=color.white, text_size=size.small)
-table.cell(dbg, 1, 0, dailyBull ? "BULL" : "BEAR",
-           text_color=dailyBull ? color.green : color.red, text_size=size.small)
-table.cell(dbg, 0, 1, "Cloud",     text_color=color.white, text_size=size.small)
-table.cell(dbg, 1, 1, aboveCloud ? "ABOVE" : belowCloud ? "BELOW" : "INSIDE",
-           text_color=aboveCloud ? color.green : belowCloud ? color.red : color.yellow, text_size=size.small)
-table.cell(dbg, 0, 2, "BOS Dir",   text_color=color.white, text_size=size.small)
-table.cell(dbg, 1, 2, bosDir == 1 ? "BULL" : bosDir == -1 ? "BEAR" : "NONE",
+table.cell(dbg, 0, 0, "Tier1",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 0, tier1Long ? "LONG" : tier1Short ? "SHORT" : "no",
+           text_color=tier1Long ? color.green : tier1Short ? color.red : color.gray, text_size=size.small)
+table.cell(dbg, 0, 1, "Tier2",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 1, str.tostring(tier1Long ? tier2Long : tier2Short) + "/3",
+           text_color=(tier1Long ? tier2Long : tier2Short) == 3 ? color.green : (tier1Long ? tier2Long : tier2Short) >= 2 ? color.yellow : color.gray, text_size=size.small)
+table.cell(dbg, 0, 2, "Bonus",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 2, str.tostring(tier1Long ? bonusLong : bonusShort) + "/2",
+           text_color=(tier1Long ? bonusLong : bonusShort) >= 1 ? color.green : color.gray, text_size=size.small)
+table.cell(dbg, 0, 3, "Class",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 3, classStr,    text_color=classClr,    text_size=size.small)
+table.cell(dbg, 0, 4, "Score",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 4, str.tostring(math.max(scoreLong, scoreShort)),
+           text_color=classClr, text_size=size.small)
+table.cell(dbg, 0, 5, "BOS Dir",   text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 5, bosDir == 1 ? "BULL" : bosDir == -1 ? "BEAR" : "NONE",
            text_color=bosDir == 1 ? color.green : bosDir == -1 ? color.red : color.gray, text_size=size.small)
-table.cell(dbg, 0, 3, "In OB",     text_color=color.white, text_size=size.small)
-table.cell(dbg, 1, 3, inObBull ? "BULL OB" : inObBear ? "BEAR OB" : "no",
-           text_color=inObBull ? color.green : inObBear ? color.red : color.gray, text_size=size.small)
-table.cell(dbg, 0, 4, "Rejection", text_color=color.white, text_size=size.small)
-table.cell(dbg, 1, 4, bullRej ? "BULL" : bearRej ? "BEAR" : "none",
-           text_color=bullRej ? color.green : bearRej ? color.red : color.gray, text_size=size.small)
-table.cell(dbg, 0, 5, "RSI Div",   text_color=color.white, text_size=size.small)
-table.cell(dbg, 1, 5, rsiDivBull ? "BULL" : rsiDivBear ? "BEAR" : "none",
+table.cell(dbg, 0, 6, "Cloud",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 6, aboveCloud ? "ABOVE" : belowCloud ? "BELOW" : "INSIDE",
+           text_color=aboveCloud ? color.green : belowCloud ? color.red : color.yellow, text_size=size.small)
+table.cell(dbg, 0, 7, "RSI Div",   text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 7, rsiDivBull ? "BULL" : rsiDivBear ? "BEAR" : "none",
            text_color=rsiDivBull ? color.green : rsiDivBear ? color.red : color.gray, text_size=size.small)
-table.cell(dbg, 0, 6, "Volume",    text_color=color.white, text_size=size.small)
-table.cell(dbg, 1, 6, highVol ? "HIGH" : "low",
-           text_color=highVol ? color.green : color.gray, text_size=size.small)
-table.cell(dbg, 0, 7, "Pullback",  text_color=color.white, text_size=size.small)
-table.cell(dbg, 1, 7, pulledBackBull ? "BULL" : pulledBackBear ? "BEAR" : "none",
-           text_color=pulledBackBull ? color.green : pulledBackBear ? color.red : color.gray, text_size=size.small)
 table.cell(dbg, 0, 8, "goLong",    text_color=color.white, text_size=size.small)
-table.cell(dbg, 1, 8, goLong  ? "FIRE" : "-",
-           text_color=goLong  ? color.green : color.gray, text_size=size.small)
+table.cell(dbg, 1, 8, goLong ? "FIRE" : watchLong ? "WATCH" : "-",
+           text_color=goLong ? color.green : watchLong ? color.blue : color.gray, text_size=size.small)
 table.cell(dbg, 0, 9, "goShort",   text_color=color.white, text_size=size.small)
-table.cell(dbg, 1, 9, goShort ? "FIRE" : "-",
-           text_color=goShort ? color.red   : color.gray, text_size=size.small)
+table.cell(dbg, 1, 9, goShort ? "FIRE" : watchShort ? "WATCH" : "-",
+           text_color=goShort ? color.red : watchShort ? color.blue : color.gray, text_size=size.small)
 
 // ── ALERTS ──────────────────────────────────────────────────────────────────
-alertcondition(goLong,  "Combined Long",  "LONG signal fired")
-alertcondition(goShort, "Combined Short", "SHORT signal fired")
+alertcondition(goLong  and classA_Long,  "Class A Long",  "CLASS A LONG signal")
+alertcondition(goLong  and classB_Long,  "Class B Long",  "CLASS B LONG signal")
+alertcondition(goShort and classA_Short, "Class A Short", "CLASS A SHORT signal")
+alertcondition(goShort and classB_Short, "Class B Short", "CLASS B SHORT signal")
+alertcondition(watchLong,                "Watch Long",    "WATCH LONG signal")
+alertcondition(watchShort,               "Watch Short",   "WATCH SHORT signal")
