@@ -129,30 +129,24 @@ async function init() {
 let _persistPending = false;
 let _persistWriting = false;
 
-// Debounce persist — max once every 30 seconds to prevent event loop blocking.
-// db.export() serializes the entire in-memory DB synchronously. With fxssi_history
-// + market_data_history growing, calling it on every single DB write was starving
-// the event loop. Now: mark dirty, flush on next 30s tick.
+// ── DEBOUNCED PERSIST ────────────────────────────────────────────────────────
+// persist() marks dirty. _flushToDisk runs max once per 30s via setInterval.
+// db.export() serializes the entire in-memory DB synchronously — at scale this
+// blocks the event loop. Backup copies happen ONLY in the 00:00 UTC daily cron,
+// NOT on every persist. No fs.statSync on the hot path.
 let _persistDirty = false;
 let _persistTimer = null;
 const PERSIST_INTERVAL_MS = 30000;
 
 function persist() {
-  if (!db) return;
-  if (!_startupComplete) return;
-
-  // Mark dirty — actual write happens on the timer
+  if (!db || !_startupComplete) return;
   _persistDirty = true;
-
-  // Start the timer if not already running
   if (!_persistTimer) {
     _persistTimer = setInterval(_flushToDisk, PERSIST_INTERVAL_MS);
-    // Also flush once immediately on first call (startup)
-    setImmediate(_flushToDisk);
+    setImmediate(_flushToDisk); // first call flushes immediately
   }
 }
 
-// Force immediate persist — used by shutdown hooks or explicit flush
 function persistNow() {
   _persistDirty = true;
   _flushToDisk();
@@ -162,11 +156,10 @@ function _flushToDisk() {
   if (!db || !_persistDirty) return;
   _persistDirty = false;
 
-  // Layer 3: never overwrite if we had signals at startup but now have 0
+  // Wipe guard: never overwrite if signals disappeared
   if (_startupSignalCount > 0) {
     try {
-      const row = db.exec("SELECT COUNT(*) as c FROM signals")[0];
-      const currentCount = row?.values?.[0]?.[0] || 0;
+      const currentCount = db.exec("SELECT COUNT(*) FROM signals")[0]?.values?.[0]?.[0] || 0;
       if (currentCount === 0) {
         console.error(`[DB] ABORT persist — had ${_startupSignalCount} signals at startup, now 0.`);
         return;
@@ -177,24 +170,13 @@ function _flushToDisk() {
   if (_persistWriting) { _persistPending = true; return; }
   _persistWriting = true;
   try {
-    const data = db.export();
-    const buf = Buffer.from(data);
-
-    // Pre-persist backup (async to avoid blocking)
-    try {
-      if (fs.existsSync(DB_PATH) && fs.statSync(DB_PATH).size > 0) {
-        fs.copyFile(DB_PATH, DB_PATH + '.bak', () => {}); // fire and forget
-      }
-    } catch(e) {}
-
-    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+    const buf = Buffer.from(db.export());
     fs.writeFile(DB_PATH, buf, (err) => {
       _persistWriting = false;
       if (err) console.error('[DB] Persist error:', err.message);
-      else console.log(`[DB] Persisted ${Math.round(buf.length / 1024)}KB`);
       if (_persistPending) { _persistPending = false; setImmediate(_flushToDisk); }
     });
-  } catch (e) {
+  } catch(e) {
     _persistWriting = false;
     console.error('[DB] Persist error:', e.message);
   }

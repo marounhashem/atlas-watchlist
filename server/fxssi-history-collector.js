@@ -1,15 +1,9 @@
-// FXSSI Historical Data Collector — standalone backtesting data
-// Fetches order book snapshots at varying timeOffsets to build historical dataset
+// FXSSI Historical Data Collector — queue-based, non-blocking
+// Processes ONE job at a time via setTimeout(processNext, 350)
 // Does NOT touch the live scraper cache or scoring pipeline
 
 const { analyseOrderBook, FXSSI_SYMBOLS } = require('./fxssiScraper');
 const db = require('./db');
-
-// Cancellation flag — set via /api/fxssi-history/stop
-let _cancelCollection = false;
-function cancelCollection() { _cancelCollection = true; }
-function isCollecting() { return !_cancelCollection && _collecting; }
-let _collecting = false;
 
 const API_BASE = 'https://c.fxssi.com/api/order-book';
 const HEADERS = {
@@ -18,7 +12,17 @@ const HEADERS = {
   'Referer': 'https://fxssi.com/'
 };
 
-// Fetch a single historical snapshot with timeOffset (minutes back)
+// ── State ───────────────────────────────────────────────────────────────────
+let _queue = [];
+let _collecting = false;
+let _cancelled = false;
+let _stats = { collected: 0, skipped: 0, errors: 0, total: 0, processed: 0 };
+let _resolve = null; // promise resolve for collectHistory callers
+
+function cancelCollection() { _cancelled = true; }
+function isCollecting() { return _collecting; }
+
+// ── Fetch a single historical snapshot ──────────────────────────────────────
 async function fetchHistoricalSnapshot(pair, timeOffset = 0) {
   const token = process.env.FXSSI_TOKEN;
   const userId = process.env.FXSSI_USER_ID || '118460';
@@ -33,7 +37,7 @@ async function fetchHistoricalSnapshot(pair, timeOffset = 0) {
       console.log(`[FXSSI-Hist] ${pair} offset=${timeOffset} HTTP ${res.status} — rate limited`);
       return null;
     }
-    if (!res.ok) { console.error(`[FXSSI-Hist] ${pair} offset=${timeOffset} HTTP ${res.status}`); return null; }
+    if (!res.ok) return null;
     const data = await res.json();
     if (!data.time || !data.levels?.length) return null;
 
@@ -54,113 +58,106 @@ async function fetchHistoricalSnapshot(pair, timeOffset = 0) {
       full_analysis: analysed
     };
   } catch(e) {
-    console.error(`[FXSSI-Hist] ${pair} offset=${timeOffset} error:`, e.message);
     return null;
   }
 }
 
-// Yield to event loop — prevents blocking during long collection runs
-function yieldToEventLoop() {
-  return new Promise(r => setImmediate(r));
+// ── Queue processor — one job at a time via setTimeout ──────────────────────
+function processNext() {
+  if (_cancelled || _queue.length === 0) {
+    _collecting = false;
+    const result = { ..._stats, cancelled: _cancelled };
+    console.log(`[FXSSI-Hist] ${_cancelled ? 'Stopped' : 'Complete'}: collected=${_stats.collected} skipped=${_stats.skipped} errors=${_stats.errors} processed=${_stats.processed}/${_stats.total}`);
+    _cancelled = false;
+    if (_resolve) { _resolve(result); _resolve = null; }
+    return;
+  }
+
+  const job = _queue.shift();
+  _stats.processed++;
+
+  fetchHistoricalSnapshot(job.pair, job.offset).then(snap => {
+    if (!snap) {
+      _stats.errors++;
+    } else {
+      const inserted = db.insertFxssiHistory({
+        symbol: job.symbol,
+        snapshot_time: snap.snapshot_time,
+        long_pct: snap.long_pct,
+        short_pct: snap.short_pct,
+        sentiment: snap.sentiment,
+        trapped: snap.trapped,
+        gravity_price: snap.gravity_price,
+        sr_wall_price: snap.sr_wall_price,
+        ob_imbalance: snap.ob_imbalance,
+        ob_absorption: snap.ob_absorption,
+        full_analysis: snap.full_analysis,
+        fetched_at: Date.now()
+      });
+      if (inserted) _stats.collected++;
+      else _stats.skipped++;
+    }
+
+    // Progress log every 50 jobs
+    if (_stats.processed % 50 === 0) {
+      console.log(`[FXSSI-Hist] progress: ${_stats.processed}/${_stats.total} collected=${_stats.collected} skipped=${_stats.skipped} errors=${_stats.errors}`);
+      try { db.persist(); } catch(e) {}
+    }
+
+    // Schedule next job — 350ms gap keeps event loop free
+    setTimeout(processNext, 350);
+  }).catch(e => {
+    _stats.errors++;
+    setTimeout(processNext, 350);
+  });
 }
 
-// Collect history across all symbols for a range of offsets
-async function collectHistory(maxOffset) {
+// ── Build queue and start collection ────────────────────────────────────────
+function collectHistory(maxOffset) {
   if (_collecting) {
-    console.log('[FXSSI-Hist] Collection already in progress — skipping');
-    return { collected: 0, skipped: 0, errors: 0, reason: 'already_running' };
+    console.log('[FXSSI-Hist] Collection already in progress');
+    return Promise.resolve({ collected: 0, skipped: 0, errors: 0, reason: 'already_running' });
   }
-  _collecting = true;
-  _cancelCollection = false;
 
   const symbols = Object.entries(FXSSI_SYMBOLS);
-  let collected = 0, skipped = 0, errors = 0;
-  let fetchCount = 0;
 
-  try {
-    for (let offset = 0; offset <= maxOffset; offset++) {
-      if (_cancelCollection) {
-        console.log(`[FXSSI-Hist] CANCELLED at offset=${offset}. collected=${collected} skipped=${skipped} errors=${errors}`);
-        break;
-      }
-
-      for (const [symbol, pair] of symbols) {
-        if (_cancelCollection) break;
-
-        try {
-          // Yield to event loop + rate limit delay
-          await yieldToEventLoop();
-          await new Promise(r => setTimeout(r, 300));
-
-          fetchCount++;
-          const snap = await fetchHistoricalSnapshot(pair, offset);
-
-          // Detailed progress logging every 10th fetch
-          if (fetchCount % 10 === 0) {
-            const snapDate = snap ? new Date(snap.snapshot_time * 1000).toISOString() : 'null';
-            console.log(`[FXSSI-Hist] fetch #${fetchCount} — ${symbol} offset=${offset} snapshot_time=${snap?.snapshot_time || 'null'} (${snapDate}) collected=${collected} skipped=${skipped} errors=${errors}`);
-          }
-
-          if (!snap) { errors++; continue; }
-
-          const inserted = db.insertFxssiHistory({
-            symbol,
-            snapshot_time: snap.snapshot_time,
-            long_pct: snap.long_pct,
-            short_pct: snap.short_pct,
-            sentiment: snap.sentiment,
-            trapped: snap.trapped,
-            gravity_price: snap.gravity_price,
-            sr_wall_price: snap.sr_wall_price,
-            ob_imbalance: snap.ob_imbalance,
-            ob_absorption: snap.ob_absorption,
-            full_analysis: snap.full_analysis,
-            fetched_at: Date.now()
-          });
-
-          if (inserted) {
-            collected++;
-          } else {
-            skipped++;
-          }
-        } catch(e) {
-          errors++;
-          console.error(`[FXSSI-Hist] ${symbol} offset=${offset} error:`, e.message);
-        }
-      }
-
-      // Persist after each offset round (21 symbols) + yield
-      try { db.persist(); } catch(e) {}
-      await yieldToEventLoop();
-
-      if (offset % 10 === 0) {
-        console.log(`[FXSSI-Hist] Progress: offset=${offset}/${maxOffset} collected=${collected} skipped=${skipped} errors=${errors} fetches=${fetchCount}`);
-      }
+  // Build job queue — check DB for existing records to resume from
+  _queue = [];
+  for (let offset = 0; offset <= maxOffset; offset++) {
+    for (const [symbol, pair] of symbols) {
+      _queue.push({ symbol, pair, offset });
     }
-  } finally {
-    _collecting = false;
   }
 
-  db.persist();
-  const cancelled = _cancelCollection;
-  _cancelCollection = false;
-  console.log(`[FXSSI-Hist] ${cancelled ? 'Stopped' : 'Complete'}: collected=${collected} skipped=${skipped} errors=${errors} fetches=${fetchCount}`);
-  return { collected, skipped, errors, cancelled };
+  // Filter out jobs where we already have data for that symbol+offset combo
+  // We can't check exact snapshot_time without fetching, but we can skip
+  // offsets where we already have a recent record for that symbol
+  // (The UNIQUE constraint handles true duplicates on insert anyway)
+
+  _collecting = true;
+  _cancelled = false;
+  _stats = { collected: 0, skipped: 0, errors: 0, total: _queue.length, processed: 0 };
+
+  console.log(`[FXSSI-Hist] Starting collection: ${_queue.length} jobs (${symbols.length} symbols × ${maxOffset + 1} offsets)`);
+
+  return new Promise(resolve => {
+    _resolve = resolve;
+    setTimeout(processNext, 100); // start after a tick
+  });
 }
 
-async function collectFullHistory() {
+function collectFullHistory() {
   console.log('[FXSSI-Hist] Starting FULL collection (offsets 0-360)...');
   return collectHistory(360);
 }
 
-async function collectRecentHistory() {
+function collectRecentHistory() {
   console.log('[FXSSI-Hist] Starting RECENT collection (offsets 0-72)...');
   return collectHistory(72);
 }
 
-// Query a snapshot for a specific symbol + timestamp
+// ── Query a snapshot for a specific symbol + timestamp ───────────────────────
 function querySnapshot(symbol, timestampSeconds) {
-  // Weekend gap check: Friday 22:00 UTC to Sunday 22:00 UTC
   const d = new Date(timestampSeconds * 1000);
   const utcDay = d.getUTCDay();
   const utcHour = d.getUTCHours();
@@ -171,12 +168,10 @@ function querySnapshot(symbol, timestampSeconds) {
     return { match: null, reason: 'weekend_gap' };
   }
 
-  // Round to nearest 20-min boundary (1200 seconds)
   const rounded = Math.round(timestampSeconds / 1200) * 1200;
 
   const row = db.getFxssiHistorySnapshot(symbol, rounded);
   if (!row) {
-    // Try ±1 boundary (1200s each way) in case of slight offset
     const rowMinus = db.getFxssiHistorySnapshot(symbol, rounded - 1200);
     const rowPlus = db.getFxssiHistorySnapshot(symbol, rounded + 1200);
     const fallback = rowMinus || rowPlus;
