@@ -465,6 +465,7 @@ function initSchema() {
     fetched_at INTEGER NOT NULL,
     UNIQUE(symbol, snapshot_time)
   )`);
+  try { db.run('CREATE INDEX IF NOT EXISTS idx_fxssi_history_lookup ON fxssi_history(symbol, snapshot_time)'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN tp1 REAL DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN tp2 REAL DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN tp3 REAL DEFAULT NULL'); } catch(e) {}
@@ -489,15 +490,19 @@ function initSchema() {
   console.log('[DB] Schema initialised, weights seeded');
 }
 
+// Cache PRAGMA table_info result — column check runs once, not on every upsert
+let _hasFxssiCol = null;
 function upsertMarketData(symbol, data) {
   const n = (v) => (v === null || v === undefined || isNaN(v)) ? null : Number(v);
 
-  // Check if fxssi_analysis column exists (added via migration)
-  let hasFxssiCol = false;
-  try {
-    const cols = db.exec("PRAGMA table_info(market_data)")[0]?.values || [];
-    hasFxssiCol = cols.some(c => c[1] === 'fxssi_analysis');
-  } catch(e) {}
+  // Check if fxssi_analysis column exists (added via migration) — cached after first check
+  if (_hasFxssiCol === null) {
+    try {
+      const cols = db.exec("PRAGMA table_info(market_data)")[0]?.values || [];
+      _hasFxssiCol = cols.some(c => c[1] === 'fxssi_analysis');
+    } catch(e) { _hasFxssiCol = false; }
+  }
+  const hasFxssiCol = _hasFxssiCol;
 
   const baseParams = [
     symbol, Date.now(),

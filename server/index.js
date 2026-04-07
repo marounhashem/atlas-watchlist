@@ -641,10 +641,11 @@ app.get('/api/fxssi-fetch', async (req, res) => {
 // FXSSI historical data collection for backtesting
 app.get('/api/fxssi-history/collect', (req, res) => {
   if (!dbReady) return res.json({ error: 'DB not ready' });
-  const mode = req.query.mode === 'recent' ? 'recent' : 'full';
+  if (isCollecting()) return res.json({ error: 'Collection already in progress — use /api/fxssi-history/stop to cancel' });
+  // Default to recent (72 offsets ~5min) — full (360 offsets ~38min) requires explicit ?mode=full
+  const mode = req.query.mode === 'full' ? 'full' : 'recent';
   res.json({ started: true, mode });
-  // Run async — don't block response
-  (mode === 'recent' ? collectRecentHistory() : collectFullHistory())
+  (mode === 'full' ? collectFullHistory() : collectRecentHistory())
     .then(r => console.log(`[FXSSI-Hist] ${mode} collection done:`, r))
     .catch(e => console.error(`[FXSSI-Hist] ${mode} collection error:`, e.message));
 });
