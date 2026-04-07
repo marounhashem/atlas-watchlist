@@ -59,6 +59,12 @@ biasScore = (close > ema200_1d ? 3.0 : -3.0)
 // ── DIRECTION ───────────────────────────────────────────────────────────────
 isLong  = biasScore >= minBiasScore
 isShort = biasScore <= -minBiasScore
+// Structure fallback: when biasScore is in dead zone (-2 to +2), use 1d+1h structure agreement
+if not isLong and not isShort
+    if struct_1d == 1 and struct_1h == 1
+        isLong := true
+    if struct_1d == -1 and struct_1h == -1
+        isShort := true
 
 // ── HARD GATES ──────────────────────────────────────────────────────────────
 longBlocked  = rsi14 < rsiGateLong
