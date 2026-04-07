@@ -1,0 +1,169 @@
+//@version=6
+strategy("ATLAS // SMC BACKTEST", overlay=true, pyramiding=0,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+     initial_capital=10000, commission_value=0.02, slippage=1,
+     calc_on_every_tick=false)
+
+// ── INPUTS ──────────────────────────────────────────────────────────────────
+swingLookback = input.int(10,    "Swing Lookback",       minval=5,   maxval=30,  step=5)
+obLookback    = input.int(5,     "Order Block Lookback",  minval=3,   maxval=10,  step=1)
+cloudFilter   = input.bool(true, "Use Ichimoku Cloud Filter")
+minRR         = input.float(2.0, "Min R:R",              minval=1.0, maxval=4.0, step=0.5)
+atrLen        = input.int(14,    "ATR Length")
+startDate     = input.time(timestamp("2026-03-31"), "Start Date")
+
+// ── STEP 1 — SWING HIGHS AND LOWS ──────────────────────────────────────────
+swingHigh = ta.pivothigh(high, swingLookback, swingLookback)
+swingLow  = ta.pivotlow(low,  swingLookback, swingLookback)
+
+var float lastSwingHigh1 = na
+var float lastSwingHigh2 = na
+var float lastSwingLow1  = na
+var float lastSwingLow2  = na
+
+if not na(swingHigh)
+    lastSwingHigh2 := lastSwingHigh1
+    lastSwingHigh1 := swingHigh
+
+if not na(swingLow)
+    lastSwingLow2 := lastSwingLow1
+    lastSwingLow1 := swingLow
+
+// ── STEP 2 — BREAK OF STRUCTURE ────────────────────────────────────────────
+bullBOS = not na(lastSwingHigh1) and close > lastSwingHigh1 and close[1] <= lastSwingHigh1
+bearBOS = not na(lastSwingLow1)  and close < lastSwingLow1  and close[1] >= lastSwingLow1
+
+var int bosDirection = 0
+if bullBOS
+    bosDirection := 1
+if bearBOS
+    bosDirection := -1
+
+// ── STEP 3 — ORDER BLOCKS ──────────────────────────────────────────────────
+var float obBullTop = na
+var float obBullBot = na
+var float obBearTop = na
+var float obBearBot = na
+
+if bullBOS
+    for i = 1 to obLookback
+        if close[i] < open[i]
+            obBullTop := high[i]
+            obBullBot := low[i]
+            break
+
+if bearBOS
+    for i = 1 to obLookback
+        if close[i] > open[i]
+            obBearTop := high[i]
+            obBearBot := low[i]
+            break
+
+// ── STEP 4 — ICHIMOKU CLOUD ────────────────────────────────────────────────
+tenkan  = ta.ema(close, 9)
+kijun   = ta.ema(close, 26)
+spanA   = (tenkan + kijun) / 2
+spanB   = ta.ema(close, 52)
+cloudTop   = math.max(spanA, spanB)
+cloudBot   = math.min(spanA, spanB)
+aboveCloud = close > cloudTop
+belowCloud = close < cloudBot
+
+// ── STEP 5 — ENTRY CONDITIONS ──────────────────────────────────────────────
+longCondition = bosDirection == 1
+     and not na(obBullTop)
+     and close <= obBullTop
+     and close >= obBullBot
+     and (not cloudFilter or aboveCloud)
+
+shortCondition = bosDirection == -1
+     and not na(obBearTop)
+     and close >= obBearBot
+     and close <= obBearTop
+     and (not cloudFilter or belowCloud)
+
+// ── STEP 6 — SL AND TP ─────────────────────────────────────────────────────
+atr14 = ta.atr(atrLen)
+
+slLong  = obBullBot - atr14 * 0.1
+slShort = obBearTop + atr14 * 0.1
+slLong  := math.min(slLong,  close - atr14 * 0.5)
+slShort := math.max(slShort, close + atr14 * 0.5)
+
+slDistLong  = close - slLong
+slDistShort = slShort - close
+
+tpLong  = close + slDistLong  * minRR
+tpShort = close - slDistShort * minRR
+
+rrLong  = slDistLong  > 0 ? (tpLong  - close) / slDistLong  : 0.0
+rrShort = slDistShort > 0 ? (close - tpShort) / slDistShort : 0.0
+
+afterStart = time >= startDate
+noPosition = strategy.position_size == 0
+
+goLong  = afterStart and noPosition and longCondition  and rrLong  >= minRR
+goShort = afterStart and noPosition and shortCondition and rrShort >= minRR
+
+// ── STEP 7 — STRATEGY EXECUTION ────────────────────────────────────────────
+if goLong
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", "Long", stop=slLong, limit=tpLong)
+
+if goShort
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", "Short", stop=slShort, limit=tpShort)
+
+// ── STEP 8 — PLOTS ─────────────────────────────────────────────────────────
+plotshape(not na(swingHigh), "Swing High", shape.triangledown, location.abovebar, color.red,   size=size.tiny, offset=-swingLookback)
+plotshape(not na(swingLow),  "Swing Low",  shape.triangleup,   location.belowbar, color.green, size=size.tiny, offset=-swingLookback)
+
+plotshape(bullBOS, "Bull BOS", shape.labelup,   location.belowbar, color.green, text="BOS", size=size.small)
+plotshape(bearBOS, "Bear BOS", shape.labeldown,  location.abovebar, color.red,   text="BOS", size=size.small)
+
+// Order block boxes
+var box obBullBox = na
+var box obBearBox = na
+if bullBOS and not na(obBullTop)
+    obBullBox := box.new(bar_index - obLookback, obBullTop, bar_index + 20, obBullBot,
+                         border_color=color.green, bgcolor=color.new(color.green, 85))
+if bearBOS and not na(obBearTop)
+    obBearBox := box.new(bar_index - obLookback, obBearTop, bar_index + 20, obBearBot,
+                         border_color=color.red, bgcolor=color.new(color.red, 85))
+
+// Ichimoku cloud
+p1 = plot(cloudFilter ? spanA : na, "Span A", color.new(color.green, 80))
+p2 = plot(cloudFilter ? spanB : na, "Span B", color.new(color.red, 80))
+fill(p1, p2, color=spanA > spanB ? color.new(color.green, 90) : color.new(color.red, 90))
+
+// Entry signals
+plotshape(goLong,  "Long Signal",  shape.triangleup,   location.belowbar, color.green, size=size.normal)
+plotshape(goShort, "Short Signal", shape.triangledown,  location.abovebar, color.red,   size=size.normal)
+
+// ── STEP 9 — DEBUG TABLE ───────────────────────────────────────────────────
+var table t = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 70), border_width=1)
+table.cell(t, 0, 0, "BOS Dir",     text_color=color.white, text_size=size.small)
+table.cell(t, 1, 0, bosDirection == 1 ? "BULL" : bosDirection == -1 ? "BEAR" : "NONE",
+           text_color=bosDirection == 1 ? color.green : bosDirection == -1 ? color.red : color.gray, text_size=size.small)
+table.cell(t, 0, 1, "Cloud",       text_color=color.white, text_size=size.small)
+table.cell(t, 1, 1, aboveCloud ? "ABOVE" : belowCloud ? "BELOW" : "INSIDE",
+           text_color=aboveCloud ? color.green : belowCloud ? color.red : color.yellow, text_size=size.small)
+table.cell(t, 0, 2, "OB Bull",     text_color=color.white, text_size=size.small)
+table.cell(t, 1, 2, not na(obBullTop) ? str.tostring(obBullTop, "#.#####") : "none",
+           text_color=color.green, text_size=size.small)
+table.cell(t, 0, 3, "OB Bear",     text_color=color.white, text_size=size.small)
+table.cell(t, 1, 3, not na(obBearTop) ? str.tostring(obBearTop, "#.#####") : "none",
+           text_color=color.red, text_size=size.small)
+table.cell(t, 0, 4, "In OB Long",  text_color=color.white, text_size=size.small)
+table.cell(t, 1, 4, longCondition  ? "YES" : "no", text_color=longCondition  ? color.green : color.gray, text_size=size.small)
+table.cell(t, 0, 5, "In OB Short", text_color=color.white, text_size=size.small)
+table.cell(t, 1, 5, shortCondition ? "YES" : "no", text_color=shortCondition ? color.red   : color.gray, text_size=size.small)
+table.cell(t, 0, 6, "goLong",      text_color=color.white, text_size=size.small)
+table.cell(t, 1, 6, goLong  ? "FIRE" : "-", text_color=goLong  ? color.green : color.gray, text_size=size.small)
+table.cell(t, 0, 7, "goShort",     text_color=color.white, text_size=size.small)
+table.cell(t, 1, 7, goShort ? "FIRE" : "-", text_color=goShort ? color.red   : color.gray, text_size=size.small)
+
+// ── ALERT ───────────────────────────────────────────────────────────────────
+alertcondition(goLong or goShort, "SMC Signal",
+     '{"symbol":"{{ticker}}","direction":"' + (goLong ? "LONG" : "SHORT") +
+     '","entry":{{close}},"time":"{{timenow}}"}')
