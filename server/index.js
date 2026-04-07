@@ -21,7 +21,7 @@ const { runRateFetch, loadRatesFromDB, getLatestRates, getRateDifferential } = r
 const { getUpcomingMeetings, isPairEventRisk, getMeetingContext } = require('./centralBankCalendar');
 const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTest } = require('./telegram');
 const { runCalendarCheck, runCalendarFetch, isPreEventRisk, isPostEventSuppressed, getUpcomingHighImpactEvents } = require('./forexCalendar');
-const { collectFullHistory, collectRecentHistory, querySnapshot } = require('./fxssi-history-collector');
+const { collectFullHistory, collectRecentHistory, querySnapshot, cancelCollection, isCollecting } = require('./fxssi-history-collector');
 const { SYMBOLS } = require('./config');
 
 console.log('[Startup] 2 — modules loaded', Date.now());
@@ -665,6 +665,12 @@ app.get('/api/fxssi-history/query', (req, res) => {
     const result = querySnapshot(symbol, Number(timestamp));
     res.json(result);
   } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/fxssi-history/stop', (req, res) => {
+  if (!isCollecting()) return res.json({ stopped: false, reason: 'not_running' });
+  cancelCollection();
+  res.json({ stopped: true });
 });
 
 // Reset — wipe signals and market data, keep weights and schema
