@@ -30,29 +30,17 @@ atr14   = ta.atr(atrLen)
 vwapVal = ta.vwap(hlc3)
 [macdLine, signalLine, macdHist] = ta.macd(close, macdFast, macdSlow, macdSig)
 
-// ── MULTI-TIMEFRAME EMA200 ─────────────────────────────────────────────────
-ema200_1d = request.security(syminfo.tickerid, "D", ta.ema(close, emaLen), lookahead=barmerge.lookahead_off)
-ema200_4h = request.security(syminfo.tickerid, "240", ta.ema(close, emaLen), lookahead=barmerge.lookahead_off)
-ema200_1h = request.security(syminfo.tickerid, "60",  ta.ema(close, emaLen), lookahead=barmerge.lookahead_off)
+// ── STRUCTURE — derived from current TF bar counts (no request.security) ────
+// On 1h chart: 5 bars=5h, 20 bars≈4h equiv, 120 bars≈1d equiv, 3 bars≈15m equiv
+// Works on any broker — no HTF data dependency
+ema200_1d = ta.ema(close, emaLen)  // single EMA200 on current TF used for all bias checks
+ema200_4h = ema200_1d
+ema200_1h = ema200_1d
 
-// ── MULTI-TIMEFRAME STRUCTURE ───────────────────────────────────────────────
-// Bullish: close > prior 5-bar high | Bearish: close < prior 5-bar low
-f_struct(_close, _high, _low) =>
-    bull = _close > ta.highest(_high, 5)[1]
-    bear = _close < ta.lowest(_low, 5)[1]
-    bull ? 1 : bear ? -1 : 0
-
-struct_1d  = request.security(syminfo.tickerid, "D",  f_struct(close, high, low), lookahead=barmerge.lookahead_off)
-struct_4h  = request.security(syminfo.tickerid, "240", f_struct(close, high, low), lookahead=barmerge.lookahead_off)
-struct_1h  = request.security(syminfo.tickerid, "60",  f_struct(close, high, low), lookahead=barmerge.lookahead_off)
-struct_15m = request.security(syminfo.tickerid, "15",  f_struct(close, high, low), lookahead=barmerge.lookahead_off)
-
-// na fallback — derive from EMA direction when HTF structure unavailable
-ema200_1d := na(ema200_1d) ? ema200_1h * 1.001 : ema200_1d
-ema200_4h := na(ema200_4h) ? ema200_1h : ema200_4h
-struct_1d := na(struct_1d) ? (close > ema200_1d ? 1 : -1) : struct_1d
-struct_4h := na(struct_4h) ? (close > ema200_4h ? 1 : -1) : struct_4h
-struct_15m := na(struct_15m) ? struct_1h : struct_15m
+struct_1d  = close > ta.highest(high[1], 120) ? 1 : close < ta.lowest(low[1], 120) ? -1 : 0
+struct_4h  = close > ta.highest(high[1], 20)  ? 1 : close < ta.lowest(low[1], 20)  ? -1 : 0
+struct_1h  = close > ta.highest(high[1], 5)   ? 1 : close < ta.lowest(low[1], 5)   ? -1 : 0
+struct_15m = close > ta.highest(high[1], 3)   ? 1 : close < ta.lowest(low[1], 3)   ? -1 : 0
 
 // ── BIAS SCORE (-8 to +8) ──────────────────────────────────────────────────
 biasScore = (close > ema200_1d ? 3.0 : -3.0)
