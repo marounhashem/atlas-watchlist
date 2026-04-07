@@ -5,9 +5,9 @@ strategy("ATLAS // COMBINED", overlay=true, pyramiding=0,
          calc_on_every_tick=false)
 
 // ── INPUTS ──────────────────────────────────────────────────────────────────
-dailyBars    = input.int(144,   "Daily Bars (144=24h)",  minval=96,  maxval=288, step=24)
-htfBars      = input.int(24,    "4H Bars (24=4h)",       minval=12,  maxval=48,  step=6)
-swingLen     = input.int(10,    "Swing Lookback",        minval=5,   maxval=20,  step=5)
+dailyBars    = input.int(1440,  "Daily Bars (1440=24h on 1m)",  minval=720,  maxval=2880, step=144)
+htfBars      = input.int(240,   "4H Bars (240=4h on 1m)",      minval=120,  maxval=480,  step=60)
+swingLen     = input.int(10,    "Swing Lookback",               minval=5,    maxval=20,   step=5)
 obLookback   = input.int(5,     "Order Block Lookback",  minval=3,   maxval=10,  step=1)
 rsiLen       = input.int(14,    "RSI Length")
 atrLen       = input.int(14,    "ATR Length")
@@ -162,11 +162,9 @@ slDistS = slShort - close
 tpLong  = close + slDistL * minRR
 tpShort = close - slDistS * minRR
 
-// Class A and B enter. Class C is WATCH only.
-goLong   = (classA_Long  or classB_Long)  and strategy.position_size == 0 and time >= startDate
-goShort  = (classA_Short or classB_Short) and strategy.position_size == 0 and time >= startDate
-watchLong  = classC_Long  and strategy.position_size == 0 and time >= startDate
-watchShort = classC_Short and strategy.position_size == 0 and time >= startDate
+// All classes enter
+goLong  = (classA_Long  or classB_Long  or classC_Long)  and strategy.position_size == 0 and time >= startDate
+goShort = (classA_Short or classB_Short or classC_Short) and strategy.position_size == 0 and time >= startDate
 
 // ── STRATEGY EXECUTION ─────────────────────────────────────────────────────
 if goLong
@@ -208,20 +206,20 @@ plotshape(goShort and classA_Short, "A Short", shape.triangledown,  location.abo
 // Class B — normal triangles
 plotshape(goLong  and classB_Long,  "B Long",  shape.triangleup,   location.belowbar, color.new(color.green, 30), size=size.normal)
 plotshape(goShort and classB_Short, "B Short", shape.triangledown,  location.abovebar, color.new(color.red,   30), size=size.normal)
-// Class C — watch circles
-plotshape(watchLong,  "C Long Watch",  shape.circle, location.belowbar, color.new(color.blue, 50), size=size.small)
-plotshape(watchShort, "C Short Watch", shape.circle, location.abovebar, color.new(color.blue, 50), size=size.small)
+// Class C — small triangles
+plotshape(goLong  and classC_Long,  "C Long",  shape.triangleup,   location.belowbar, color.new(color.green, 50), size=size.small)
+plotshape(goShort and classC_Short, "C Short", shape.triangledown,  location.abovebar, color.new(color.red,   50), size=size.small)
 
 // Class labels
 if goLong
     label.new(bar_index, low - atr14,
-              classA_Long ? "A" : "B",
-              color=classA_Long ? color.green : color.new(color.green, 30),
+              classA_Long ? "A" : classB_Long ? "B" : "C",
+              color=classA_Long ? color.green : classB_Long ? color.new(color.green, 30) : color.new(color.green, 50),
               textcolor=color.white, size=size.small, style=label.style_label_up)
 if goShort
     label.new(bar_index, high + atr14,
-              classA_Short ? "A" : "B",
-              color=classA_Short ? color.red : color.new(color.red, 30),
+              classA_Short ? "A" : classB_Short ? "B" : "C",
+              color=classA_Short ? color.red : classB_Short ? color.new(color.red, 30) : color.new(color.red, 50),
               textcolor=color.white, size=size.small, style=label.style_label_down)
 
 // Rejection dots
@@ -260,16 +258,16 @@ table.cell(dbg, 0, 7, "RSI Div",   text_color=color.white, text_size=size.small)
 table.cell(dbg, 1, 7, rsiDivBull ? "BULL" : rsiDivBear ? "BEAR" : "none",
            text_color=rsiDivBull ? color.green : rsiDivBear ? color.red : color.gray, text_size=size.small)
 table.cell(dbg, 0, 8, "goLong",    text_color=color.white, text_size=size.small)
-table.cell(dbg, 1, 8, goLong ? "FIRE" : watchLong ? "WATCH" : "-",
-           text_color=goLong ? color.green : watchLong ? color.blue : color.gray, text_size=size.small)
+table.cell(dbg, 1, 8, goLong ? "FIRE" : "-",
+           text_color=goLong ? color.green : color.gray, text_size=size.small)
 table.cell(dbg, 0, 9, "goShort",   text_color=color.white, text_size=size.small)
-table.cell(dbg, 1, 9, goShort ? "FIRE" : watchShort ? "WATCH" : "-",
-           text_color=goShort ? color.red : watchShort ? color.blue : color.gray, text_size=size.small)
+table.cell(dbg, 1, 9, goShort ? "FIRE" : "-",
+           text_color=goShort ? color.red : color.gray, text_size=size.small)
 
 // ── ALERTS ──────────────────────────────────────────────────────────────────
 alertcondition(goLong  and classA_Long,  "Class A Long",  "CLASS A LONG signal")
 alertcondition(goLong  and classB_Long,  "Class B Long",  "CLASS B LONG signal")
+alertcondition(goLong  and classC_Long,  "Class C Long",  "CLASS C LONG signal")
 alertcondition(goShort and classA_Short, "Class A Short", "CLASS A SHORT signal")
 alertcondition(goShort and classB_Short, "Class B Short", "CLASS B SHORT signal")
-alertcondition(watchLong,                "Watch Long",    "WATCH LONG signal")
-alertcondition(watchShort,               "Watch Short",   "WATCH SHORT signal")
+alertcondition(goShort and classC_Short, "Class C Short", "CLASS C SHORT signal")
