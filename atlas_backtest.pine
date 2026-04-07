@@ -20,8 +20,8 @@ minWeightedStruct = input.float(1.0, "Min Weighted Structure",  minval=0.5, maxv
 rsiGateLong       = input.int(40,    "RSI Gate Long",           minval=30,  maxval=55,  step=5)
 rsiGateShort      = input.int(75,    "RSI Gate Short",          minval=55,  maxval=80,  step=5)
 atrEntryMult      = input.float(0.35,"ATR Entry Multiplier",    minval=0.1, maxval=0.8, step=0.1)
-atrSlMult         = input.float(1.5, "ATR SL Multiplier",       minval=0.8, maxval=2.5, step=0.1)
 atrTpMult         = input.float(3.0, "ATR TP Multiplier",       minval=1.5, maxval=5.0, step=0.5)
+swingLookback     = input.int(10,    "Swing Lookback",           minval=5,   maxval=30,  step=5)
 
 // ── INDICATORS — CURRENT TF ────────────────────────────────────────────────
 ema200  = ta.ema(close, emaLen)
@@ -78,16 +78,27 @@ structGate = math.abs(biasScore) >= 4.0 or weightedStruct >= minWeightedStruct
 longEntry  = close + atr14 * atrEntryMult
 shortEntry = close - atr14 * atrEntryMult
 
-longSL  = longEntry  - atr14 * atrSlMult
-shortSL = shortEntry + atr14 * atrSlMult
+// Structure-based SL: swing low/high over lookback period
+swingLow  = ta.lowest(low, swingLookback)
+swingHigh = ta.highest(high, swingLookback)
 
-longTP1  = longEntry  + math.abs(longEntry  - longSL)            // 1:1 RR
-longTP2  = longEntry  + atr14 * atrTpMult                        // main target
-longTP3  = longTP2    + math.abs(longEntry  - longSL) * 0.5      // stretch
+longSL  = swingLow  - atr14 * 0.1   // just below swing low
+shortSL = swingHigh + atr14 * 0.1   // just above swing high
+// Minimum SL distance gate — at least 0.5 ATR from entry
+longSL  := math.min(longSL,  longEntry  - atr14 * 0.5)
+shortSL := math.max(shortSL, shortEntry + atr14 * 0.5)
 
-shortTP1 = shortEntry - math.abs(shortEntry - shortSL)
-shortTP2 = shortEntry - atr14 * atrTpMult
-shortTP3 = shortTP2   - math.abs(shortEntry - shortSL) * 0.5
+// TP is RR-based from the structure SL distance
+slDistLong  = longEntry  - longSL
+slDistShort = shortSL - shortEntry
+
+longTP1  = longEntry  + slDistLong                               // 1:1 RR
+longTP2  = longEntry  + slDistLong  * atrTpMult                  // main target
+longTP3  = longTP2    + slDistLong  * 0.5                        // stretch
+
+shortTP1 = shortEntry - slDistShort
+shortTP2 = shortEntry - slDistShort * atrTpMult
+shortTP3 = shortTP2   - slDistShort * 0.5
 
 // ── RR GATE ─────────────────────────────────────────────────────────────────
 longRR  = math.abs(longTP2  - longEntry)  / math.abs(longSL  - longEntry)
