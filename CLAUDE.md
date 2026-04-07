@@ -72,6 +72,7 @@ Changes since 20260401.7:
 | dxy_reference | DXY reference data (never traded, used for correlation) |
 | trade_journal | Auto-generated signal snapshots on every WIN/LOSS/EXPIRED |
 | market_data_history | Snapshots of market_data per symbol per scoring run (14-day retention) |
+| fxssi_history | Historical FXSSI order book snapshots for backtesting (UNIQUE symbol+snapshot_time) |
 
 ### Key columns on signals table
 
@@ -282,6 +283,7 @@ Auto-categorised on every WIN/LOSS:
 | :02/:22/:42 | Signal retirement cycle |
 | Hourly | Learning cycle (if thresholds met) |
 | Friday 20:45 | COT weekly fetch (CFTC) |
+| 23:30 | Nightly FXSSI history collection (recent, queue-based, non-blocking) |
 | Every 30min | Health check → email + Telegram if degraded |
 
 ## API endpoints
@@ -323,6 +325,12 @@ Auto-categorised on every WIN/LOSS:
 | GET | /api/telegram-test | Send test message |
 | GET | /api/morning-brief | Preview brief HTML |
 | POST | /api/morning-brief-send | Send brief to Telegram |
+| GET | /api/fxssi-history/collect | Trigger FXSSI history collection (?mode=recent or full) |
+| GET | /api/fxssi-history/status | Count + earliest/latest snapshot per symbol |
+| GET | /api/fxssi-history/query | Lookup snapshot by symbol + timestamp |
+| GET | /api/fxssi-history/stop | Cancel in-progress collection |
+| GET | /api/fxssi-history/sample-full | Raw full_analysis JSON for 3 symbols |
+| POST | /api/backtest-analyze | Correlate trades with FXSSI history (6 alignment dimensions) |
 
 ## Environment variables
 
@@ -368,3 +376,35 @@ Auto-categorised on every WIN/LOSS:
 14. **Never replace the stream body parser with express.json().** Pine Script sends NaN literals which are invalid JSON. The stream parser with NaN sanitisation is intentional and must not be changed.
 15. **Never DELETE signals on startup.** No automatic cleanup queries that delete from the signals table during init. Signals expire naturally via `expires_at` or get replaced by new scoring runs. Previous cleanup queries wiped all signals after DB restores.
 16. **Anthropic API calls are FORBIDDEN outside the 07:00 UTC macro cron and explicit user-triggered `/api/macro-force` and `/api/macro-refresh` endpoints.** `runMacroContextFetch()` has a hard caller guard — it requires a `caller` string from `MACRO_ALLOWED_CALLERS` (`cron_0700`, `macro_force`, `macro_refresh`). Any other caller is blocked with a throw. On startup, macro context is loaded from DB only. This rule exists because startup macro fetches have regressed 3+ times.
+17. **persist() is debounced to max once per 30 seconds.** `db.export()` serializes the entire in-memory DB synchronously — at scale this blocks the event loop. `persist()` marks dirty, `_flushToDisk()` runs on a 30s setInterval. Backup copies happen ONLY in the 00:00 UTC daily cron, not on every persist. No `fs.statSync` on the hot path. PRAGMA table_info for fxssi_analysis column check is cached after first call.
+
+## Pine Script backtest strategies
+
+| File | Approach | Chart TF | Key Features |
+|------|----------|----------|-------------|
+| `atlas_backtest.pine` | EMA + bias score + structure | Any | Optimizable inputs, structure fallback in dead zone, bias bypass for structGate |
+| `atlas_smc_backtest.pine` | Smart Money Concepts | Any | BOS + Order Blocks + Ichimoku cloud filter, swing pivots |
+| `atlas_mtf_backtest.pine` | MTF confluence (daily/4h/1h) | 10m | Pullback from 4H extreme + rejection candle, no indicators except ATR |
+| `atlas_combined_backtest.pine` | Combined SMC + MTF + RSI div + volume | 1m | Three-class system (A/B/C), 10-layer confluence, request.security for daily/4H |
+
+### Combined strategy class system
+
+| Class | Requirements | Score | SL Placement |
+|-------|-------------|-------|-------------|
+| A | Tier1 + all 3 strong filters + 1+ bonus | 88 | Order Block |
+| B | Tier1 + 2+ strong filters | 75 | Swing level |
+| C | Tier1 + 1 strong filter | 62 | ATR × 1.5 |
+
+Tier 1 (mandatory): daily bias + BOS direction + rejection candle
+Tier 2 (0-3): cloud + order block + pullback
+Bonus (0-2): RSI divergence + volume
+
+## FXSSI history collector
+
+- `server/fxssi-history-collector.js` — standalone, queue-based, non-blocking
+- Processes ONE job at a time via `setTimeout(processNext, 350)`
+- Jobs: `[{symbol, pair, offset}]` for 21 symbols × offsets
+- `INSERT OR IGNORE` handles duplicates — safe to restart mid-collection
+- Cancellable via `/api/fxssi-history/stop`
+- `POST /api/backtest-analyze` correlates trades with historical FXSSI snapshots
+- 6 alignment dimensions: sentiment, long_pct, trapped, ob_imbalance, absorption, gravity
