@@ -77,7 +77,8 @@ longStructScore  = (struct_1d  == 1 ? 3.0 : 0.0) + (struct_4h == 1 ? 2.0 : 0.0) 
 shortStructScore = (struct_1d  == -1 ? 3.0 : 0.0) + (struct_4h == -1 ? 2.0 : 0.0) + (struct_1h == -1 ? 1.5 : 0.0) + (struct_15m == -1 ? 1.0 : 0.0)
 weightedStruct   = isLong ? longStructScore : isShort ? shortStructScore : 0.0
 
-structGate = weightedStruct >= minWeightedStruct
+// Strong bias (abs >= 4) bypasses structure gate — bias overrides weak alignment
+structGate = math.abs(biasScore) >= 4.0 or weightedStruct >= minWeightedStruct
 
 // ── ENTRY / SL / TP ────────────────────────────────────────────────────────
 longEntry  = close + atr14 * atrEntryMult
