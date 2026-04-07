@@ -80,6 +80,12 @@ function processNext() {
     if (!snap) {
       _stats.errors++;
     } else {
+      // Log every fetch so we can see if snapshot_time changes with offset
+      const snapDate = new Date(snap.snapshot_time * 1000).toISOString().slice(0, 19);
+      if (_stats.processed <= 50 || _stats.processed % 50 === 0) {
+        console.log(`[FXSSI-Hist] #${_stats.processed} ${job.symbol} offset=${job.offset} → time=${snap.snapshot_time} (${snapDate}) price=${snap.price}`);
+      }
+
       const inserted = db.insertFxssiHistory({
         symbol: job.symbol,
         snapshot_time: snap.snapshot_time,
@@ -95,7 +101,13 @@ function processNext() {
         fetched_at: Date.now()
       });
       if (inserted) _stats.collected++;
-      else _stats.skipped++;
+      else {
+        _stats.skipped++;
+        // Log duplicate detection — if snapshot_time isn't moving, the API isn't respecting timeOffset
+        if (_stats.skipped <= 10) {
+          console.log(`[FXSSI-Hist] DUPLICATE: ${job.symbol} offset=${job.offset} snapshot_time=${snap.snapshot_time} already in DB`);
+        }
+      }
     }
 
     // Progress log every 50 jobs
@@ -121,24 +133,27 @@ function collectHistory(maxOffset) {
 
   const symbols = Object.entries(FXSSI_SYMBOLS);
 
-  // Build job queue — check DB for existing records to resume from
+  // Build job queue: every symbol × every offset
   _queue = [];
-  for (let offset = 0; offset <= maxOffset; offset++) {
-    for (const [symbol, pair] of symbols) {
+  for (const [symbol, pair] of symbols) {
+    for (let offset = 0; offset <= maxOffset; offset++) {
       _queue.push({ symbol, pair, offset });
     }
   }
-
-  // Filter out jobs where we already have data for that symbol+offset combo
-  // We can't check exact snapshot_time without fetching, but we can skip
-  // offsets where we already have a recent record for that symbol
-  // (The UNIQUE constraint handles true duplicates on insert anyway)
+  // UNIQUE constraint on (symbol, snapshot_time) handles duplicates on insert
 
   _collecting = true;
   _cancelled = false;
   _stats = { collected: 0, skipped: 0, errors: 0, total: _queue.length, processed: 0 };
 
-  console.log(`[FXSSI-Hist] Starting collection: ${_queue.length} jobs (${symbols.length} symbols × ${maxOffset + 1} offsets)`);
+  const expected = symbols.length * (maxOffset + 1);
+  console.log(`[FXSSI-Hist] Starting collection: ${_queue.length} jobs (${symbols.length} symbols × ${maxOffset + 1} offsets, expected ${expected})`);
+  if (_queue.length !== expected) console.error(`[FXSSI-Hist] BUG: queue has ${_queue.length} jobs but expected ${expected}!`);
+  // Log first and last job to confirm range
+  if (_queue.length > 0) {
+    const first = _queue[0], last = _queue[_queue.length - 1];
+    console.log(`[FXSSI-Hist] First job: ${first.symbol} offset=${first.offset} | Last job: ${last.symbol} offset=${last.offset}`);
+  }
 
   return new Promise(resolve => {
     _resolve = resolve;
