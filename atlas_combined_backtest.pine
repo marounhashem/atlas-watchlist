@@ -1,0 +1,229 @@
+//@version=6
+strategy("ATLAS // COMBINED", overlay=true, pyramiding=0,
+         default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+         initial_capital=10000, commission_value=0.02, slippage=1,
+         calc_on_every_tick=false)
+
+// ── INPUTS ──────────────────────────────────────────────────────────────────
+dailyBars    = input.int(144,   "Daily Bars (144=24h)",  minval=96,  maxval=288, step=24)
+htfBars      = input.int(24,    "4H Bars (24=4h)",       minval=12,  maxval=48,  step=6)
+swingLen     = input.int(10,    "Swing Lookback",        minval=5,   maxval=20,  step=5)
+obLookback   = input.int(5,     "Order Block Lookback",  minval=3,   maxval=10,  step=1)
+rsiLen       = input.int(14,    "RSI Length")
+atrLen       = input.int(14,    "ATR Length")
+volLen       = input.int(20,    "Volume MA Length")
+minRR        = input.float(3.0, "Min R:R",               minval=2.0, maxval=5.0, step=0.5)
+useCloud     = input.bool(true, "Ichimoku Cloud Filter")
+useVolume    = input.bool(true, "Volume Confirmation")
+useRsiDiv    = input.bool(true, "RSI Divergence Filter")
+startDate    = input.time(timestamp("2026-03-31"), "Start Date")
+
+// ── LAYER 1 — ICHIMOKU CLOUD ────────────────────────────────────────────────
+tenkan   = (ta.highest(high, 9)  + ta.lowest(low, 9))  / 2
+kijun    = (ta.highest(high, 26) + ta.lowest(low, 26)) / 2
+spanA    = (tenkan + kijun) / 2
+spanB    = (ta.highest(high, 52) + ta.lowest(low, 52)) / 2
+cloudTop    = math.max(spanA, spanB)
+cloudBot    = math.min(spanA, spanB)
+aboveCloud  = close > cloudTop
+belowCloud  = close < cloudBot
+
+// ── LAYER 2 — DAILY BIAS ────────────────────────────────────────────────────
+dailyHigh = ta.highest(high, dailyBars)
+dailyLow  = ta.lowest(low,   dailyBars)
+dailyMid  = (dailyHigh + dailyLow) / 2
+dailyBull = close > dailyMid
+dailyBear = close < dailyMid
+
+// ── LAYER 3 — BREAK OF STRUCTURE ────────────────────────────────────────────
+swingHigh = ta.pivothigh(high, swingLen, swingLen)
+swingLow  = ta.pivotlow(low,   swingLen, swingLen)
+
+var float lastSwingHigh = na
+var float lastSwingLow  = na
+if not na(swingHigh)
+    lastSwingHigh := swingHigh
+if not na(swingLow)
+    lastSwingLow := swingLow
+
+bullBOS = not na(lastSwingHigh) and close > lastSwingHigh and close[1] <= lastSwingHigh
+bearBOS = not na(lastSwingLow)  and close < lastSwingLow  and close[1] >= lastSwingLow
+
+var int bosDir = 0
+if bullBOS
+    bosDir := 1
+if bearBOS
+    bosDir := -1
+
+// ── LAYER 4 — ORDER BLOCK ──────────────────────────────────────────────────
+var float obBullTop = na
+var float obBullBot = na
+var float obBearTop = na
+var float obBearBot = na
+
+if bullBOS
+    for i = 1 to obLookback
+        if close[i] < open[i]
+            obBullTop := high[i]
+            obBullBot := low[i]
+            break
+
+if bearBOS
+    for i = 1 to obLookback
+        if close[i] > open[i]
+            obBearTop := high[i]
+            obBearBot := low[i]
+            break
+
+// ── LAYER 5 — 4H PULLBACK TO ORDER BLOCK ───────────────────────────────────
+htfHighest = ta.highest(high, htfBars)
+htfLowest  = ta.lowest(low,   htfBars)
+atr14 = ta.atr(atrLen)
+
+pulledBackBull = close < htfHighest - atr14 * 0.3
+pulledBackBear = close > htfLowest  + atr14 * 0.3
+
+inObBull = not na(obBullTop) and close <= obBullTop and close >= obBullBot
+inObBear = not na(obBearTop) and close >= obBearBot and close <= obBearTop
+
+// ── LAYER 6 — REJECTION CANDLE ──────────────────────────────────────────────
+candleRange = high - low
+lowerWick   = math.min(open, close) - low
+upperWick   = high - math.max(open, close)
+bullRej = candleRange > 0 and lowerWick > candleRange * 0.35 and close > (low + candleRange * 0.45)
+bearRej = candleRange > 0 and upperWick > candleRange * 0.35 and close < (high - candleRange * 0.45)
+
+// ── LAYER 7 — RSI DIVERGENCE ────────────────────────────────────────────────
+rsi14 = ta.rsi(close, rsiLen)
+
+rsiDivBull = false
+rsiDivBear = false
+if useRsiDiv
+    priceLow1  = ta.lowest(low,     5)
+    priceLow2  = ta.lowest(low[5],  5)
+    rsiLow1    = ta.lowest(rsi14,   5)
+    rsiLow2    = ta.lowest(rsi14[5],5)
+    priceHigh1 = ta.highest(high,     5)
+    priceHigh2 = ta.highest(high[5],  5)
+    rsiHigh1   = ta.highest(rsi14,    5)
+    rsiHigh2   = ta.highest(rsi14[5], 5)
+    rsiDivBull := priceLow1  < priceLow2  and rsiLow1  > rsiLow2
+    rsiDivBear := priceHigh1 > priceHigh2 and rsiHigh1 < rsiHigh2
+
+// ── LAYER 8 — VOLUME CONFIRMATION ──────────────────────────────────────────
+volMA   = ta.sma(volume, volLen)
+highVol = useVolume ? volume > volMA * 1.3 : true
+
+// ── LAYER 9 — ENTRY CONDITIONS ─────────────────────────────────────────────
+longCond = dailyBull
+     and (not useCloud or aboveCloud)
+     and bosDir == 1
+     and pulledBackBull
+     and inObBull
+     and bullRej
+     and (not useRsiDiv or rsiDivBull)
+     and highVol
+
+shortCond = dailyBear
+     and (not useCloud or belowCloud)
+     and bosDir == -1
+     and pulledBackBear
+     and inObBear
+     and bearRej
+     and (not useRsiDiv or rsiDivBear)
+     and highVol
+
+// ── LAYER 10 — SL AND TP ───────────────────────────────────────────────────
+slLong  = not na(obBullBot) ? obBullBot - atr14 * 0.1 : close - atr14 * 1.5
+slShort = not na(obBearTop) ? obBearTop + atr14 * 0.1 : close + atr14 * 1.5
+slLong  := math.min(slLong,  close - atr14 * 0.5)
+slShort := math.max(slShort, close + atr14 * 0.5)
+
+slDistL = close - slLong
+slDistS = slShort - close
+
+tpLong  = close + slDistL * minRR
+tpShort = close - slDistS * minRR
+
+goLong  = longCond  and strategy.position_size == 0 and time >= startDate
+goShort = shortCond and strategy.position_size == 0 and time >= startDate
+
+// ── STRATEGY EXECUTION ─────────────────────────────────────────────────────
+if goLong
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", "Long", stop=slLong, limit=tpLong)
+
+if goShort
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", "Short", stop=slShort, limit=tpShort)
+
+// ── PLOTS ───────────────────────────────────────────────────────────────────
+// Cloud
+p1 = plot(useCloud ? spanA : na, "Span A", color.new(color.green, 80))
+p2 = plot(useCloud ? spanB : na, "Span B", color.new(color.red,   80))
+fill(p1, p2, color=spanA > spanB ? color.new(color.green, 90) : color.new(color.red, 90))
+
+// Daily range
+plot(dailyHigh, "Daily High", color.new(color.red,   60), 1)
+plot(dailyLow,  "Daily Low",  color.new(color.green, 60), 1)
+plot(dailyMid,  "Daily Mid",  color.new(color.gray,  70), 1, plot.style_circles)
+
+// BOS markers
+plotshape(bullBOS, "Bull BOS", shape.labelup,   location.belowbar, color.green, text="BOS", size=size.small)
+plotshape(bearBOS, "Bear BOS", shape.labeldown,  location.abovebar, color.red,   text="BOS", size=size.small)
+
+// Order blocks
+var box obBullBox = na
+var box obBearBox = na
+if bullBOS and not na(obBullTop)
+    obBullBox := box.new(bar_index - obLookback, obBullTop, bar_index + 30, obBullBot,
+                         border_color=color.green, bgcolor=color.new(color.green, 85))
+if bearBOS and not na(obBearTop)
+    obBearBox := box.new(bar_index - obLookback, obBearTop, bar_index + 30, obBearBot,
+                         border_color=color.red, bgcolor=color.new(color.red, 85))
+
+// Signals
+plotshape(goLong,  "Long",  shape.triangleup,   location.belowbar, color.green, size=size.normal)
+plotshape(goShort, "Short", shape.triangledown,  location.abovebar, color.red,   size=size.normal)
+
+// Rejection dots
+plotshape(bullRej and bosDir == 1,  "Bull Rej", shape.circle, location.belowbar, color.new(color.green, 50), size=size.tiny)
+plotshape(bearRej and bosDir == -1, "Bear Rej", shape.circle, location.abovebar, color.new(color.red,   50), size=size.tiny)
+
+// ── DEBUG TABLE ─────────────────────────────────────────────────────────────
+var table dbg = table.new(position.top_right, 2, 10,
+                           bgcolor=color.new(color.black, 70), border_width=1)
+table.cell(dbg, 0, 0, "Daily",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 0, dailyBull ? "BULL" : "BEAR",
+           text_color=dailyBull ? color.green : color.red, text_size=size.small)
+table.cell(dbg, 0, 1, "Cloud",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 1, aboveCloud ? "ABOVE" : belowCloud ? "BELOW" : "INSIDE",
+           text_color=aboveCloud ? color.green : belowCloud ? color.red : color.yellow, text_size=size.small)
+table.cell(dbg, 0, 2, "BOS Dir",   text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 2, bosDir == 1 ? "BULL" : bosDir == -1 ? "BEAR" : "NONE",
+           text_color=bosDir == 1 ? color.green : bosDir == -1 ? color.red : color.gray, text_size=size.small)
+table.cell(dbg, 0, 3, "In OB",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 3, inObBull ? "BULL OB" : inObBear ? "BEAR OB" : "no",
+           text_color=inObBull ? color.green : inObBear ? color.red : color.gray, text_size=size.small)
+table.cell(dbg, 0, 4, "Rejection", text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 4, bullRej ? "BULL" : bearRej ? "BEAR" : "none",
+           text_color=bullRej ? color.green : bearRej ? color.red : color.gray, text_size=size.small)
+table.cell(dbg, 0, 5, "RSI Div",   text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 5, rsiDivBull ? "BULL" : rsiDivBear ? "BEAR" : "none",
+           text_color=rsiDivBull ? color.green : rsiDivBear ? color.red : color.gray, text_size=size.small)
+table.cell(dbg, 0, 6, "Volume",    text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 6, highVol ? "HIGH" : "low",
+           text_color=highVol ? color.green : color.gray, text_size=size.small)
+table.cell(dbg, 0, 7, "Pullback",  text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 7, pulledBackBull ? "BULL" : pulledBackBear ? "BEAR" : "none",
+           text_color=pulledBackBull ? color.green : pulledBackBear ? color.red : color.gray, text_size=size.small)
+table.cell(dbg, 0, 8, "goLong",    text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 8, goLong  ? "FIRE" : "-",
+           text_color=goLong  ? color.green : color.gray, text_size=size.small)
+table.cell(dbg, 0, 9, "goShort",   text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 9, goShort ? "FIRE" : "-",
+           text_color=goShort ? color.red   : color.gray, text_size=size.small)
+
+// ── ALERTS ──────────────────────────────────────────────────────────────────
+alertcondition(goLong,  "Combined Long",  "LONG signal fired")
+alertcondition(goShort, "Combined Short", "SHORT signal fired")
