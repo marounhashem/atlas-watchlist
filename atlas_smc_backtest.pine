@@ -60,10 +60,11 @@ if bearBOS
             break
 
 // ── STEP 4 — ICHIMOKU CLOUD ────────────────────────────────────────────────
-tenkan  = ta.ema(close, 9)
-kijun   = ta.ema(close, 26)
+tenkan  = (ta.highest(high, 9)  + ta.lowest(low, 9))  / 2
+kijun   = (ta.highest(high, 26) + ta.lowest(low, 26)) / 2
 spanA   = (tenkan + kijun) / 2
-spanB   = ta.ema(close, 52)
+spanB   = (ta.highest(high, 52) + ta.lowest(low, 52)) / 2
+// Cloud plotted 26 bars ahead (offset on plots only) — conditions use current bar values
 cloudTop   = math.max(spanA, spanB)
 cloudBot   = math.min(spanA, spanB)
 aboveCloud = close > cloudTop
