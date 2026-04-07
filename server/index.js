@@ -697,6 +697,9 @@ app.post('/api/backtest-analyze', (req, res) => {
   const gravAgainst = { count: 0, wins: 0, losses: 0 };
   const comboTrappedAbs = { count: 0, wins: 0, losses: 0 };
   const comboTrappedOb = { count: 0, wins: 0, losses: 0 };
+  const comboTrappedGravFar = { count: 0, wins: 0, losses: 0 };
+  const comboTrappedGravNotClose = { count: 0, wins: 0, losses: 0 };
+  const gravCloseBlocked = { count: 0, wins: 0, losses: 0 };
   let noSnapshot = 0;
   const results = [];
 
@@ -861,6 +864,13 @@ app.post('/api/backtest-analyze', (req, res) => {
       const isObAligned = obImbAlignment === 'ob_imbalance_aligned';
       if (isTrAligned && isAbsAligned) { comboTrappedAbs.count++; if (isWin) comboTrappedAbs.wins++; if (isLoss) comboTrappedAbs.losses++; }
       if (isTrAligned && isObAligned) { comboTrappedOb.count++; if (isWin) comboTrappedOb.wins++; if (isLoss) comboTrappedOb.losses++; }
+      // Gravity distance combos
+      const isGravFar = gravProximity === 'gravity_far';
+      const isGravNotClose = gravProximity === 'gravity_far' || gravProximity === 'gravity_medium';
+      const isGravClose = gravProximity === 'gravity_close';
+      if (isTrAligned && isGravFar) { comboTrappedGravFar.count++; if (isWin) comboTrappedGravFar.wins++; if (isLoss) comboTrappedGravFar.losses++; }
+      if (isTrAligned && isGravNotClose) { comboTrappedGravNotClose.count++; if (isWin) comboTrappedGravNotClose.wins++; if (isLoss) comboTrappedGravNotClose.losses++; }
+      if (isGravClose) { gravCloseBlocked.count++; if (isWin) gravCloseBlocked.wins++; if (isLoss) gravCloseBlocked.losses++; }
     } else {
       noSnapshot++;
       if (results.length < 3) {
@@ -898,6 +908,9 @@ app.post('/api/backtest-analyze', (req, res) => {
     gravity_against: { ...gravAgainst, win_rate: wr(gravAgainst) },
     trapped_AND_absorption: { ...comboTrappedAbs, win_rate: wr(comboTrappedAbs) },
     trapped_AND_ob: { ...comboTrappedOb, win_rate: wr(comboTrappedOb) },
+    trapped_AND_gravity_far: { ...comboTrappedGravFar, win_rate: wr(comboTrappedGravFar) },
+    trapped_AND_gravity_not_close: { ...comboTrappedGravNotClose, win_rate: wr(comboTrappedGravNotClose) },
+    gravity_close_blocked: { ...gravCloseBlocked, win_rate: wr(gravCloseBlocked) },
     no_snapshot: { count: noSnapshot },
     trades: results
   });
