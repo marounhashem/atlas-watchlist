@@ -637,6 +637,30 @@ app.get('/api/fxssi-fetch', async (req, res) => {
   }
 });
 
+// TEMPORARY: compare FXSSI with/without timeOffset param
+app.get('/api/fxssi-timeoffset-test', async (req, res) => {
+  const token = process.env.FXSSI_TOKEN;
+  const userId = process.env.FXSSI_USER_ID || '118460';
+  if (!token) return res.json({ error: 'No FXSSI_TOKEN' });
+  const headers = {
+    'Accept': 'application/json, text/javascript, */*; q=0.01',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+    'Referer': 'https://fxssi.com/'
+  };
+  const base = `https://c.fxssi.com/api/order-book?pair=EURUSD&view=all&period=1200&token=${token}&user_id=${userId}`;
+  try {
+    const [r1, r2] = await Promise.all([
+      fetch(`${base}&rand=${Math.random()}`, { headers }).then(r => r.json()),
+      fetch(`${base}&timeOffset=10&rand=${Math.random()}`, { headers }).then(r => r.json())
+    ]);
+    res.json({
+      withoutOffset: { time: r1.time, price: r1.price, levels: r1.levels?.length },
+      withOffset:    { time: r2.time, price: r2.price, levels: r2.levels?.length },
+      timeDiffSeconds: (r2.time || 0) - (r1.time || 0)
+    });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // Reset — wipe signals and market data, keep weights and schema
 // Signals-only reset — clears trades but preserves market data (Pine + FXSSI)
 // Use this when you want a clean slate without losing live order book data
