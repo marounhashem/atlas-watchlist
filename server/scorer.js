@@ -153,7 +153,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260407.1'; // raised RR gates, trapped trader + gravity hard gates
+const SCORER_VERSION = '20260407.2'; // simplified multipliers, weight rebalance, raised floor
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -328,8 +328,7 @@ function scoreFXSSI(data, direction) {
     if (direction === 'SHORT' && fxssi.nearestLimitBelow?.price) score -= 0.08;
   }
 
-  // 4. Absorption
-  if (data.ob_absorption && direction === 'LONG') score += 0.10;
+  // 4. Absorption — REMOVED (20260407.2)
 
   // 5. Signal bias
   if (fxssi?.signals?.bias) {
@@ -359,8 +358,7 @@ function scoreOrderBook(data, direction) {
 
   const cp = data.close || 0;
 
-  if (data.ob_absorption && direction === 'LONG')  score += 0.20;
-  if (data.ob_absorption && direction === 'SHORT') score += 0.05;
+  // Absorption scoring — REMOVED (20260407.2)
 
   // ── Hourly order book confirmation ───────────────────────────────────────
   // If a level appears in BOTH the 20-min and 1-hour order books it's significant
@@ -435,25 +433,7 @@ function scoreOrderBook(data, direction) {
   // Gravity above price = liquidity magnet pulling UP = bullish pull
   // Absorption at entry = large buyers defending the level = support confirmed
   // Together: institutional support + price magnet above = high conviction LONG
-  try {
-    const raw2 = data.fxssi_analysis || data.raw_payload;
-    if (raw2 && data.ob_absorption) {
-      const parsed2 = JSON.parse(raw2);
-      const fx2 = parsed2.fxssiAnalysis
-        ? (typeof parsed2.fxssiAnalysis === 'string' ? JSON.parse(parsed2.fxssiAnalysis) : parsed2.fxssiAnalysis)
-        : (parsed2.longPct != null ? parsed2 : null);
-      const gp = fx2?.gravity?.price;
-      const cp2 = data.close || 0;
-      if (gp && cp2) {
-        if (direction === 'LONG'  && gp > cp2) score += 0.18; // gravity above + absorption = strong LONG setup
-        if (direction === 'SHORT' && gp < cp2) score += 0.18; // gravity below + absorption = strong SHORT setup
-      }
-    }
-  } catch(e) {}
-
-  const imbalance = data.ob_imbalance || 0;
-  if (direction === 'LONG'  && imbalance > 0.3)  score += 0.15;
-  if (direction === 'SHORT' && imbalance < -0.3) score += 0.15;
+  // Gravity+absorption combo + imbalance scoring — REMOVED (20260407.2)
 
   if (!fxssi) return Math.min(1.0, score);
 
@@ -604,16 +584,24 @@ function scoreSymbol(symbol) {
   }
 
   const w = getWeights(symbol);
-  // New 3-weight schema: pine, fxssi (covers both sentiment + OB), session
+  // Simplified 2-weight schema for forex (pine 0.50, fxssi 0.50, session 0)
+  // Session weight only for noOrderBook symbols (indices without FXSSI data)
+  const hasFxssiData = !!data.fxssi_analysis;
   const weights = w && w.pine ? {
     pine:    w.pine,
     fxssi:   w.fxssi,
     session: w.session
   } : {
-    pine:    cfg.scoringWeights.pine    || 0.40,
-    fxssi:   cfg.scoringWeights.fxssi   || 0.45,
-    session: cfg.scoringWeights.session || 0.15
+    pine:    0.50,
+    fxssi:   0.50,
+    session: 0.00
   };
+  // If symbol has FXSSI data, zero out session weight and redistribute
+  if (hasFxssiData) {
+    weights.pine = 0.50;
+    weights.fxssi = 0.50;
+    weights.session = 0.00;
+  }
 
   // Learned entry/SL/TP blend weights (how much FXSSI vs Pine for each level)
   // Start 50/50, Claude learns to adjust based on what actually works
@@ -908,31 +896,8 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
-  // ── Crowd trap override ───────────────────────────────────────────────────
-  // When 60%+ crowd is trapped on the OPPOSITE side, that IS the signal
-  // Don't penalise — the contrarian setup is valid even if Pine EMA conflicts
-  // 65%+ trapped = strong squeeze setup, slight boost
-  const longPct  = data.fxssi_long_pct  || 50;
-  const shortPct = data.fxssi_short_pct || 50;
-  // Asymmetric crowd thresholds — SHORT needs lower bar to trigger
-  const crowdWithUs      = (direction === 'LONG'  && longPct  > 70) ||
-                           (direction === 'SHORT' && shortPct > 70);
-  const crowdTrappedOpp  = (direction === 'LONG'  && shortPct >= 60) ||
-                           (direction === 'SHORT' && longPct  >= 55);
-  const crowdStrongTrap  = (direction === 'LONG'  && shortPct >= 65) ||
-                           (direction === 'SHORT' && longPct  >= 60);
-
-  if (crowdWithUs) {
-    // Crowd on same side as us = contrarian risk, slight penalty
-    conflictMultiplier *= 0.85;
-  } else if (crowdStrongTrap) {
-    // 65%+ on opposite side = strong squeeze fuel, override EMA conflict penalty
-    if (conflictMultiplier < 1.0) conflictMultiplier = Math.min(1.0, conflictMultiplier + 0.15);
-    conflictMultiplier *= 1.05;
-  } else if (crowdTrappedOpp) {
-    // 60-65% on opposite side = moderate contrarian setup
-    if (conflictMultiplier < 1.0) conflictMultiplier = Math.min(1.0, conflictMultiplier + 0.08);
-  }
+  // ── Crowd trap / absorption / long_pct multipliers REMOVED (20260407.2) ────
+  // Replaced by trapped trader hard gate + gravity proximity hard gate
 
   // ── Weighted multi-TF structure alignment ───────────────────────────────────
   // Higher TFs carry more weight: 1d=3, 4h=2, 1h=1.5, 15m=1, 5m=0.5, 1m=0.5
@@ -1007,32 +972,10 @@ function scoreSymbol(symbol) {
         (direction === 'SHORT' && macro.supports_short && !macro.supports_long);
 
       if (macroConflict) {
-        // Macro penalty with event-aware decay — if HIGH impact event fired after macro
-        // was last updated, macro context is superseded (event changed conditions)
-        const macroAgeH = (Date.now() - macro.ts) / 3600000;
-        let decayFactor;
-        let superseded = false;
-        try {
-          const symCurrencies = SYMBOL_CURRENCIES[symbol] || [];
-          const dbMod = require('./db');
-          const allEvts = dbMod.getAllEconomicEvents() || [];
-          const eventsSince = allEvts.filter(e =>
-            e.fired && e.impact === 'High' && e.ts > macro.ts
-            && symCurrencies.some(c => c === e.currency)
-          );
-          if (eventsSince.length > 0) {
-            decayFactor = 0.25; // Max staleness — event superseded macro context
-            superseded = true;
-          }
-        } catch(e) {}
-        if (!superseded) {
-          decayFactor = macroAgeH < 6 ? 1.00 : macroAgeH < 12 ? 0.75 : macroAgeH < 20 ? 0.50 : 0.25;
-        }
+        // Direct macro penalty — no superseded decay (removed 20260407.2)
         const basePenalty = macro.strength >= 8 ? 0.70 : macro.strength >= 6 ? 0.78 : macro.strength >= 4 ? 0.88 : 0.94;
-        const decayedPenalty = 1 - ((1 - basePenalty) * decayFactor);
-        conflictMultiplier *= decayedPenalty;
-        const ageLabel = superseded ? 'superseded by event' : (macroAgeH > 6 ? Math.round(macroAgeH) + 'h old' : '');
-        macroNote = `⚠ Macro ${macro.sentiment} (${macro.strength}/10${ageLabel ? ', ' + ageLabel : ''}) conflicts — ${macro.summary}`;
+        conflictMultiplier *= basePenalty;
+        macroNote = `⚠ Macro ${macro.sentiment} (${macro.strength}/10) conflicts — ${macro.summary}`;
       } else if (macroConfirm) {
         const bonus = macro.strength >= 7 ? 1.08 : 1.04;
         conflictMultiplier *= bonus;
@@ -1047,51 +990,7 @@ function scoreSymbol(symbol) {
     macroNote += macroNote ? ' · No Retail OB — Technical only' : 'No Retail OB — Technical only';
   }
 
-  // ── DXY correlation — USD strength/weakness context ─────────────────────────
-  // Direct USD pairs get stronger weight (×1.07/×0.92)
-  // Cross pairs and commodities get lighter weight (×1.03/×0.97)
-  try {
-    const dxy = global.atlasGetDXY?.();
-    if (dxy && dxy.trend) {
-      const symCurrencies = SYMBOL_CURRENCIES[symbol] || [];
-      if (symCurrencies.includes('USD')) {
-        const USD_DIRECT = ['EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD'];
-        const isDirect = USD_DIRECT.includes(symbol);
-        const isBase = symCurrencies[0] === 'USD'; // USDJPY, USDCHF, USDCAD
-        // DXY bullish = USD strong → base-USD pairs LONG, quote-USD pairs SHORT
-        const dxyConfirms = (dxy.trend === 'bullish' && ((isBase && direction === 'LONG') || (!isBase && direction === 'SHORT')))
-          || (dxy.trend === 'bearish' && ((isBase && direction === 'SHORT') || (!isBase && direction === 'LONG')));
-        const dxyConflicts = (dxy.trend === 'bullish' && ((isBase && direction === 'SHORT') || (!isBase && direction === 'LONG')))
-          || (dxy.trend === 'bearish' && ((isBase && direction === 'LONG') || (!isBase && direction === 'SHORT')));
-        if (dxyConfirms) {
-          conflictMultiplier *= isDirect ? 1.07 : 1.03;
-          macroNote += ` · ✓ DXY ${dxy.trend} confirms`;
-        } else if (dxyConflicts) {
-          conflictMultiplier *= isDirect ? 0.92 : 0.97;
-          macroNote += ` · ⚠ DXY ${dxy.trend} conflicts`;
-        }
-      }
-    }
-  } catch(e) {}
-
-  // ── Nikkei-JPY correlation ──────────────────────────────────────────────────
-  // J225 bullish = risk-on = JPY weakens → JPY pairs LONG favoured
-  // J225 bearish = risk-off = JPY strengthens → JPY pairs SHORT favoured
-  const currencies = SYMBOL_CURRENCIES[symbol] || [];
-  if (currencies.includes('JPY')) {
-    try {
-      const j225Data = getLatestMarketData('J225');
-      if (j225Data && j225Data.bias_score !== undefined) {
-        const j225Bias = j225Data.bias_score;
-        const jpyBullish = j225Bias < -0.2; // J225 falling = JPY strong
-        const jpyBearish = j225Bias > 0.2;  // J225 rising = JPY weak
-        if (jpyBullish && direction === 'LONG') { conflictMultiplier *= 0.93; macroNote += ' · ⚠ Nikkei bearish — JPY strength risk'; }
-        if (jpyBearish && direction === 'SHORT') { conflictMultiplier *= 0.93; macroNote += ' · ⚠ Nikkei bullish — JPY weakness risk'; }
-        if (jpyBullish && direction === 'SHORT') { conflictMultiplier *= 1.04; macroNote += ' · ✓ Nikkei bearish confirms JPY strength'; }
-        if (jpyBearish && direction === 'LONG') { conflictMultiplier *= 1.04; macroNote += ' · ✓ Nikkei bullish confirms JPY weakness'; }
-      }
-    } catch(e) {}
-  }
+  // ── DXY / Nikkei-JPY multipliers REMOVED (20260407.2) ──────────────────────
 
   // ─�� Intel key levels scoring ────────────────────────────────────────────────
   // If active intel has key_levels for this symbol, check price proximity
@@ -1125,57 +1024,7 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
-  // ── COT with age decay — re-enabled with fading weight ─────────────────────
-  // Weekly CFTC data: full weight <48h after release, fades over the week
-  try {
-    const { getLatestCOT } = getCotFetcher();
-    const cot = getLatestCOT(symbol);
-    if (cot && cot.netNonComm !== undefined) {
-      const crowded = Math.abs(cot.netNonComm) > 100000;
-      if (crowded) {
-        const isLong = cot.netNonComm > 0;
-        const against = (isLong && direction === 'SHORT') || (!isLong && direction === 'LONG');
-        const withDir = (isLong && direction === 'LONG') || (!isLong && direction === 'SHORT');
-        const rawMult = against ? 0.88 : withDir ? 1.05 : 1.0;
-        // Age decay: full weight <48h, 75% at 2-4d, 50% at 4-6d, 20% at >6d
-        const cotAgeH = cot.ts ? (Date.now() - cot.ts) / 3600000 : 999;
-        const fade = cotAgeH < 48 ? 1.0 : cotAgeH < 96 ? 0.75 : cotAgeH < 144 ? 0.50 : 0.20;
-        const fadedMult = 1 + (rawMult - 1) * fade;
-        conflictMultiplier *= fadedMult;
-        if (against) macroNote += ` · ⚠ COT crowded ${isLong ? 'LONG' : 'SHORT'} (${Math.round(cot.netNonComm/1000)}k)${fade < 1 ? ' [' + Math.round(cotAgeH/24) + 'd old]' : ''}`;
-        else if (withDir) macroNote += ` · ✓ COT confirms ${direction}${fade < 1 ? ' [' + Math.round(cotAgeH/24) + 'd old]' : ''}`;
-      }
-    }
-  } catch(e) {}
-
-  // ── Rate differential carry gate ────────────────────────────────────────────
-  // Strong carry differentials penalise counter-carry trades, reward with-carry
-  try {
-    const { getRateDifferential } = getRateFetcher();
-    const rateDiff = getRateDifferential(symbol);
-    if (rateDiff && rateDiff.differential !== 0) {
-      const absBps = Math.abs(rateDiff.differential);
-      // Determine if signal fights carry: LONG on base-favoured pair = with carry
-      // BASE_FAVOURED + LONG = with carry, BASE_FAVOURED + SHORT = against carry
-      // QUOTE_FAVOURED + SHORT = with carry, QUOTE_FAVOURED + LONG = against carry
-      const withCarry = (rateDiff.direction === 'BASE_FAVOURED' && direction === 'LONG') ||
-                        (rateDiff.direction === 'QUOTE_FAVOURED' && direction === 'SHORT');
-      const againstCarry = (rateDiff.direction === 'BASE_FAVOURED' && direction === 'SHORT') ||
-                           (rateDiff.direction === 'QUOTE_FAVOURED' && direction === 'LONG');
-
-      // Spot: carry matters less (no overnight swap) — reduced penalties
-      if (againstCarry && absBps > 500) {
-        conflictMultiplier *= 0.90;
-        macroNote += ` | ⚠ Carry ${rateDiff.differential}bps against`;
-        if (!eventRiskTag) eventRiskTag = 'CARRY_RISK';
-      } else if (againstCarry && absBps > 300) {
-        conflictMultiplier *= 0.95;
-        macroNote += ` | ⚠ Carry ${rateDiff.differential}bps against`;
-      } else if (withCarry && absBps > 300) {
-        conflictMultiplier *= 1.03;
-      }
-    }
-  } catch(e) {}
+  // ── COT / Carry rate multipliers REMOVED (20260407.2) ──────────────────────
 
   // ── Economic event sentiment gate ───────────────────────────────────────────
   // When HIGH impact event fired recently, adjust scoring based on actual vs forecast
@@ -1210,10 +1059,10 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
-  // ── Multiplier floor — prevent compounding below 0.65 ───────────────────────
-  if (conflictMultiplier < 0.65) {
-    console.log(`[Scorer] ${symbol} conflictMultiplier floored at 0.65 (was ${conflictMultiplier.toFixed(3)})`);
-    conflictMultiplier = 0.65;
+  // ── Multiplier floor — prevent compounding below 0.70 ───────────────────────
+  if (conflictMultiplier < 0.70) {
+    console.log(`[Scorer] ${symbol} conflictMultiplier floored at 0.70 (was ${conflictMultiplier.toFixed(3)})`);
+    conflictMultiplier = 0.70;
   }
 
   // Combined FXSSI score = average of sentiment + order book (same source, two perspectives)
@@ -1989,58 +1838,7 @@ function scoreSymbol(symbol) {
     } catch(e) {}
   }
 
-  // ── Forward guidance from consensus ─────────────────────────────────────────
-  try {
-    const { getConsensusImpact } = getCbCalendar();
-    const consensus = getConsensusImpact(symbol, direction);
-    if (consensus) {
-      if (consensus.impact === 'CONFIRMS') {
-        macroAdjustedScore = Math.round(macroAdjustedScore * 1.08);
-        eventRiskNote += (eventRiskNote ? ' · ' : '') + `${consensus.bank} ${consensus.decision} expected — confirms ${direction}`;
-      } else if (consensus.impact === 'CONTRADICTS') {
-        macroAdjustedScore = Math.round(macroAdjustedScore * 0.88);
-        eventRiskNote += (eventRiskNote ? ' · ' : '') + `${consensus.bank} ${consensus.decision} expected — contradicts ${direction}`;
-      }
-    }
-  } catch(e) {}
-
-  // ── Forecast-based pre-release bias ─────────────────────────────────────────
-  // Uses forecast vs previous for upcoming HIGH impact events to nudge score
-  // Only applies when event is >10min away (inside 10min = pre-event suppression)
-  try {
-    const { getForecastBias } = require('./forexCalendar');
-    const forecastBias = getForecastBias(symbol);
-    if (forecastBias && forecastBias.firesInMin > 10) {
-      // Determine if forecast bias confirms or contradicts our direction
-      // Use CURRENCY_DIRECTION from centralBankCalendar to map currency strength → pair direction
-      const { PAIR_CURRENCIES } = getCbCalendar();
-      const currencies = PAIR_CURRENCIES?.[symbol] || [];
-      const eventCcy = forecastBias.currency;
-
-      // For the event currency: bias=1 means currency strengthens
-      // Map to pair direction: if currency strengthening favours LONG, confirms LONG
-      let pairBias = 0;
-      if (currencies.length >= 2) {
-        const isBase = currencies[0] === eventCcy;
-        pairBias = isBase ? forecastBias.bias : -forecastBias.bias;
-      } else if (currencies.includes(eventCcy)) {
-        // Single-currency symbols (GOLD, US30) — USD bullish = bearish for GOLD/indices
-        pairBias = symbol === 'OILWTI' ? -forecastBias.bias : -forecastBias.bias;
-      }
-
-      const mult = forecastBias.strength === 3 ? 0.12 : forecastBias.strength === 2 ? 0.07 : 0.03;
-      const confirms = (pairBias === 1 && direction === 'LONG') || (pairBias === -1 && direction === 'SHORT');
-      const contradicts = (pairBias === 1 && direction === 'SHORT') || (pairBias === -1 && direction === 'LONG');
-
-      if (confirms) {
-        macroAdjustedScore = Math.round(macroAdjustedScore * (1 + mult));
-        macroNote += ` · ✓ Forecast: ${forecastBias.summary}`;
-      } else if (contradicts) {
-        macroAdjustedScore = Math.round(macroAdjustedScore * (1 - mult));
-        macroNote += ` · ⚠ Forecast: ${forecastBias.summary}`;
-      }
-    }
-  } catch(e) {}
+  // ── CB consensus / Forecast bias multipliers REMOVED (20260407.2) ──────────
 
   const fxssiStale = hasFxssi && fxssiAge > FXSSI_MAX_AGE_MS;
 
