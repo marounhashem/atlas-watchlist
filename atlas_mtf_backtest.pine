@@ -1,0 +1,114 @@
+//@version=6
+strategy("ATLAS // MTF BACKTEST", overlay=true, pyramiding=0,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+     initial_capital=10000, commission_value=0.02, slippage=1,
+     calc_on_every_tick=false)
+
+// ── INPUTS ──────────────────────────────────────────────────────────────────
+dailyLookback = input.int(24,    "Daily Bars",   minval=16, maxval=48,  step=4)
+htfLookback   = input.int(4,     "4H Bars",      minval=2,  maxval=8,   step=1)
+swingLen      = input.int(10,    "Swing Length",  minval=5,  maxval=20,  step=5)
+atrLen        = input.int(14,    "ATR Length")
+minRR         = input.float(2.0, "Min R:R",      minval=1.5, maxval=4.0, step=0.5)
+startDate     = input.time(timestamp("2026-03-31"), "Start Date")
+
+// ── STEP 1 — DAILY BIAS ────────────────────────────────────────────────────
+dailyHigh = ta.highest(high, dailyLookback)
+dailyLow  = ta.lowest(low,   dailyLookback)
+dailyMid  = (dailyHigh + dailyLow) / 2
+
+dailyBullish = close > dailyMid
+dailyBearish = close < dailyMid
+
+dailyResistance = dailyHigh
+dailySupport    = dailyLow
+
+// ── STEP 2 — 4H SETUP (pullback to level) ──────────────────────────────────
+htfHigh = ta.highest(high, htfLookback)
+htfLow  = ta.lowest(low,   htfLookback)
+
+supportZoneTop = dailyLow  + (dailyHigh - dailyLow) * 0.35
+resistZoneBot  = dailyHigh - (dailyHigh - dailyLow) * 0.35
+
+bullishSetup = dailyBullish and close <= supportZoneTop
+bearishSetup = dailyBearish and close >= resistZoneBot
+
+// ── STEP 3 — 1H ENTRY TRIGGER ──────────────────────────────────────────────
+atr14       = ta.atr(atrLen)
+candleRange = high - low
+lowerWick   = math.min(open, close) - low
+upperWick   = high - math.max(open, close)
+
+bullRejection = candleRange > 0 and lowerWick > candleRange * 0.5 and close > (low + candleRange * 0.6)
+bearRejection = candleRange > 0 and upperWick > candleRange * 0.5 and close < (high - candleRange * 0.6)
+
+// ── STEP 4 — CONFLUENCE ENTRY ───────────────────────────────────────────────
+notAtDailyExtreme = close > dailyLow + atr14 and close < dailyHigh - atr14
+
+longSignal  = bullishSetup and bullRejection and notAtDailyExtreme
+shortSignal = bearishSetup and bearRejection and notAtDailyExtreme
+
+// ── STEP 5 — SL AND TP ─────────────────────────────────────────────────────
+slLong  = low  - atr14 * 0.1
+slShort = high + atr14 * 0.1
+slLong  := math.min(slLong,  close - atr14 * 0.5)
+slShort := math.max(slShort, close + atr14 * 0.5)
+
+slDistLong  = close - slLong
+slDistShort = slShort - close
+
+tpLong  = close + slDistLong  * minRR
+tpShort = close - slDistShort * minRR
+
+goLong  = longSignal  and strategy.position_size == 0 and time >= startDate
+goShort = shortSignal and strategy.position_size == 0 and time >= startDate
+
+// ── STEP 6 — STRATEGY EXECUTION ────────────────────────────────────────────
+if goLong
+    strategy.entry("Long", strategy.long)
+    strategy.exit("Long Exit", "Long", stop=slLong, limit=tpLong)
+
+if goShort
+    strategy.entry("Short", strategy.short)
+    strategy.exit("Short Exit", "Short", stop=slShort, limit=tpShort)
+
+// ── STEP 7 — PLOTS ─────────────────────────────────────────────────────────
+plot(dailyHigh,      "Daily High",   color.new(color.red,   60), 1, plot.style_line)
+plot(dailyLow,       "Daily Low",    color.new(color.green, 60), 1, plot.style_line)
+plot(dailyMid,       "Daily Mid",    color.new(color.gray,  60), 1, plot.style_circles)
+plot(supportZoneTop, "Support Zone", color.new(color.green, 80), 1, plot.style_line)
+plot(resistZoneBot,  "Resist Zone",  color.new(color.red,   80), 1, plot.style_line)
+
+plotshape(goLong,  "Long",  shape.triangleup,   location.belowbar, color.green, size=size.normal)
+plotshape(goShort, "Short", shape.triangledown,  location.abovebar, color.red,   size=size.normal)
+
+plotshape(bullRejection and dailyBullish, "Bull Rejection", shape.circle, location.belowbar, color.new(color.green, 50), size=size.tiny)
+plotshape(bearRejection and dailyBearish, "Bear Rejection", shape.circle, location.abovebar, color.new(color.red,   50), size=size.tiny)
+
+// ── STEP 8 — DEBUG TABLE ───────────────────────────────────────────────────
+var table t = table.new(position.top_right, 2, 7, bgcolor=color.new(color.black, 70), border_width=1)
+table.cell(t, 0, 0, "Daily Bias",  text_color=color.white, text_size=size.small)
+table.cell(t, 1, 0, dailyBullish ? "BULL" : "BEAR",
+           text_color=dailyBullish ? color.green : color.red, text_size=size.small)
+table.cell(t, 0, 1, "Setup",       text_color=color.white, text_size=size.small)
+table.cell(t, 1, 1, bullishSetup ? "BULL SETUP" : bearishSetup ? "BEAR SETUP" : "none",
+           text_color=bullishSetup ? color.green : bearishSetup ? color.red : color.gray, text_size=size.small)
+table.cell(t, 0, 2, "Rejection",   text_color=color.white, text_size=size.small)
+table.cell(t, 1, 2, bullRejection ? "BULL" : bearRejection ? "BEAR" : "none",
+           text_color=bullRejection ? color.green : bearRejection ? color.red : color.gray, text_size=size.small)
+table.cell(t, 0, 3, "Not Extreme", text_color=color.white, text_size=size.small)
+table.cell(t, 1, 3, notAtDailyExtreme ? "YES" : "NO",
+           text_color=notAtDailyExtreme ? color.green : color.red, text_size=size.small)
+table.cell(t, 0, 4, "goLong",      text_color=color.white, text_size=size.small)
+table.cell(t, 1, 4, goLong  ? "FIRE" : "-",
+           text_color=goLong  ? color.green : color.gray, text_size=size.small)
+table.cell(t, 0, 5, "goShort",     text_color=color.white, text_size=size.small)
+table.cell(t, 1, 5, goShort ? "FIRE" : "-",
+           text_color=goShort ? color.red   : color.gray, text_size=size.small)
+table.cell(t, 0, 6, "SL dist",     text_color=color.white, text_size=size.small)
+table.cell(t, 1, 6, str.tostring(math.round(goLong ? slDistLong : slDistShort, 5)),
+           text_color=color.white, text_size=size.small)
+
+// ── ALERTS ──────────────────────────────────────────────────────────────────
+alertcondition(goLong,  "MTF Long",  "MTF Long signal fired")
+alertcondition(goShort, "MTF Short", "MTF Short signal fired")
