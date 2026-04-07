@@ -679,6 +679,9 @@ app.post('/api/backtest-analyze', (req, res) => {
   const lpAligned = { count: 0, wins: 0, losses: 0 };
   const lpConflicted = { count: 0, wins: 0, losses: 0 };
   const lpNeutral = { count: 0, wins: 0, losses: 0 };
+  const trAligned = { count: 0, wins: 0, losses: 0 };
+  const trConflicted = { count: 0, wins: 0, losses: 0 };
+  const trNeutral = { count: 0, wins: 0, losses: 0 };
   let noSnapshot = 0;
   const results = [];
 
@@ -709,6 +712,14 @@ app.post('/api/backtest-analyze', (req, res) => {
         console.log(`[backtest-analyze] trade ${results.length}: snapshot found=true sentiment=${sent} long_pct=${longPct}`);
       }
 
+      // Extract trapped trader data from full_analysis JSON
+      const inProfitPct = fullAnalysis?.inProfitPct ?? null;
+      const inLossPct = fullAnalysis?.inLossPct ?? null;
+      const buyersInProfitPct = fullAnalysis?.buyersInProfitPct ?? null;
+      const sellersInProfitPct = fullAnalysis?.sellersInProfitPct ?? null;
+      const losingClusters = fullAnalysis?.losingClusters || [];
+      const nearestLosingCluster = losingClusters[0] || null;
+
       fxssi_data = {
         snapshot_time: snap.match.snapshot_time,
         raw_sentiment: snap.match.sentiment,
@@ -718,9 +729,16 @@ app.post('/api/backtest-analyze', (req, res) => {
         short_pct: shortPct,
         gravity_price: snap.match.gravity_price,
         ob_imbalance: snap.match.ob_imbalance,
-        gap_minutes: snap.gap_minutes
+        gap_minutes: snap.gap_minutes,
+        in_profit_pct: inProfitPct,
+        in_loss_pct: inLossPct,
+        buyers_in_profit_pct: buyersInProfitPct,
+        sellers_in_profit_pct: sellersInProfitPct,
+        losing_cluster_count: losingClusters.length,
+        nearest_losing_cluster_price: nearestLosingCluster?.price || null
       };
 
+      // Sentiment alignment
       if ((sent === 'BULLISH' && trade.direction === 'LONG') || (sent === 'BEARISH' && trade.direction === 'SHORT')) {
         alignment = 'aligned';
         aligned.count++; if (isWin) aligned.wins++; if (isLoss) aligned.losses++;
@@ -732,6 +750,7 @@ app.post('/api/backtest-analyze', (req, res) => {
         neutral.count++; if (isWin) neutral.wins++; if (isLoss) neutral.losses++;
       }
 
+      // long_pct alignment (contrarian)
       if (longPct != null) {
         if ((trade.direction === 'SHORT' && longPct >= 52) || (trade.direction === 'LONG' && longPct <= 48)) {
           lpAlignment = 'long_pct_aligned';
@@ -743,6 +762,21 @@ app.post('/api/backtest-analyze', (req, res) => {
           lpNeutral.count++; if (isWin) lpNeutral.wins++; if (isLoss) lpNeutral.losses++;
         }
       }
+
+      // Trapped trader alignment — who is losing and will capitulate?
+      let trAlignment = 'trapped_neutral';
+      if (buyersInProfitPct != null && sellersInProfitPct != null) {
+        if ((trade.direction === 'SHORT' && buyersInProfitPct <= 35) || (trade.direction === 'LONG' && sellersInProfitPct <= 35)) {
+          trAlignment = 'trapped_aligned';
+          trAligned.count++; if (isWin) trAligned.wins++; if (isLoss) trAligned.losses++;
+        } else if ((trade.direction === 'SHORT' && sellersInProfitPct <= 35) || (trade.direction === 'LONG' && buyersInProfitPct <= 35)) {
+          trAlignment = 'trapped_conflicted';
+          trConflicted.count++; if (isWin) trConflicted.wins++; if (isLoss) trConflicted.losses++;
+        } else {
+          trNeutral.count++; if (isWin) trNeutral.wins++; if (isLoss) trNeutral.losses++;
+        }
+      }
+      fxssi_data.trapped_alignment = trAlignment;
     } else {
       noSnapshot++;
       if (results.length < 3) {
@@ -750,7 +784,7 @@ app.post('/api/backtest-analyze', (req, res) => {
       }
     }
 
-    results.push({ ...trade, fxssi_data, alignment, long_pct_alignment: lpAlignment, snapshot_reason: snap.reason || null });
+    results.push({ ...trade, fxssi_data, alignment, long_pct_alignment: lpAlignment, trapped_alignment: fxssi_data?.trapped_alignment || 'trapped_neutral', snapshot_reason: snap.reason || null });
   }
 
   const wr = (b) => b.count > 0 ? Math.round(b.wins / (b.wins + b.losses || 1) * 100) : null;
@@ -762,6 +796,9 @@ app.post('/api/backtest-analyze', (req, res) => {
     long_pct_aligned: { ...lpAligned, win_rate: wr(lpAligned) },
     long_pct_conflicted: { ...lpConflicted, win_rate: wr(lpConflicted) },
     long_pct_neutral: { ...lpNeutral, win_rate: wr(lpNeutral) },
+    trapped_aligned: { ...trAligned, win_rate: wr(trAligned) },
+    trapped_conflicted: { ...trConflicted, win_rate: wr(trConflicted) },
+    trapped_neutral: { ...trNeutral, win_rate: wr(trNeutral) },
     no_snapshot: { count: noSnapshot },
     trades: results
   });
