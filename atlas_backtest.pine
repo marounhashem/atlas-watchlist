@@ -122,9 +122,9 @@ plotshape(goShort, "Short Signal", shape.triangledown,  location.abovebar, color
 
 // ── PLOTS — SEPARATE PANES ─────────────────────────────────────────────────
 plot(biasScore,     "Bias Score",      color=biasScore > 0 ? color.green : color.red, display=display.pane)
-hline(2,  "Long Threshold",  color=color.gray, linestyle=hline.style_dotted, display=display.pane)
-hline(-2, "Short Threshold", color=color.gray, linestyle=hline.style_dotted, display=display.pane)
-hline(0,  "Zero",            color=color.gray, linestyle=hline.style_dashed, display=display.pane)
+hline(2,  "Long Threshold",  color=color.gray, linestyle=hline.style_dotted, display=display.all)
+hline(-2, "Short Threshold", color=color.gray, linestyle=hline.style_dotted, display=display.all)
+hline(0,  "Zero",            color=color.gray, linestyle=hline.style_dashed, display=display.all)
 
 plot(weightedStruct, "Weighted Structure", color=color.orange, display=display.pane)
-hline(1,  "Min Struct Gate",  color=color.gray, linestyle=hline.style_dotted, display=display.pane)
+hline(1,  "Min Struct Gate",  color=color.gray, linestyle=hline.style_dotted, display=display.all)
