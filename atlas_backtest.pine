@@ -31,9 +31,9 @@ vwapVal = ta.vwap(hlc3)
 [macdLine, signalLine, macdHist] = ta.macd(close, macdFast, macdSlow, macdSig)
 
 // ── MULTI-TIMEFRAME EMA200 ─────────────────────────────────────────────────
-ema200_1d = request.security(syminfo.tickerid, "D", ta.ema(close, emaLen), lookahead=barmerge.lookahead_off)
-ema200_4h = request.security(syminfo.tickerid, "240", ta.ema(close, emaLen), lookahead=barmerge.lookahead_off)
-ema200_1h = request.security(syminfo.tickerid, "60",  ta.ema(close, emaLen), lookahead=barmerge.lookahead_off)
+ema200_1d = request.security(syminfo.tickerid, "D", ta.ema(close, emaLen), lookahead=barmerge.lookahead_on)
+ema200_4h = request.security(syminfo.tickerid, "240", ta.ema(close, emaLen), lookahead=barmerge.lookahead_on)
+ema200_1h = request.security(syminfo.tickerid, "60",  ta.ema(close, emaLen), lookahead=barmerge.lookahead_on)
 
 // ── MULTI-TIMEFRAME STRUCTURE ───────────────────────────────────────────────
 // Bullish: close > prior 5-bar high | Bearish: close < prior 5-bar low
@@ -42,10 +42,10 @@ f_struct(_close, _high, _low) =>
     bear = _close < ta.lowest(_low, 5)[1]
     bull ? 1 : bear ? -1 : 0
 
-struct_1d  = request.security(syminfo.tickerid, "D",  f_struct(close, high, low), lookahead=barmerge.lookahead_off)
-struct_4h  = request.security(syminfo.tickerid, "240", f_struct(close, high, low), lookahead=barmerge.lookahead_off)
-struct_1h  = request.security(syminfo.tickerid, "60",  f_struct(close, high, low), lookahead=barmerge.lookahead_off)
-struct_15m = request.security(syminfo.tickerid, "15",  f_struct(close, high, low), lookahead=barmerge.lookahead_off)
+struct_1d  = request.security(syminfo.tickerid, "D",  f_struct(close, high, low), lookahead=barmerge.lookahead_on)
+struct_4h  = request.security(syminfo.tickerid, "240", f_struct(close, high, low), lookahead=barmerge.lookahead_on)
+struct_1h  = request.security(syminfo.tickerid, "60",  f_struct(close, high, low), lookahead=barmerge.lookahead_on)
+struct_15m = request.security(syminfo.tickerid, "15",  f_struct(close, high, low), lookahead=barmerge.lookahead_on)
 
 // ── BIAS SCORE (-8 to +8) ──────────────────────────────────────────────────
 biasScore = (close > ema200_1d ? 3.0 : -3.0)
