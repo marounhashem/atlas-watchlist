@@ -165,6 +165,5 @@ table.cell(t, 0, 7, "goShort",     text_color=color.white, text_size=size.small)
 table.cell(t, 1, 7, goShort ? "FIRE" : "-", text_color=goShort ? color.red   : color.gray, text_size=size.small)
 
 // ── ALERT ───────────────────────────────────────────────────────────────────
-alertcondition(goLong or goShort, "SMC Signal",
-     '{"symbol":"{{ticker}}","direction":"' + (goLong ? "LONG" : "SHORT") +
-     '","entry":{{close}},"time":"{{timenow}}"}')
+alertcondition(goLong,  "SMC Long Signal",  "LONG signal fired")
+alertcondition(goShort, "SMC Short Signal", "SHORT signal fired")
