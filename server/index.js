@@ -682,6 +682,19 @@ app.post('/api/backtest-analyze', (req, res) => {
   const trAligned = { count: 0, wins: 0, losses: 0 };
   const trConflicted = { count: 0, wins: 0, losses: 0 };
   const trNeutral = { count: 0, wins: 0, losses: 0 };
+  const obImbAligned = { count: 0, wins: 0, losses: 0 };
+  const obImbConflicted = { count: 0, wins: 0, losses: 0 };
+  const obImbNeutral = { count: 0, wins: 0, losses: 0 };
+  const absAligned = { count: 0, wins: 0, losses: 0 };
+  const absConflicted = { count: 0, wins: 0, losses: 0 };
+  const absNeutral = { count: 0, wins: 0, losses: 0 };
+  const gravClose = { count: 0, wins: 0, losses: 0 };
+  const gravMedium = { count: 0, wins: 0, losses: 0 };
+  const gravFar = { count: 0, wins: 0, losses: 0 };
+  const gravNone = { count: 0, wins: 0, losses: 0 };
+  const gravBelow = { count: 0, wins: 0, losses: 0 };
+  const gravAbove = { count: 0, wins: 0, losses: 0 };
+  const gravAgainst = { count: 0, wins: 0, losses: 0 };
   let noSnapshot = 0;
   const results = [];
 
@@ -777,6 +790,63 @@ app.post('/api/backtest-analyze', (req, res) => {
         }
       }
       fxssi_data.trapped_alignment = trAlignment;
+
+      // OB Imbalance alignment
+      const obImb = fullAnalysis?.obImbalance ?? snap.match.ob_imbalance ?? null;
+      let obImbAlignment = 'ob_imbalance_neutral';
+      if (obImb != null) {
+        if ((trade.direction === 'LONG' && obImb >= 0.2) || (trade.direction === 'SHORT' && obImb <= -0.2)) {
+          obImbAlignment = 'ob_imbalance_aligned';
+          obImbAligned.count++; if (isWin) obImbAligned.wins++; if (isLoss) obImbAligned.losses++;
+        } else if ((trade.direction === 'LONG' && obImb <= -0.2) || (trade.direction === 'SHORT' && obImb >= 0.2)) {
+          obImbAlignment = 'ob_imbalance_conflicted';
+          obImbConflicted.count++; if (isWin) obImbConflicted.wins++; if (isLoss) obImbConflicted.losses++;
+        } else {
+          obImbNeutral.count++; if (isWin) obImbNeutral.wins++; if (isLoss) obImbNeutral.losses++;
+        }
+      }
+      fxssi_data.ob_imbalance_alignment = obImbAlignment;
+
+      // Absorption alignment
+      const absorption = fullAnalysis?.obAbsorption ?? (snap.match.ob_absorption === 1);
+      let absAlignment = 'absorption_neutral';
+      if (absorption) {
+        if (trade.direction === 'LONG') {
+          absAlignment = 'absorption_aligned';
+          absAligned.count++; if (isWin) absAligned.wins++; if (isLoss) absAligned.losses++;
+        } else {
+          absAlignment = 'absorption_conflicted';
+          absConflicted.count++; if (isWin) absConflicted.wins++; if (isLoss) absConflicted.losses++;
+        }
+      } else {
+        absNeutral.count++; if (isWin) absNeutral.wins++; if (isLoss) absNeutral.losses++;
+      }
+      fxssi_data.absorption_alignment = absAlignment;
+
+      // Gravity proximity + direction
+      const gravPrice = snap.match.gravity_price ?? fullAnalysis?.gravity?.price ?? null;
+      const entryPrice = trade.entry || trade.entry_price || null;
+      let gravProximity = 'gravity_none';
+      let gravDirection = 'gravity_against';
+      if (gravPrice && entryPrice) {
+        const dist = Math.abs(entryPrice - gravPrice) / entryPrice * 100;
+        if (dist <= 0.3) { gravProximity = 'gravity_close'; gravClose.count++; if (isWin) gravClose.wins++; if (isLoss) gravClose.losses++; }
+        else if (dist <= 1.0) { gravProximity = 'gravity_medium'; gravMedium.count++; if (isWin) gravMedium.wins++; if (isLoss) gravMedium.losses++; }
+        else { gravProximity = 'gravity_far'; gravFar.count++; if (isWin) gravFar.wins++; if (isLoss) gravFar.losses++; }
+
+        if ((trade.direction === 'LONG' && gravPrice < entryPrice) || (trade.direction === 'SHORT' && gravPrice > entryPrice)) {
+          gravDirection = trade.direction === 'LONG' ? 'gravity_below' : 'gravity_above';
+          const b = trade.direction === 'LONG' ? gravBelow : gravAbove;
+          b.count++; if (isWin) b.wins++; if (isLoss) b.losses++;
+        } else {
+          gravAgainst.count++; if (isWin) gravAgainst.wins++; if (isLoss) gravAgainst.losses++;
+        }
+      } else {
+        gravNone.count++; if (isWin) gravNone.wins++; if (isLoss) gravNone.losses++;
+      }
+      fxssi_data.gravity_proximity = gravProximity;
+      fxssi_data.gravity_direction = gravDirection;
+      fxssi_data.gravity_price = gravPrice;
     } else {
       noSnapshot++;
       if (results.length < 3) {
@@ -799,6 +869,19 @@ app.post('/api/backtest-analyze', (req, res) => {
     trapped_aligned: { ...trAligned, win_rate: wr(trAligned) },
     trapped_conflicted: { ...trConflicted, win_rate: wr(trConflicted) },
     trapped_neutral: { ...trNeutral, win_rate: wr(trNeutral) },
+    ob_imbalance_aligned: { ...obImbAligned, win_rate: wr(obImbAligned) },
+    ob_imbalance_conflicted: { ...obImbConflicted, win_rate: wr(obImbConflicted) },
+    ob_imbalance_neutral: { ...obImbNeutral, win_rate: wr(obImbNeutral) },
+    absorption_aligned: { ...absAligned, win_rate: wr(absAligned) },
+    absorption_conflicted: { ...absConflicted, win_rate: wr(absConflicted) },
+    absorption_neutral: { ...absNeutral, win_rate: wr(absNeutral) },
+    gravity_close: { ...gravClose, win_rate: wr(gravClose) },
+    gravity_medium: { ...gravMedium, win_rate: wr(gravMedium) },
+    gravity_far: { ...gravFar, win_rate: wr(gravFar) },
+    gravity_none: { ...gravNone, win_rate: wr(gravNone) },
+    gravity_below: { ...gravBelow, win_rate: wr(gravBelow) },
+    gravity_above: { ...gravAbove, win_rate: wr(gravAbove) },
+    gravity_against: { ...gravAgainst, win_rate: wr(gravAgainst) },
     no_snapshot: { count: noSnapshot },
     trades: results
   });
