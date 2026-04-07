@@ -589,4 +589,4 @@ function getFxssiCacheAge(symbol) {
   return Date.now() - cached.ts;
 }
 
-module.exports = { runFXSSIScrape, processBridgePayload, getFxssiCacheAge, getFxssiNullStreak };
+module.exports = { runFXSSIScrape, processBridgePayload, getFxssiCacheAge, getFxssiNullStreak, analyseOrderBook, FXSSI_SYMBOLS };
