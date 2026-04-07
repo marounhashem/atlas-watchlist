@@ -1283,14 +1283,14 @@ app.get('/api/macro-debug', (req, res) => {
 // macro-refresh: fire-and-forget (fast response)
 const macroRefreshHandler = async (req, res) => {
   res.json({ ok: true, message: 'Macro refresh started' });
-  runMacroContextFetch(broadcast).catch(e => console.error('[Macro] Manual refresh error:', e.message));
+  runMacroContextFetch(broadcast, 'macro_refresh').catch(e => console.error('[Macro] Manual refresh error:', e.message));
 };
 app.get('/api/macro-refresh', macroRefreshHandler);
 app.post('/api/macro-refresh', macroRefreshHandler);
 // macro-force: waits and returns result (for debugging)
 const macroForceHandler = async (req, res) => {
   try {
-    await runMacroContextFetch(broadcast);
+    await runMacroContextFetch(broadcast, 'macro_force');
     const ctx = getMacroContext();
     res.json({ ok: true, symbols: Object.keys(ctx).length, data: ctx });
   } catch(e) {
@@ -2377,7 +2377,7 @@ cron.schedule('50 6 * * *', async () => {
 // Stored in DB and used by scorer as a macro alignment check
 cron.schedule('0 7 * * *', async () => {
   console.log('[Cron] Running daily macro context fetch...');
-  await runMacroContextFetch(broadcast);
+  await runMacroContextFetch(broadcast, 'cron_0700');
 });
 
 // Weekly COT fetch — every Friday at 20:45 UTC (15 min after CFTC 15:30 EST release)
@@ -2456,11 +2456,18 @@ async function callClaudeWithSearch(prompt) {
 }
 
 // ── MACRO CONTEXT FETCH ─────────────────────────────────────────────────────
-// ONLY called by 07:00 UTC cron — NEVER call on startup or restart.
-// On startup, macro context is loaded from DB only (no API calls).
-// This function makes Anthropic API calls for every symbol — calling it on
-// startup wastes API budget and has caused billing incidents repeatedly.
-async function runMacroContextFetch(broadcast) {
+// Rule 16: Anthropic API calls are FORBIDDEN outside the 07:00 UTC macro cron
+// and explicit user-triggered /api/macro-force and /api/macro-refresh endpoints.
+// This function enforces a hard caller guard — any unrecognised caller is
+// blocked with a throw. On startup, macro context is loaded from DB only.
+// This guard exists because startup macro fetches have regressed 3+ times.
+const MACRO_ALLOWED_CALLERS = new Set(['cron_0700', 'macro_force', 'macro_refresh']);
+async function runMacroContextFetch(broadcast, caller) {
+  if (!MACRO_ALLOWED_CALLERS.has(caller)) {
+    const msg = `[MACRO GUARD] BLOCKED — runMacroContextFetch called by "${caller || 'unknown'}". Only allowed: ${[...MACRO_ALLOWED_CALLERS].join(', ')}`;
+    console.error(msg);
+    throw new Error(msg);
+  }
   if (!process.env.ANTHROPIC_API_KEY) return;
 
   const dateStr = new Date().toISOString().slice(0, 10);
