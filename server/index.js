@@ -919,6 +919,31 @@ app.get('/api/fxssi-history/sample', (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// Debug: full raw full_analysis JSON for 3 symbols
+app.get('/api/fxssi-history/sample-full', (req, res) => {
+  try {
+    const samples = [];
+    for (const sym of ['EURUSD', 'GOLD', 'GBPUSD']) {
+      const status = db.getFxssiHistoryStatus().find(s => s.symbol === sym);
+      if (!status) continue;
+      const row = db.getFxssiHistorySnapshot(sym, status.latest);
+      if (!row) continue;
+      let parsed = null;
+      try { parsed = typeof row.full_analysis === 'string' ? JSON.parse(row.full_analysis) : row.full_analysis; } catch(e) {}
+      samples.push({
+        symbol: sym,
+        snapshot_time: row.snapshot_time,
+        gravity_price_column: row.gravity_price,
+        sr_wall_price_column: row.sr_wall_price,
+        ob_imbalance_column: row.ob_imbalance,
+        ob_absorption_column: row.ob_absorption,
+        full_analysis: parsed
+      });
+    }
+    res.json({ samples });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/fxssi-history/stop', (req, res) => {
   if (!isCollecting()) return res.json({ stopped: false, reason: 'not_running' });
   cancelCollection();
