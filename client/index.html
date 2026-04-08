@@ -55,9 +55,21 @@
   [data-theme="light"] .tab-btn.active { color: var(--text); border-bottom-color: var(--active); }
   [data-theme="light"] .filter-btn        { background: var(--surface2); border-color: var(--border); color: var(--muted); }
   [data-theme="light"] .filter-btn.active { background: var(--active); color: #fff; }
+  [data-theme="light"] body { background: var(--bg); color: var(--text); }
+  [data-theme="light"] .header { background: var(--surface); border-bottom-color: var(--border); }
+  [data-theme="light"] .sidebar { background: var(--surface); border-left-color: var(--border); }
+  [data-theme="light"] .mtab-row { background: var(--surface); border-bottom-color: var(--border); }
+  [data-theme="light"] .mtab { color: var(--muted); }
+  [data-theme="light"] .mtab.active { color: var(--text); }
+  [data-theme="light"] input, [data-theme="light"] select { background: var(--surface2); color: var(--text); border-color: var(--border); }
+  [data-theme="light"] .no-ob-note { color: var(--muted); }
   [data-theme="light"] .bar-hi  { background: var(--proceed) !important; }
   [data-theme="light"] .bar-mid { background: var(--watch)   !important; }
   [data-theme="light"] .bar-lo  { background: var(--short)   !important; }
+  .abc-badge { background:color-mix(in srgb, var(--abc-c) 15%, transparent); color:var(--abc-c); border:1px solid color-mix(in srgb, var(--abc-c) 25%, transparent); border-radius:4px; padding:1px 6px; font-size:10px; font-weight:700; margin-left:6px; }
+  @supports not (background: color-mix(in srgb, red 50%, blue)) {
+    .abc-badge { background:var(--surface2); border-color:var(--border); }
+  }
 
   html{font-size:14px;}
   body{
@@ -1340,8 +1352,8 @@ function renderRecommendations(sig) {
       + '<button style="float:right;background:none;border:none;color:var(--dim);cursor:pointer;font-size:11px;padding:0 4px;" onclick="dismissRec(' + sig.id + ',&quot;' + primaryId + '&quot;)" title="Dismiss">&#x2715;</button>'
       + moreBadge
       + '<br>' + (primary.reason || '')
-      + (primary.new_sl ? '<br><span style="color:#ffd740">New SL: ' + primary.new_sl + '</span>' : '')
-      + (primary.new_tp ? '<br><span style="color:#00e676">New TP: ' + primary.new_tp + '</span>' : '')
+      + (primary.new_sl ? '<br><span style="color:var(--watch)">New SL: ' + primary.new_sl + '</span>' : '')
+      + (primary.new_tp ? '<br><span style="color:var(--proceed)">New TP: ' + primary.new_tp + '</span>' : '')
       + (primary.progress_pct !== undefined ? '<br><span style="color:var(--dim)">Progress: ' + primary.progress_pct + '% toward TP</span>' : '')
       + '</div>';
 
@@ -1412,7 +1424,7 @@ function renderCard(sig, isPast) {
         return '<span class="rsn-ok">' + safe.replace(/^[✓✓]\s*/,'') + '</span>';
       if (part.startsWith('⚠'))
         return '<span class="rsn-warn">' + safe.replace(/^⚠\s*/,'') + '</span>';
-      return '<span style="color:#383850">' + safe + '</span>';
+      return '<span style="color:var(--dim)">' + safe + '</span>';
     }).join('<span class="rsn-sep"> · </span>');
   }
 
@@ -1495,7 +1507,7 @@ function renderCard(sig, isPast) {
     // HEADER
     + '<div class="card-hd">'
     + '<span class="card-sym">'+esc(sig.symbol)+'</span>'
-    + (sig._abcClass ? (() => { const c=sig._abcClass,cl=c==='A'?'var(--proceed)':c==='B'?'var(--active)':'#888',lb=c==='A'?'⭐ A':c==='B'?'🔷 B':'🔹 C'; return '<span style="background:'+cl+'22;color:'+cl+';border:1px solid '+cl+'44;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:6px;">'+lb+'</span>'; })() : '')
+    + (sig._abcClass ? (() => { const c=sig._abcClass,cl=c==='A'?'var(--proceed)':c==='B'?'var(--active)':'var(--muted)',lb=c==='A'?'⭐ A':c==='B'?'🔷 B':'🔹 C'; return '<span class="abc-badge" style="--abc-c:'+cl+'">'+lb+'</span>'; })() : '')
     + '<span class="card-pair">'+esc(sig.label||'')+'</span>'
     + '<div class="card-hd-mid">'
     + (isActive ? '<span class="card-tag tag-active">● ACTIVE</span>' : '')
