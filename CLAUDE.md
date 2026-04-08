@@ -399,6 +399,37 @@ Tier 1 (mandatory): daily bias + BOS direction + rejection candle
 Tier 2 (0-3): cloud + order block + pullback
 Bonus (0-2): RSI divergence + volume
 
+## ABC parallel signal system
+
+- `server/abcGates.js` — gate engine for Pine ABC signals (separate from scorer)
+- Webhook: `/webhook/pine-abc` → `processAbcWebhook()` → `runAbcGates()` → `abc_signals` table
+- API: `GET /api/abc-signals` — returns saved ABC signals
+- Telegram: Class A+B → swing channel via `sendAbcSignalAlert()`
+- Dashboard: ⭐ ABC tab with class filters (ALL/A/B/C)
+
+### Verdict mapping (class × FXSSI × noData)
+
+| Class | FXSSI Pass | FXSSI Fail | FXSSI No Data |
+|-------|-----------|-----------|---------------|
+| A | PROCEED | WATCH | WATCH |
+| B | PROCEED | SKIP | WATCH |
+| C | WATCH | SKIP | SKIP |
+
+### Gates (checked in order)
+
+1. Bank holiday → SKIP
+2. Pre-event suppression → SKIP
+3. Post-event volatility → SKIP
+4. RR sanity (< 1.5) → SKIP
+5. FXSSI trapped alignment (opposing side must be trapped)
+6. Gravity proximity (blocks if gravity in 70% of TP path)
+7. Class × FXSSI verdict mapping
+8. Intel key levels (annotation only, no block)
+
+### Cooldown
+
+30-minute cooldown per symbol + direction — prevents duplicate signals.
+
 ## FXSSI history collector
 
 - `server/fxssi-history-collector.js` — standalone, queue-based, non-blocking

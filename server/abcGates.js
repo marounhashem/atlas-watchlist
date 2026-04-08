@@ -12,32 +12,37 @@ const { isPreEventRisk, isPostEventSuppressed } = require('./forexCalendar');
 // Class A: structurally strongest — FXSSI pass=PROCEED, fail=WATCH
 // Class B: needs FXSSI — FXSSI pass=PROCEED, fail=SKIP
 // Class C: weakest — FXSSI pass=WATCH, fail=SKIP
-function mapVerdict(pineClass, fxssiPassed) {
-  if (pineClass === 'A') return fxssiPassed ? 'PROCEED' : 'WATCH';
-  if (pineClass === 'B') return fxssiPassed ? 'PROCEED' : 'SKIP';
-  if (pineClass === 'C') return fxssiPassed ? 'WATCH'   : 'SKIP';
+function mapVerdict(pineClass, fxssiPassed, fxssiNoData) {
+  if (fxssiPassed) {
+    if (pineClass === 'A') return 'PROCEED';
+    if (pineClass === 'B') return 'PROCEED';
+    if (pineClass === 'C') return 'WATCH';
+  } else if (fxssiNoData) {
+    if (pineClass === 'A') return 'WATCH';
+    if (pineClass === 'B') return 'WATCH';
+    if (pineClass === 'C') return 'SKIP';
+  } else {
+    if (pineClass === 'A') return 'WATCH';
+    if (pineClass === 'B') return 'SKIP';
+    if (pineClass === 'C') return 'SKIP';
+  }
   return 'SKIP';
 }
 
 // ── FXSSI gate — same logic as scorer ────────────────────────────────────────
 // Returns { passed: bool, reason: string }
 function checkFxssi(symbol, fxssiData) {
-  if (!fxssiData) return { passed: false, reason: 'No FXSSI data' };
-
-  const direction = fxssiData._direction; // injected by processAbcWebhook
-  const longPct   = fxssiData.fxssi_long_pct  || 50;
-  const shortPct  = fxssiData.fxssi_short_pct || 50;
+  if (!fxssiData || fxssiData.fxssi_trapped == null) {
+    return { passed: false, noData: true, reason: 'No FXSSI data for symbol' };
+  }
+  const direction = fxssiData._direction;
   const trapped   = fxssiData.fxssi_trapped;
-
-  // Trapped alignment gate — must have trapped on opposing side
   const trappedAligned = (direction === 'LONG'  && trapped === 'SHORT') ||
                          (direction === 'SHORT' && trapped === 'LONG');
-
   if (!trappedAligned) {
-    return { passed: false, reason: `Trapped not aligned (trapped=${trapped}, dir=${direction})` };
+    return { passed: false, noData: false, reason: `Trapped not aligned (trapped=${trapped}, dir=${direction})` };
   }
-
-  return { passed: true, reason: `Trapped ${trapped} aligned with ${direction}` };
+  return { passed: true, noData: false, reason: `Trapped ${trapped} aligned with ${direction}` };
 }
 
 // ── Gravity proximity gate ────────────────────────────────────────────────────
@@ -144,7 +149,7 @@ function runAbcGates(symbol, payload, fxssiData, db) {
   }
 
   // 8. Class × FXSSI verdict mapping
-  const verdict = mapVerdict(pineClass, fxssiCheck.passed);
+  const verdict = mapVerdict(pineClass, fxssiCheck.passed, fxssiCheck.noData);
   if (verdict === 'SKIP') {
     return { verdict: 'SKIP', blocked: true, reason: `Class ${pineClass} + FXSSI fail → SKIP. ${fxssiCheck.reason}` };
   }
