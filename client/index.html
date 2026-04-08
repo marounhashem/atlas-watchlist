@@ -29,27 +29,35 @@
     --card-padding:20px; --card-radius:10px; --card-gap:12px;
   }
   [data-theme="light"] {
-    --bg:#f0f0f5; --surface:#ffffff; --surface2:#f5f5fa; --surface3:#eeeef5; --bg-section:#f8f8fc;
-    --border:#d8d8e2; --border2:#e0e0ea;
-    --text:#0a0a18; --text2:#555575; --muted:#555575; --dim:#9999b0;
-    --proceed:#00a86b; --proceed-bg:rgba(0,168,107,.10); --proceed-border:rgba(0,168,107,.30);
-    --watch:#d4840a; --watch-bg:rgba(212,132,10,.10); --watch-border:rgba(212,132,10,.30);
+    --bg:#f2f2f7; --surface:#ffffff; --surface2:#f7f7fc; --surface3:#eeeef5; --bg-section:#f8f8fc;
+    --border:#e2e2ec; --border2:#e0e0ea;
+    --text:#0a0a18; --text2:#44445a; --muted:#8888a0; --dim:#9999b0;
+    --proceed:#007a52; --proceed-bg:rgba(0,122,82,.10); --proceed-border:rgba(0,122,82,.30);
+    --watch:#c07800; --watch-bg:rgba(192,120,0,.10); --watch-border:rgba(192,120,0,.30);
     --skip:#e0e0ea; --closed:#f0f0f5;
-    --long:#2277dd; --long-bg:rgba(34,119,221,.10);
-    --short:#c0303a; --short-bg:rgba(192,48,58,.10);
-    --accent:#6644dd; --accent-bg:rgba(102,68,221,.10); --accent-border:rgba(102,68,221,.30);
-    --teal:#008888; --teal-bg:rgba(0,136,136,.10); --teal-border:rgba(0,136,136,.30);
-    --blue:#2266dd; --blue-dim:rgba(34,102,221,.15);
-    --gold:#b58900;
+    --long:#1a66cc; --long-bg:rgba(26,102,204,.10);
+    --short:#b02030; --short-bg:rgba(176,32,48,.10);
+    --active:#1a66cc;
+    --accent:#5533cc; --accent-bg:rgba(85,51,204,.10); --accent-border:rgba(85,51,204,.30);
+    --teal:#006666; --teal-bg:rgba(0,102,102,.10); --teal-border:rgba(0,102,102,.30);
+    --blue:#1a66cc; --blue-dim:rgba(26,102,204,.15);
+    --gold:#8a6800;
+    --card-bg:#ffffff;
   }
   [data-theme="light"] .card,
   [data-theme="light"] .signal-card {
-    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    border: 1px solid var(--border);
+    box-shadow: 0 1px 6px rgba(0,0,0,0.10), 0 0 0 1px var(--border);
+    background: var(--surface);
   }
-  [data-theme="light"] .bar-hi  { background: #00a86b; }
-  [data-theme="light"] .bar-mid { background: #d4840a; }
-  [data-theme="light"] .bar-lo  { background: #c0303a; }
+  [data-theme="light"] .card.proceed::before { background: var(--proceed); }
+  [data-theme="light"] .card.watch::before   { background: var(--watch); }
+  [data-theme="light"] .tab-btn       { color: var(--muted); }
+  [data-theme="light"] .tab-btn.active { color: var(--text); border-bottom-color: var(--active); }
+  [data-theme="light"] .filter-btn        { background: var(--surface2); border-color: var(--border); color: var(--muted); }
+  [data-theme="light"] .filter-btn.active { background: var(--active); color: #fff; }
+  [data-theme="light"] .bar-hi  { background: var(--proceed) !important; }
+  [data-theme="light"] .bar-mid { background: var(--watch)   !important; }
+  [data-theme="light"] .bar-lo  { background: var(--short)   !important; }
 
   html{font-size:14px;}
   body{
@@ -198,10 +206,10 @@
     left:0;top:0;bottom:0;width:4px;z-index:2;
   }
   .card.proceed::before{background:#00e5a0;}
-  .card.watch::before{background:#ffb340;}
-  .card.active-state::before{background:#4d9eff;}
-  .card.active-state.proceed::before{background:#4d9eff;}
-  .card.active-state.watch::before{background:#4d9eff;}
+  .card.watch::before{background:var(--watch);}
+  .card.active-state::before{background:var(--active);}
+  .card.active-state.proceed::before{background:var(--active);}
+  .card.active-state.watch::before{background:var(--active);}
   .card.win{opacity:.6;background:var(--proceed-bg);}
   .card.win::before{background:#00e5a0;}
   .card.loss{opacity:.5;background:var(--short-bg);}
@@ -229,22 +237,22 @@
     font-size:9px;font-weight:700;letter-spacing:.1em;
     padding:2px 7px;border-radius:2px;border:1px solid;
   }
-  .tag-active{color:#4d9eff;border-color:#4d9eff40;background:#4d9eff10;}
+  .tag-active{color:var(--active);border-color:#4d9eff40;background:#4d9eff10;}
   .tag-past{color:#2e2e48;border-color:#1e1e2c;background:transparent;}
   .tag-swing{color:#00d4d4;border-color:#00d4d440;background:#00d4d410;}
-  .tag-event{color:#ffb340;border-color:#ffb34040;background:#ffb34010;}
+  .tag-event{color:var(--watch);border-color:#ffb34040;background:#ffb34010;}
   .tag-holiday{color:#888;border-color:#333;background:transparent;}
   .quality-badge{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px;border:1px solid;letter-spacing:.05em;}
   .quality-a{color:#00c880;border-color:#00c88040;background:#00c88010;}
   .quality-b{color:#6868a0;border-color:#6868a040;background:transparent;}
-  .quality-c{color:#c07080;border-color:#c0708040;background:#c0708008;}
+  .quality-c{color:var(--short);border-color:#c0708040;background:#c0708008;}
   .card-hd-right{display:flex;align-items:center;gap:10px;}
   .card-verdict{
     font-size:10px;font-weight:700;letter-spacing:.1em;
     padding:3px 11px;border-radius:3px;border:1px solid;
   }
   .verdict-proceed{color:#00e5a0;border-color:#00e5a050;background:#00e5a010;}
-  .verdict-watch{color:#ffb340;border-color:#ffb34050;background:#ffb34010;}
+  .verdict-watch{color:var(--watch);border-color:#ffb34050;background:#ffb34010;}
   .card-score-wrap{display:flex;align-items:baseline;gap:1px;}
   .card-score-num{
     font-family:'JetBrains Mono',monospace;
@@ -295,7 +303,7 @@
     font-size:12px;font-weight:700;line-height:1.2;
   }
   .lv-entry{color:#9090b0;}
-  .lv-sl{color:#c07080;}
+  .lv-sl{color:var(--short);}
   .lv-tp{color:#50b890;}
   .lv-tp1{color:#c09040;}
   .lv-tp3{color:#00e5a0;}
@@ -325,7 +333,7 @@
   .bar-name{font-size:9px;font-weight:700;color:#6868a0;text-align:right;white-space:nowrap;}
   .bar-track{height:4px;background:var(--surface2);border-radius:2px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.4);}
   .bar-fill{height:100%;border-radius:2px;}
-  .bar-hi{background:#00c880;box-shadow:0 0 5px rgba(0,200,128,.25);}
+  .bar-hi{background:var(--proceed);box-shadow:0 0 5px rgba(0,200,128,.25);}
   .bar-mid{background:#4488ee;box-shadow:0 0 5px rgba(68,136,238,.25);}
   .bar-lo{background:#e0a030;box-shadow:0 0 5px rgba(224,160,48,.25);}
   .bar-pct{
@@ -353,7 +361,7 @@
     overflow:visible;
   }
   .rsn-ok{color:#7070a8;}
-  .rsn-ok::before{content:'✓ ';color:#00c880;font-weight:700;}
+  .rsn-ok::before{content:'✓ ';color:var(--proceed);font-weight:700;}
   .rsn-warn{color:#7070a8;}
   .rsn-warn::before{content:'⚠ ';color:#e0a030;font-weight:700;}
   .rsn-sep{color:#1e1e30;margin:0 2px;}
@@ -380,8 +388,8 @@
   .tp-progress{display:flex;align-items:center;gap:5px;}
   .prog-track{width:44px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;}
   .prog-fill{height:100%;border-radius:2px;}
-  .prog-fill.positive{background:#00c880;}
-  .prog-fill.negative{background:#c07080;}
+  .prog-fill.positive{background:var(--proceed);}
+  .prog-fill.negative{background:var(--short);}
   .prog-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:#5a5a7a;white-space:nowrap;}
   .mfe-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:rgba(80,184,144,.55);white-space:nowrap;}
   .btn-action{font-size:9px;color:var(--dim);border:1px solid #222238;border-radius:3px;padding:3px 8px;background:transparent;cursor:pointer;font-family:'Space Grotesk',sans-serif;transition:all .15s;white-space:nowrap;}
@@ -729,9 +737,9 @@
       <span>USD</span>
     </div>
     <span id="symbol-count">0 symbols</span>
-    <div id="theme-toggle" style="display:flex;align-items:center;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
-      <button id="btn-dark" onclick="setTheme('dark')" style="padding:4px 8px;border:none;cursor:pointer;background:var(--surface);color:var(--text2);font-size:11px;transition:all .2s;">◑</button>
-      <button id="btn-light" onclick="setTheme('light')" style="padding:4px 8px;border:none;cursor:pointer;background:var(--surface);color:var(--text2);font-size:11px;transition:all .2s;">◐</button>
+    <div id="theme-toggle" style="display:flex;align-items:center;gap:2px;margin-left:12px;">
+      <button id="btn-dark" onclick="setTheme('dark')" style="width:32px;height:28px;border:1px solid var(--border);border-radius:4px 0 0 4px;background:var(--surface);color:var(--text2);font-size:14px;cursor:pointer;transition:all .2s;" title="Dark mode">🌙</button>
+      <button id="btn-light" onclick="setTheme('light')" style="width:32px;height:28px;border:1px solid var(--border);border-radius:0 4px 4px 0;background:var(--surface);color:var(--text2);font-size:14px;cursor:pointer;transition:all .2s;" title="Light mode">☀️</button>
     </div>
     <button onclick="switchMainTab('settings')" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--txt2,var(--muted));cursor:pointer;font-size:14px;" title="Settings">⚙</button>
   </div>
@@ -1487,7 +1495,7 @@ function renderCard(sig, isPast) {
     // HEADER
     + '<div class="card-hd">'
     + '<span class="card-sym">'+esc(sig.symbol)+'</span>'
-    + (sig._abcClass ? (() => { const c=sig._abcClass,cl=c==='A'?'var(--proceed)':c==='B'?'#4d9eff':'#888',lb=c==='A'?'⭐ A':c==='B'?'🔷 B':'🔹 C'; return '<span style="background:'+cl+'22;color:'+cl+';border:1px solid '+cl+'44;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:6px;">'+lb+'</span>'; })() : '')
+    + (sig._abcClass ? (() => { const c=sig._abcClass,cl=c==='A'?'var(--proceed)':c==='B'?'var(--active)':'#888',lb=c==='A'?'⭐ A':c==='B'?'🔷 B':'🔹 C'; return '<span style="background:'+cl+'22;color:'+cl+';border:1px solid '+cl+'44;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:6px;">'+lb+'</span>'; })() : '')
     + '<span class="card-pair">'+esc(sig.label||'')+'</span>'
     + '<div class="card-hd-mid">'
     + (isActive ? '<span class="card-tag tag-active">● ACTIVE</span>' : '')
@@ -2242,7 +2250,7 @@ function renderHeatmap() {
     const isAct = sig.outcome === 'ACTIVE';
     const bg = isAct ? '#4d9eff15' : sig.verdict === 'PROCEED' ? '#00c88015' : '#ffb34015';
     const bc = isAct ? '#4d9eff40' : sig.verdict === 'PROCEED' ? '#00c88030' : '#ffb34030';
-    const sc = isAct ? '#4d9eff' : sig.verdict === 'PROCEED' ? '#00c880' : '#ffb340';
+    const sc = isAct ? 'var(--active)' : sig.verdict === 'PROCEED' ? 'var(--proceed)' : 'var(--watch)';
     html += '<div style="border-radius:3px;padding:4px 5px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:1px;background:'+bg+';border:1px solid '+bc+';" title="'+sym+' '+sig.direction+' '+sig.verdict+' '+sig.score+'" onclick="scrollToSignal(\''+sym+'\')"><span style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;color:#6868a0;">'+sym.slice(0,6)+'</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:700;color:'+sc+';">'+sig.score+'</span></div>';
   }
   el.innerHTML = html;
@@ -2255,7 +2263,7 @@ function scrollToSignal(sym) {
     for (const c of cards) {
       if (c.querySelector('.card-sym')?.textContent === sym) {
         c.scrollIntoView({behavior:'smooth',block:'center'});
-        c.style.outline = '1px solid #4d9eff';
+        c.style.outline = '1px solid var(--active)';
         setTimeout(() => c.style.outline = 'none', 2000);
         break;
       }
@@ -2282,26 +2290,26 @@ function renderCorrelation() {
   const idxShort = SHORT_SYM.filter(s => ['US30','US100','US500','DE40','UK100'].includes(s));
   if (idxShort.length >= 2) risks.push({label:'Index short ×'+idxShort.length, symbols:idxShort});
   if (!risks.length) { el.innerHTML = '<div style="font-size:10px;color:#252538;padding:4px 0;">✓ No correlated exposure</div>'; return; }
-  el.innerHTML = risks.map(r => '<div style="margin-bottom:6px;"><div style="font-size:9px;font-weight:700;color:#ffb340;letter-spacing:.05em;margin-bottom:2px;">⚠ '+r.label+'</div><div style="font-size:9px;color:var(--text2);">'+r.symbols.join(' · ')+'</div><div style="font-size:8px;color:var(--dim);margin-top:1px;">treat as one position</div></div>').join('');
+  el.innerHTML = risks.map(r => '<div style="margin-bottom:6px;"><div style="font-size:9px;font-weight:700;color:var(--watch);letter-spacing:.05em;margin-bottom:2px;">⚠ '+r.label+'</div><div style="font-size:9px;color:var(--text2);">'+r.symbols.join(' · ')+'</div><div style="font-size:8px;color:var(--dim);margin-top:1px;">treat as one position</div></div>').join('');
 }
 
 // ── MTF Bias tab ──────────────────────────────────────────────────────────
 function renderBiasTab() {
   fetch('/api/mtf-bias').then(r=>r.json()).then(data => {
     const TFS = ['1m','5m','15m','1h','4h','1d'];
-    let html = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-family:\'JetBrains Mono\',monospace;font-size:11px;"><thead><tr style="color:var(--dim);border-bottom:1px solid #1a1a28;"><th style="text-align:left;padding:6px 10px;width:80px;">Symbol</th>';
+    let html = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-family:\'JetBrains Mono\',monospace;font-size:11px;"><thead><tr style="color:var(--dim);border-bottom:1px solid var(--border2);"><th style="text-align:left;padding:6px 10px;width:80px;">Symbol</th>';
     TFS.forEach(tf => html += '<th style="text-align:center;padding:6px 8px;">'+tf+'</th>');
     html += '<th style="text-align:center;padding:6px 8px;">Struct</th><th style="text-align:center;padding:6px 8px;">Price</th></tr></thead><tbody>';
     const sorted = Object.entries(data).sort((a,b) => (b[1].score||0) - (a[1].score||0));
     for (const [sym, d] of sorted) {
       const stale = d.ageMin > 10;
-      html += '<tr style="border-bottom:1px solid var(--surface2);'+(d.score>=5?'background:#00c88006':d.score>=3.5?'background:#4d9eff06':'')+'"><td style="padding:5px 10px;color:'+(stale?'#333348':'#8888b0')+';font-weight:700;">'+sym+(stale?' <span style="color:#333;font-size:8px;">'+d.ageMin+'m</span>':'')+'</td>';
+      html += '<tr style="border-bottom:1px solid var(--surface2);'+(d.score>=5?'background:#00c88006':d.score>=3.5?'background:#4d9eff06':'')+'"><td style="padding:5px 10px;color:'+(stale?'var(--muted)':'var(--text2)')+';font-weight:700;">'+sym+(stale?' <span style="color:#333;font-size:8px;">'+d.ageMin+'m</span>':'')+'</td>';
       TFS.forEach(tf => {
         const dir = d[tf]; const arrow = dir===1?'↑':dir===-1?'↓':'→';
-        const c = dir===1?'#00c880':dir===-1?'#c07080':'#333348';
+        const c = dir===1?'var(--proceed)':dir===-1?'var(--short)':'var(--muted)';
         html += '<td style="text-align:center;padding:5px 8px;color:'+c+';font-size:13px;">'+arrow+'</td>';
       });
-      const sc = d.score>=5?'#00c880':d.score>=2?'#ffb340':'#555575';
+      const sc = d.score>=5?'var(--proceed)':d.score>=2?'var(--watch)':'var(--text2)';
       html += '<td style="text-align:center;color:'+sc+';padding:5px 8px;">'+d.score+'/8.5</td><td style="text-align:center;color:var(--dim);padding:5px 8px;">'+d.price+'</td></tr>';
     }
     html += '</tbody></table></div>';
@@ -2314,12 +2322,12 @@ function renderStatsTab() {
   fetch('/api/stats').then(r=>r.json()).then(d => {
     if (d.empty || d.total < 3) { document.getElementById('stats-content').innerHTML = '<div class="empty">Need at least 3 closed trades</div>'; return; }
     function sBox(l,v,c) { return '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:5px;padding:8px 10px;text-align:center;"><div style="font-size:8px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">'+l+'</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:16px;font-weight:700;color:'+c+';">'+v+'</div></div>'; }
-    const wrc = d.winRate>=55?'#00c880':d.winRate>=45?'#ffb340':'#c07080';
-    const mfec = d.mfeCapture>=60?'#00c880':d.mfeCapture>=40?'#ffb340':'#c07080';
-    let html = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px;">'+sBox('Win Rate',d.winRate+'%',wrc)+sBox('Trades',d.total,'#8888b0')+sBox('W/L',d.wins+'/'+d.losses,'#8888b0')+sBox('Avg MFE','+'+d.avgMFE+'%','#8888b0')+sBox('MFE Capture',d.mfeCapture+'%',mfec)+sBox('Avg Hold',d.avgHoldH+'h','#8888b0')+'</div>';
+    const wrc = d.winRate>=55?'var(--proceed)':d.winRate>=45?'var(--watch)':'var(--short)';
+    const mfec = d.mfeCapture>=60?'var(--proceed)':d.mfeCapture>=40?'var(--watch)':'var(--short)';
+    let html = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px;">'+sBox('Win Rate',d.winRate+'%',wrc)+sBox('Trades',d.total,'var(--text2)')+sBox('W/L',d.wins+'/'+d.losses,'var(--text2)')+sBox('Avg MFE','+'+d.avgMFE+'%','var(--text2)')+sBox('MFE Capture',d.mfeCapture+'%',mfec)+sBox('Avg Hold',d.avgHoldH+'h','var(--text2)')+'</div>';
     if (Object.keys(d.bySess).length) {
       html += '<div style="margin-bottom:12px;"><div style="font-size:9px;color:var(--dim);letter-spacing:.1em;margin-bottom:6px;">BY SESSION</div>';
-      for (const [sess,v] of Object.entries(d.bySess)) { const wr=v.w+v.l>0?Math.round(v.w/(v.w+v.l)*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px;"><span style="color:var(--text2);text-transform:capitalize;">'+sess+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W '+v.l+'L)</span></div>'; }
+      for (const [sess,v] of Object.entries(d.bySess)) { const wr=v.w+v.l>0?Math.round(v.w/(v.w+v.l)*100):0; const c=wr>=55?'var(--proceed)':wr>=45?'var(--watch)':'var(--short)'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px;"><span style="color:var(--text2);text-transform:capitalize;">'+sess+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W '+v.l+'L)</span></div>'; }
       html += '</div>';
     }
     if (Object.keys(d.lossCats||{}).length) {
@@ -2356,42 +2364,42 @@ function renderBacktestResults(data) {
   document.getElementById('bt-results').style.display = 'block';
   document.getElementById('bt-empty').style.display = 'none';
   function bCard(l,v,c) { return '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:5px;padding:8px 10px;text-align:center;"><div style="font-size:8px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">'+l+'</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:14px;font-weight:700;color:'+c+';">'+v+'</div></div>'; }
-  const wrc = s.winRate>=55?'#00c880':s.winRate>=45?'#ffb340':'#c07080';
-  const pfc = (s.profitFactor||0)>=1.5?'#00c880':(s.profitFactor||0)>=1?'#ffb340':'#c07080';
+  const wrc = s.winRate>=55?'var(--proceed)':s.winRate>=45?'var(--watch)':'var(--short)';
+  const pfc = (s.profitFactor||0)>=1.5?'var(--proceed)':(s.profitFactor||0)>=1?'var(--watch)':'var(--short)';
 
   let html = '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:16px;">'
     + bCard('Win Rate',s.winRate+'%',wrc)
-    + bCard('Closed',s.closed,'#8888b0')
-    + bCard('Total P&L',(s.totalPnl>=0?'+':'')+s.totalPnl+'%',s.totalPnl>=0?'#00c880':'#c07080')
+    + bCard('Closed',s.closed,'var(--text2)')
+    + bCard('Total P&L',(s.totalPnl>=0?'+':'')+s.totalPnl+'%',s.totalPnl>=0?'var(--proceed)':'var(--short)')
     + bCard('Profit Factor',s.profitFactor||'—',pfc)
-    + bCard('Max DD','-'+s.maxDrawdown+'%',s.maxDrawdown>2?'#c07080':'#8888b0')
-    + bCard('Avg Win','+'+s.avgWin+'%','#00c880')
-    + bCard('Avg Loss','-'+s.avgLoss+'%','#c07080')
-    + bCard('Avg R:R','1:'+s.avgRR,'#8888b0')
-    + bCard('Expired',s.expired,'#333348')
-    + bCard('Pending',s.pending,'#4d9eff')
+    + bCard('Max DD','-'+s.maxDrawdown+'%',s.maxDrawdown>2?'var(--short)':'var(--text2)')
+    + bCard('Avg Win','+'+s.avgWin+'%','var(--proceed)')
+    + bCard('Avg Loss','-'+s.avgLoss+'%','var(--short)')
+    + bCard('Avg R:R','1:'+s.avgRR,'var(--text2)')
+    + bCard('Expired',s.expired,'var(--muted)')
+    + bCard('Pending',s.pending,'var(--active)')
     + '</div>';
 
   // By score
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">';
   html += '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:var(--dim);letter-spacing:.1em;margin-bottom:10px;font-weight:700;">WIN RATE BY SCORE</div>';
-  for (const [band, v] of Object.entries(data.byScore)) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:var(--text2);">'+band+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W/'+v.l+'L)</span></div>'; }
+  for (const [band, v] of Object.entries(data.byScore)) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'var(--proceed)':wr>=45?'var(--watch)':'var(--short)'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:var(--text2);">'+band+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W/'+v.l+'L)</span></div>'; }
   html += '</div>';
 
   // By session
   html += '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:var(--dim);letter-spacing:.1em;margin-bottom:10px;font-weight:700;">WIN RATE BY SESSION</div>';
-  for (const [sess, v] of Object.entries(data.bySession)) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:var(--text2);text-transform:capitalize;">'+sess+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W/'+v.l+'L)</span></div>'; }
+  for (const [sess, v] of Object.entries(data.bySession)) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'var(--proceed)':wr>=45?'var(--watch)':'var(--short)'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:var(--text2);text-transform:capitalize;">'+sess+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W/'+v.l+'L)</span></div>'; }
   html += '</div></div>';
 
   // By symbol
   html += '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:12px 14px;margin-bottom:16px;"><div style="font-size:9px;color:var(--dim);letter-spacing:.1em;margin-bottom:10px;font-weight:700;">BY SYMBOL</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">';
-  for (const [sym, v] of Object.entries(data.bySymbol).sort((a,b)=>(b[1].w+b[1].l)-(a[1].w+a[1].l))) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:4px;padding:5px 8px;display:flex;justify-content:space-between;"><span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:#6868a0;">'+sym+'</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:'+c+';">'+wr+'% <span style="color:var(--dim);">'+v.w+'W/'+v.l+'L</span></span></div>'; }
+  for (const [sym, v] of Object.entries(data.bySymbol).sort((a,b)=>(b[1].w+b[1].l)-(a[1].w+a[1].l))) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'var(--proceed)':wr>=45?'var(--watch)':'var(--short)'; html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:4px;padding:5px 8px;display:flex;justify-content:space-between;"><span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:#6868a0;">'+sym+'</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:'+c+';">'+wr+'% <span style="color:var(--dim);">'+v.w+'W/'+v.l+'L</span></span></div>'; }
   html += '</div></div>';
 
   // Signal log
-  html += '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:var(--dim);letter-spacing:.1em;margin-bottom:10px;font-weight:700;">SIGNAL LOG</div><div style="max-height:300px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-family:\'JetBrains Mono\',monospace;font-size:9px;"><thead><tr style="color:var(--dim);border-bottom:1px solid #1a1a28;"><th style="text-align:left;padding:4px;">Sym</th><th>Dir</th><th>Score</th><th>R:R</th><th>MFE</th><th>Result</th><th>P&L</th></tr></thead><tbody>';
+  html += '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:var(--dim);letter-spacing:.1em;margin-bottom:10px;font-weight:700;">SIGNAL LOG</div><div style="max-height:300px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-family:\'JetBrains Mono\',monospace;font-size:9px;"><thead><tr style="color:var(--dim);border-bottom:1px solid var(--border2);"><th style="text-align:left;padding:4px;">Sym</th><th>Dir</th><th>Score</th><th>R:R</th><th>MFE</th><th>Result</th><th>P&L</th></tr></thead><tbody>';
   for (const sig of data.signals.slice(0, 50)) {
-    const oc = sig.simOutcome === 'WIN' ? '#00c880' : sig.simOutcome === 'LOSS' ? '#c07080' : sig.simOutcome === 'PENDING' ? '#4d9eff' : '#333348';
+    const oc = sig.simOutcome === 'WIN' ? 'var(--proceed)' : sig.simOutcome === 'LOSS' ? 'var(--short)' : sig.simOutcome === 'PENDING' ? 'var(--active)' : 'var(--muted)';
     html += '<tr style="border-bottom:1px solid var(--surface2);"><td style="padding:3px 4px;color:#6868a0;">'+sig.symbol+'</td><td style="color:'+(sig.direction==='LONG'?'#5bc8a0':'#d46080')+';">'+sig.direction+'</td><td>'+sig.score+'</td><td>1:'+sig.rr+'</td><td>+'+(sig.mfe_pct||0)+'%</td><td style="color:'+oc+';">'+sig.simOutcome+'</td><td style="color:'+oc+';">'+(sig.simPnl>=0?'+':'')+sig.simPnl+'%</td></tr>';
   }
   html += '</tbody></table></div></div>';
