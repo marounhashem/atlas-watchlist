@@ -28,6 +28,28 @@
     /* Card */
     --card-padding:20px; --card-radius:10px; --card-gap:12px;
   }
+  [data-theme="light"] {
+    --bg:#f0f0f5; --surface:#ffffff; --surface2:#f5f5fa; --surface3:#eeeef5; --bg-section:#f8f8fc;
+    --border:#d8d8e2; --border2:#e0e0ea;
+    --text:#0a0a18; --text2:#555575; --muted:#555575; --dim:#9999b0;
+    --proceed:#00a86b; --proceed-bg:rgba(0,168,107,.10); --proceed-border:rgba(0,168,107,.30);
+    --watch:#d4840a; --watch-bg:rgba(212,132,10,.10); --watch-border:rgba(212,132,10,.30);
+    --skip:#e0e0ea; --closed:#f0f0f5;
+    --long:#2277dd; --long-bg:rgba(34,119,221,.10);
+    --short:#c0303a; --short-bg:rgba(192,48,58,.10);
+    --accent:#6644dd; --accent-bg:rgba(102,68,221,.10); --accent-border:rgba(102,68,221,.30);
+    --teal:#008888; --teal-bg:rgba(0,136,136,.10); --teal-border:rgba(0,136,136,.30);
+    --blue:#2266dd; --blue-dim:rgba(34,102,221,.15);
+    --gold:#b58900;
+  }
+  [data-theme="light"] .card,
+  [data-theme="light"] .signal-card {
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    border: 1px solid var(--border);
+  }
+  [data-theme="light"] .bar-hi  { background: #00a86b; }
+  [data-theme="light"] .bar-mid { background: #d4840a; }
+  [data-theme="light"] .bar-lo  { background: #c0303a; }
 
   html{font-size:14px;}
   body{
@@ -193,8 +215,8 @@
   .card-hd{
     display:flex;align-items:center;gap:10px;
     padding:8px 14px 7px 16px;
-    background:#0e0e1b;
-    border-bottom:1px solid #111120;
+    background:var(--surface);
+    border-bottom:1px solid var(--surface2);
   }
   .card-sym{
     font-family:'JetBrains Mono',monospace;
@@ -241,7 +263,7 @@
     border-bottom:1px solid #12121e;
     min-height:88px;
     gap:1px;
-    background:#111120;
+    background:var(--surface2);
   }
   .card-levels{
     display:flex;flex-direction:column;
@@ -266,7 +288,7 @@
   }
   .card-lvl-name{
     font-size:8px;font-weight:700;
-    letter-spacing:.14em;text-transform:uppercase;color:#555575;text-align:right;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--text2);text-align:right;
   }
   .card-lvl-val{
     font-family:'JetBrains Mono',monospace;
@@ -281,7 +303,7 @@
   .card-pill{
     font-family:'JetBrains Mono',monospace;
     font-size:9px;font-weight:600;
-    color:#8888b0;background:#111120;
+    color:var(--text2);background:var(--surface2);
     border:1px solid #2a2a42;border-radius:2px;padding:2px 6px;
   }
   .pill-mfe{color:rgba(91,200,160,.7);border-color:rgba(91,200,160,.2);}
@@ -301,7 +323,7 @@
     align-items:center;gap:5px;
   }
   .bar-name{font-size:9px;font-weight:700;color:#6868a0;text-align:right;white-space:nowrap;}
-  .bar-track{height:4px;background:#111120;border-radius:2px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.4);}
+  .bar-track{height:4px;background:var(--surface2);border-radius:2px;overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.4);}
   .bar-fill{height:100%;border-radius:2px;}
   .bar-hi{background:#00c880;box-shadow:0 0 5px rgba(0,200,128,.25);}
   .bar-mid{background:#4488ee;box-shadow:0 0 5px rgba(68,136,238,.25);}
@@ -319,7 +341,7 @@
   /* ── CARD REASONING ── */
   .card-reasoning{
     padding:10px 14px;
-    font-size:11.5px;color:#8080b8;font-weight:500;line-height:1.9;
+    font-size:11.5px;color:var(--text2);font-weight:500;line-height:1.9;
     display:-webkit-box;
     -webkit-line-clamp:4;
     -webkit-box-orient:vertical;
@@ -340,7 +362,7 @@
   .card-footer{
     display:flex;align-items:center;justify-content:space-between;
     padding:6px 14px;gap:8px;min-height:32px;
-    background:#0e0e1b;border-top:1px solid #111120;
+    background:var(--surface);border-top:1px solid var(--surface2);
   }
   .footer-left{display:flex;align-items:center;gap:6px;flex:1;min-width:0;overflow:hidden;}
   .footer-right{display:flex;align-items:center;gap:5px;flex-shrink:0;}
@@ -356,13 +378,13 @@
   .rec-msg.time{color:#9966dd;}
   .rec-msg.none{color:#333358;}
   .tp-progress{display:flex;align-items:center;gap:5px;}
-  .prog-track{width:44px;height:3px;background:#111120;border-radius:2px;overflow:hidden;}
+  .prog-track{width:44px;height:3px;background:var(--surface2);border-radius:2px;overflow:hidden;}
   .prog-fill{height:100%;border-radius:2px;}
   .prog-fill.positive{background:#00c880;}
   .prog-fill.negative{background:#c07080;}
   .prog-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:#5a5a7a;white-space:nowrap;}
   .mfe-label{font-family:'JetBrains Mono',monospace;font-size:9px;color:rgba(80,184,144,.55);white-space:nowrap;}
-  .btn-action{font-size:9px;color:#444466;border:1px solid #222238;border-radius:3px;padding:3px 8px;background:transparent;cursor:pointer;font-family:'Space Grotesk',sans-serif;transition:all .15s;white-space:nowrap;}
+  .btn-action{font-size:9px;color:var(--dim);border:1px solid #222238;border-radius:3px;padding:3px 8px;background:transparent;cursor:pointer;font-family:'Space Grotesk',sans-serif;transition:all .15s;white-space:nowrap;}
   .btn-action:hover{border-color:#666688;color:#8888aa;}
   .btn-more{
     font-size:8px;color:#2a2a44;
@@ -707,6 +729,10 @@
       <span>USD</span>
     </div>
     <span id="symbol-count">0 symbols</span>
+    <div id="theme-toggle" style="display:flex;align-items:center;gap:0;border:1px solid var(--border);border-radius:6px;overflow:hidden;">
+      <button id="btn-dark" onclick="setTheme('dark')" style="padding:4px 8px;border:none;cursor:pointer;background:var(--surface);color:var(--text2);font-size:11px;transition:all .2s;">◑</button>
+      <button id="btn-light" onclick="setTheme('light')" style="padding:4px 8px;border:none;cursor:pointer;background:var(--surface);color:var(--text2);font-size:11px;transition:all .2s;">◐</button>
+    </div>
     <button onclick="switchMainTab('settings')" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 10px;color:var(--txt2,var(--muted));cursor:pointer;font-size:14px;" title="Settings">⚙</button>
   </div>
 </div>
@@ -779,15 +805,15 @@
   <div class="main-pane" id="pane-backtest">
     <div style="padding:8px 0 4px;"><div class="sec" style="margin:0;">🔬 Signal backtester</div></div>
     <div style="display:grid;grid-template-columns:repeat(4,1fr) auto;gap:8px;margin-bottom:12px;align-items:end;">
-      <div><div style="font-size:9px;color:#444466;letter-spacing:.08em;margin-bottom:4px;">SYMBOL</div><select id="bt-symbol" style="width:100%;background:#111120;border:1px solid #2a2a3a;border-radius:4px;color:#8080b8;font-family:'Space Grotesk',sans-serif;font-size:11px;padding:6px 8px;outline:none;"><option value="ALL">All Symbols</option></select></div>
-      <div><div style="font-size:9px;color:#444466;letter-spacing:.08em;margin-bottom:4px;">MIN SCORE: <span id="bt-score-label">80</span></div><input type="range" id="bt-minscore" min="70" max="95" value="80" step="1" style="width:100%;" oninput="document.getElementById('bt-score-label').textContent=this.value"></div>
-      <div><div style="font-size:9px;color:#444466;letter-spacing:.08em;margin-bottom:4px;">SESSION</div><select id="bt-session" style="width:100%;background:#111120;border:1px solid #2a2a3a;border-radius:4px;color:#8080b8;font-family:'Space Grotesk',sans-serif;font-size:11px;padding:6px 8px;outline:none;"><option value="ALL">All Sessions</option><option value="london">London</option><option value="newYork">New York</option><option value="asia">Asia</option></select></div>
-      <div><div style="font-size:9px;color:#444466;letter-spacing:.08em;margin-bottom:4px;">DIRECTION</div><select id="bt-dir" style="width:100%;background:#111120;border:1px solid #2a2a3a;border-radius:4px;color:#8080b8;font-family:'Space Grotesk',sans-serif;font-size:11px;padding:6px 8px;outline:none;"><option value="ALL">Both</option><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
+      <div><div style="font-size:9px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">SYMBOL</div><select id="bt-symbol" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text2);font-family:'Space Grotesk',sans-serif;font-size:11px;padding:6px 8px;outline:none;"><option value="ALL">All Symbols</option></select></div>
+      <div><div style="font-size:9px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">MIN SCORE: <span id="bt-score-label">80</span></div><input type="range" id="bt-minscore" min="70" max="95" value="80" step="1" style="width:100%;" oninput="document.getElementById('bt-score-label').textContent=this.value"></div>
+      <div><div style="font-size:9px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">SESSION</div><select id="bt-session" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text2);font-family:'Space Grotesk',sans-serif;font-size:11px;padding:6px 8px;outline:none;"><option value="ALL">All Sessions</option><option value="london">London</option><option value="newYork">New York</option><option value="asia">Asia</option></select></div>
+      <div><div style="font-size:9px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">DIRECTION</div><select id="bt-dir" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text2);font-family:'Space Grotesk',sans-serif;font-size:11px;padding:6px 8px;outline:none;"><option value="ALL">Both</option><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
       <button onclick="runBacktest()" id="bt-run-btn" style="padding:8px 20px;background:transparent;border:1px solid #6644cc;border-radius:5px;color:#8866ff;font-size:11px;font-weight:600;letter-spacing:.07em;cursor:pointer;font-family:'Space Grotesk',sans-serif;white-space:nowrap;">▶ RUN</button>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;"><input type="checkbox" id="bt-followrecs"><label for="bt-followrecs" style="font-size:10px;color:#555575;cursor:pointer;">Simulate following HIGH urgency CLOSE recs</label></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;"><input type="checkbox" id="bt-followrecs"><label for="bt-followrecs" style="font-size:10px;color:var(--text2);cursor:pointer;">Simulate following HIGH urgency CLOSE recs</label></div>
     <div id="bt-results" style="display:none;"></div>
-    <div id="bt-empty" style="color:#333348;font-size:12px;padding:20px 0;">Set filters and click RUN to simulate</div>
+    <div id="bt-empty" style="color:var(--dim);font-size:12px;padding:20px 0;">Set filters and click RUN to simulate</div>
   </div>
 
   <!-- Stats pane -->
@@ -821,7 +847,7 @@
           <button class="filter-btn" onclick="setAbcClass('C')" style="font-size:10px;padding:3px 8px;">🔹 C</button>
         </div>
       </div>
-      <div id="abc-stats-panel" style="margin-bottom:12px;padding:10px;background:#07070f;border:1px solid #111120;border-radius:6px;"></div>
+      <div id="abc-stats-panel" style="margin-bottom:12px;padding:10px;background:var(--bg);border:1px solid var(--border2);border-radius:6px;"></div>
       <div id="abc-container"><div class="empty">No ABC signals yet — waiting for Pine alerts on /webhook/pine-abc</div></div>
     </div>
   </div>
@@ -961,6 +987,16 @@
 </div>
 
 <script>
+// Theme toggle
+function setTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('atlas-theme', theme);
+  const bd = document.getElementById('btn-dark'), bl = document.getElementById('btn-light');
+  if (bd) { bd.style.background = theme==='dark' ? 'var(--blue)' : 'var(--surface)'; bd.style.color = theme==='dark' ? '#fff' : 'var(--text2)'; }
+  if (bl) { bl.style.background = theme==='light' ? 'var(--blue)' : 'var(--surface)'; bl.style.color = theme==='light' ? '#fff' : 'var(--text2)'; }
+}
+(function(){ setTheme(localStorage.getItem('atlas-theme') || 'dark'); })();
+
 const WS_URL = `${location.protocol==='https:'?'wss':'ws'}://${location.host}`;
 let allSignals=[], pastSignals=[], activeFilter='ALL', ws;
 let abcSignals=[], abcClassFilter='ALL';
@@ -1672,7 +1708,7 @@ function renderResearch(box, raw, sig) {
   // Score trace at top of analyse panel
   let traceSection = '';
   if (sig && sig.score_trace) {
-    traceSection = '<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:#444466;padding:6px 0 10px;border-bottom:1px solid #111120;margin-bottom:8px;">📊 ' + esc(sig.score_trace) + '</div>';
+    traceSection = '<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:var(--dim);padding:6px 0 10px;border-bottom:1px solid var(--surface2);margin-bottom:8px;">📊 ' + esc(sig.score_trace) + '</div>';
   }
 
   // Position sizing section (moved from card body to analyse panel)
@@ -2200,7 +2236,7 @@ function renderHeatmap() {
   for (const sym of ALL_SYMBOLS) {
     const sig = sigMap[sym];
     if (!sig) {
-      html += '<div style="border-radius:3px;padding:4px 5px;display:flex;flex-direction:column;align-items:center;gap:1px;background:#0e0e1b;border:1px solid #1a1a28;" title="'+sym+' — no signal"><span style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;color:#444466;">'+sym.slice(0,6)+'</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:700;color:#252538;">--</span></div>';
+      html += '<div style="border-radius:3px;padding:4px 5px;display:flex;flex-direction:column;align-items:center;gap:1px;background:var(--surface);border:1px solid var(--border2);" title="'+sym+' — no signal"><span style="font-family:\'JetBrains Mono\',monospace;font-size:8px;font-weight:700;color:var(--dim);">'+sym.slice(0,6)+'</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;font-weight:700;color:#252538;">--</span></div>';
       continue;
     }
     const isAct = sig.outcome === 'ACTIVE';
@@ -2246,27 +2282,27 @@ function renderCorrelation() {
   const idxShort = SHORT_SYM.filter(s => ['US30','US100','US500','DE40','UK100'].includes(s));
   if (idxShort.length >= 2) risks.push({label:'Index short ×'+idxShort.length, symbols:idxShort});
   if (!risks.length) { el.innerHTML = '<div style="font-size:10px;color:#252538;padding:4px 0;">✓ No correlated exposure</div>'; return; }
-  el.innerHTML = risks.map(r => '<div style="margin-bottom:6px;"><div style="font-size:9px;font-weight:700;color:#ffb340;letter-spacing:.05em;margin-bottom:2px;">⚠ '+r.label+'</div><div style="font-size:9px;color:#555575;">'+r.symbols.join(' · ')+'</div><div style="font-size:8px;color:#333348;margin-top:1px;">treat as one position</div></div>').join('');
+  el.innerHTML = risks.map(r => '<div style="margin-bottom:6px;"><div style="font-size:9px;font-weight:700;color:#ffb340;letter-spacing:.05em;margin-bottom:2px;">⚠ '+r.label+'</div><div style="font-size:9px;color:var(--text2);">'+r.symbols.join(' · ')+'</div><div style="font-size:8px;color:var(--dim);margin-top:1px;">treat as one position</div></div>').join('');
 }
 
 // ── MTF Bias tab ──────────────────────────────────────────────────────────
 function renderBiasTab() {
   fetch('/api/mtf-bias').then(r=>r.json()).then(data => {
     const TFS = ['1m','5m','15m','1h','4h','1d'];
-    let html = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-family:\'JetBrains Mono\',monospace;font-size:11px;"><thead><tr style="color:#444466;border-bottom:1px solid #1a1a28;"><th style="text-align:left;padding:6px 10px;width:80px;">Symbol</th>';
+    let html = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-family:\'JetBrains Mono\',monospace;font-size:11px;"><thead><tr style="color:var(--dim);border-bottom:1px solid #1a1a28;"><th style="text-align:left;padding:6px 10px;width:80px;">Symbol</th>';
     TFS.forEach(tf => html += '<th style="text-align:center;padding:6px 8px;">'+tf+'</th>');
     html += '<th style="text-align:center;padding:6px 8px;">Struct</th><th style="text-align:center;padding:6px 8px;">Price</th></tr></thead><tbody>';
     const sorted = Object.entries(data).sort((a,b) => (b[1].score||0) - (a[1].score||0));
     for (const [sym, d] of sorted) {
       const stale = d.ageMin > 10;
-      html += '<tr style="border-bottom:1px solid #111120;'+(d.score>=5?'background:#00c88006':d.score>=3.5?'background:#4d9eff06':'')+'"><td style="padding:5px 10px;color:'+(stale?'#333348':'#8888b0')+';font-weight:700;">'+sym+(stale?' <span style="color:#333;font-size:8px;">'+d.ageMin+'m</span>':'')+'</td>';
+      html += '<tr style="border-bottom:1px solid var(--surface2);'+(d.score>=5?'background:#00c88006':d.score>=3.5?'background:#4d9eff06':'')+'"><td style="padding:5px 10px;color:'+(stale?'#333348':'#8888b0')+';font-weight:700;">'+sym+(stale?' <span style="color:#333;font-size:8px;">'+d.ageMin+'m</span>':'')+'</td>';
       TFS.forEach(tf => {
         const dir = d[tf]; const arrow = dir===1?'↑':dir===-1?'↓':'→';
         const c = dir===1?'#00c880':dir===-1?'#c07080':'#333348';
         html += '<td style="text-align:center;padding:5px 8px;color:'+c+';font-size:13px;">'+arrow+'</td>';
       });
       const sc = d.score>=5?'#00c880':d.score>=2?'#ffb340':'#555575';
-      html += '<td style="text-align:center;color:'+sc+';padding:5px 8px;">'+d.score+'/8.5</td><td style="text-align:center;color:#444466;padding:5px 8px;">'+d.price+'</td></tr>';
+      html += '<td style="text-align:center;color:'+sc+';padding:5px 8px;">'+d.score+'/8.5</td><td style="text-align:center;color:var(--dim);padding:5px 8px;">'+d.price+'</td></tr>';
     }
     html += '</tbody></table></div>';
     document.getElementById('bias-content').innerHTML = html;
@@ -2277,18 +2313,18 @@ function renderBiasTab() {
 function renderStatsTab() {
   fetch('/api/stats').then(r=>r.json()).then(d => {
     if (d.empty || d.total < 3) { document.getElementById('stats-content').innerHTML = '<div class="empty">Need at least 3 closed trades</div>'; return; }
-    function sBox(l,v,c) { return '<div style="background:#0e0e1b;border:1px solid #1a1a28;border-radius:5px;padding:8px 10px;text-align:center;"><div style="font-size:8px;color:#333348;letter-spacing:.08em;margin-bottom:4px;">'+l+'</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:16px;font-weight:700;color:'+c+';">'+v+'</div></div>'; }
+    function sBox(l,v,c) { return '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:5px;padding:8px 10px;text-align:center;"><div style="font-size:8px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">'+l+'</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:16px;font-weight:700;color:'+c+';">'+v+'</div></div>'; }
     const wrc = d.winRate>=55?'#00c880':d.winRate>=45?'#ffb340':'#c07080';
     const mfec = d.mfeCapture>=60?'#00c880':d.mfeCapture>=40?'#ffb340':'#c07080';
     let html = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:16px;">'+sBox('Win Rate',d.winRate+'%',wrc)+sBox('Trades',d.total,'#8888b0')+sBox('W/L',d.wins+'/'+d.losses,'#8888b0')+sBox('Avg MFE','+'+d.avgMFE+'%','#8888b0')+sBox('MFE Capture',d.mfeCapture+'%',mfec)+sBox('Avg Hold',d.avgHoldH+'h','#8888b0')+'</div>';
     if (Object.keys(d.bySess).length) {
-      html += '<div style="margin-bottom:12px;"><div style="font-size:9px;color:#444466;letter-spacing:.1em;margin-bottom:6px;">BY SESSION</div>';
-      for (const [sess,v] of Object.entries(d.bySess)) { const wr=v.w+v.l>0?Math.round(v.w/(v.w+v.l)*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px;"><span style="color:#555575;text-transform:capitalize;">'+sess+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W '+v.l+'L)</span></div>'; }
+      html += '<div style="margin-bottom:12px;"><div style="font-size:9px;color:var(--dim);letter-spacing:.1em;margin-bottom:6px;">BY SESSION</div>';
+      for (const [sess,v] of Object.entries(d.bySess)) { const wr=v.w+v.l>0?Math.round(v.w/(v.w+v.l)*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px;"><span style="color:var(--text2);text-transform:capitalize;">'+sess+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W '+v.l+'L)</span></div>'; }
       html += '</div>';
     }
     if (Object.keys(d.lossCats||{}).length) {
-      html += '<div style="margin-bottom:12px;"><div style="font-size:9px;color:#444466;letter-spacing:.1em;margin-bottom:6px;">LOSS REASONS</div>';
-      for (const [cat,count] of Object.entries(d.lossCats).sort((a,b)=>b[1]-a[1])) { html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px;"><span style="color:#555575;">'+cat.replace(/_/g,' ')+'</span><span style="color:#c07080;font-family:\'JetBrains Mono\',monospace;">'+count+'</span></div>'; }
+      html += '<div style="margin-bottom:12px;"><div style="font-size:9px;color:var(--dim);letter-spacing:.1em;margin-bottom:6px;">LOSS REASONS</div>';
+      for (const [cat,count] of Object.entries(d.lossCats).sort((a,b)=>b[1]-a[1])) { html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px;"><span style="color:var(--text2);">'+cat.replace(/_/g,' ')+'</span><span style="color:#c07080;font-family:\'JetBrains Mono\',monospace;">'+count+'</span></div>'; }
       html += '</div>';
     }
     document.getElementById('stats-content').innerHTML = html;
@@ -2319,7 +2355,7 @@ function renderBacktestResults(data) {
   const s = data.summary;
   document.getElementById('bt-results').style.display = 'block';
   document.getElementById('bt-empty').style.display = 'none';
-  function bCard(l,v,c) { return '<div style="background:#0e0e1b;border:1px solid #1a1a28;border-radius:5px;padding:8px 10px;text-align:center;"><div style="font-size:8px;color:#333348;letter-spacing:.08em;margin-bottom:4px;">'+l+'</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:14px;font-weight:700;color:'+c+';">'+v+'</div></div>'; }
+  function bCard(l,v,c) { return '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:5px;padding:8px 10px;text-align:center;"><div style="font-size:8px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">'+l+'</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:14px;font-weight:700;color:'+c+';">'+v+'</div></div>'; }
   const wrc = s.winRate>=55?'#00c880':s.winRate>=45?'#ffb340':'#c07080';
   const pfc = (s.profitFactor||0)>=1.5?'#00c880':(s.profitFactor||0)>=1?'#ffb340':'#c07080';
 
@@ -2338,25 +2374,25 @@ function renderBacktestResults(data) {
 
   // By score
   html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">';
-  html += '<div style="background:#0e0e1b;border:1px solid #1a1a28;border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:#444466;letter-spacing:.1em;margin-bottom:10px;font-weight:700;">WIN RATE BY SCORE</div>';
-  for (const [band, v] of Object.entries(data.byScore)) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:#555575;">'+band+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W/'+v.l+'L)</span></div>'; }
+  html += '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:var(--dim);letter-spacing:.1em;margin-bottom:10px;font-weight:700;">WIN RATE BY SCORE</div>';
+  for (const [band, v] of Object.entries(data.byScore)) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:var(--text2);">'+band+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W/'+v.l+'L)</span></div>'; }
   html += '</div>';
 
   // By session
-  html += '<div style="background:#0e0e1b;border:1px solid #1a1a28;border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:#444466;letter-spacing:.1em;margin-bottom:10px;font-weight:700;">WIN RATE BY SESSION</div>';
-  for (const [sess, v] of Object.entries(data.bySession)) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:#555575;text-transform:capitalize;">'+sess+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W/'+v.l+'L)</span></div>'; }
+  html += '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:var(--dim);letter-spacing:.1em;margin-bottom:10px;font-weight:700;">WIN RATE BY SESSION</div>';
+  for (const [sess, v] of Object.entries(data.bySession)) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:4px;"><span style="color:var(--text2);text-transform:capitalize;">'+sess+'</span><span style="color:'+c+';font-family:\'JetBrains Mono\',monospace;">'+wr+'% ('+v.w+'W/'+v.l+'L)</span></div>'; }
   html += '</div></div>';
 
   // By symbol
-  html += '<div style="background:#0e0e1b;border:1px solid #1a1a28;border-radius:6px;padding:12px 14px;margin-bottom:16px;"><div style="font-size:9px;color:#444466;letter-spacing:.1em;margin-bottom:10px;font-weight:700;">BY SYMBOL</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">';
-  for (const [sym, v] of Object.entries(data.bySymbol).sort((a,b)=>(b[1].w+b[1].l)-(a[1].w+a[1].l))) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="background:#111120;border:1px solid #1a1a28;border-radius:4px;padding:5px 8px;display:flex;justify-content:space-between;"><span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:#6868a0;">'+sym+'</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:'+c+';">'+wr+'% <span style="color:#333348;">'+v.w+'W/'+v.l+'L</span></span></div>'; }
+  html += '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:12px 14px;margin-bottom:16px;"><div style="font-size:9px;color:var(--dim);letter-spacing:.1em;margin-bottom:10px;font-weight:700;">BY SYMBOL</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;">';
+  for (const [sym, v] of Object.entries(data.bySymbol).sort((a,b)=>(b[1].w+b[1].l)-(a[1].w+a[1].l))) { const t=v.w+v.l; const wr=t>0?Math.round(v.w/t*100):0; const c=wr>=55?'#00c880':wr>=45?'#ffb340':'#c07080'; html += '<div style="background:var(--surface2);border:1px solid var(--border2);border-radius:4px;padding:5px 8px;display:flex;justify-content:space-between;"><span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:#6868a0;">'+sym+'</span><span style="font-family:\'JetBrains Mono\',monospace;font-size:9px;color:'+c+';">'+wr+'% <span style="color:var(--dim);">'+v.w+'W/'+v.l+'L</span></span></div>'; }
   html += '</div></div>';
 
   // Signal log
-  html += '<div style="background:#0e0e1b;border:1px solid #1a1a28;border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:#444466;letter-spacing:.1em;margin-bottom:10px;font-weight:700;">SIGNAL LOG</div><div style="max-height:300px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-family:\'JetBrains Mono\',monospace;font-size:9px;"><thead><tr style="color:#333348;border-bottom:1px solid #1a1a28;"><th style="text-align:left;padding:4px;">Sym</th><th>Dir</th><th>Score</th><th>R:R</th><th>MFE</th><th>Result</th><th>P&L</th></tr></thead><tbody>';
+  html += '<div style="background:var(--surface);border:1px solid var(--border2);border-radius:6px;padding:12px 14px;"><div style="font-size:9px;color:var(--dim);letter-spacing:.1em;margin-bottom:10px;font-weight:700;">SIGNAL LOG</div><div style="max-height:300px;overflow-y:auto;"><table style="width:100%;border-collapse:collapse;font-family:\'JetBrains Mono\',monospace;font-size:9px;"><thead><tr style="color:var(--dim);border-bottom:1px solid #1a1a28;"><th style="text-align:left;padding:4px;">Sym</th><th>Dir</th><th>Score</th><th>R:R</th><th>MFE</th><th>Result</th><th>P&L</th></tr></thead><tbody>';
   for (const sig of data.signals.slice(0, 50)) {
     const oc = sig.simOutcome === 'WIN' ? '#00c880' : sig.simOutcome === 'LOSS' ? '#c07080' : sig.simOutcome === 'PENDING' ? '#4d9eff' : '#333348';
-    html += '<tr style="border-bottom:1px solid #111120;"><td style="padding:3px 4px;color:#6868a0;">'+sig.symbol+'</td><td style="color:'+(sig.direction==='LONG'?'#5bc8a0':'#d46080')+';">'+sig.direction+'</td><td>'+sig.score+'</td><td>1:'+sig.rr+'</td><td>+'+(sig.mfe_pct||0)+'%</td><td style="color:'+oc+';">'+sig.simOutcome+'</td><td style="color:'+oc+';">'+(sig.simPnl>=0?'+':'')+sig.simPnl+'%</td></tr>';
+    html += '<tr style="border-bottom:1px solid var(--surface2);"><td style="padding:3px 4px;color:#6868a0;">'+sig.symbol+'</td><td style="color:'+(sig.direction==='LONG'?'#5bc8a0':'#d46080')+';">'+sig.direction+'</td><td>'+sig.score+'</td><td>1:'+sig.rr+'</td><td>+'+(sig.mfe_pct||0)+'%</td><td style="color:'+oc+';">'+sig.simOutcome+'</td><td style="color:'+oc+';">'+(sig.simPnl>=0?'+':'')+sig.simPnl+'%</td></tr>';
   }
   html += '</tbody></table></div></div>';
   document.getElementById('bt-results').innerHTML = html;
@@ -2845,39 +2881,39 @@ function fetchAbcStats() {
     const el = document.getElementById('abc-stats-panel');
     if (!el) return;
     if (data.empty || data.total < 3) {
-      el.innerHTML = '<div style="color:#333348;font-size:10px;padding:8px;">Log WIN/LOSS on signals to build stats</div>';
+      el.innerHTML = '<div style="color:var(--dim);font-size:10px;padding:8px;">Log WIN/LOSS on signals to build stats</div>';
       return;
     }
     const wr = d => d.winRate != null
-      ? `<span style="color:${d.winRate>=55?'var(--proceed)':d.winRate>=45?'var(--watch)':'var(--short)'};font-weight:700;">${d.winRate}%</span> <span style="color:#444466;font-size:9px;">${d.wins}W/${d.losses}L</span>`
-      : '<span style="color:#333348;">—</span>';
+      ? `<span style="color:${d.winRate>=55?'var(--proceed)':d.winRate>=45?'var(--watch)':'var(--short)'};font-weight:700;">${d.winRate}%</span> <span style="color:var(--dim);font-size:9px;">${d.wins}W/${d.losses}L</span>`
+      : '<span style="color:var(--dim);">—</span>';
     el.innerHTML = `
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
-        <div style="background:#0a0a18;border:1px solid #1a1a28;border-radius:5px;padding:8px;text-align:center;">
-          <div style="font-size:8px;color:#333348;letter-spacing:.08em;margin-bottom:4px;">TOTAL</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:#eeeef5;">${data.total}</div>
+        <div style="background:var(--bg);border:1px solid var(--border2);border-radius:5px;padding:8px;text-align:center;">
+          <div style="font-size:8px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">TOTAL</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--text);">${data.total}</div>
         </div>
-        <div style="background:#0a0a18;border:1px solid #1a1a28;border-radius:5px;padding:8px;text-align:center;">
-          <div style="font-size:8px;color:#333348;letter-spacing:.08em;margin-bottom:4px;">WIN RATE</div>
+        <div style="background:var(--bg);border:1px solid var(--border2);border-radius:5px;padding:8px;text-align:center;">
+          <div style="font-size:8px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">WIN RATE</div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:${data.winRate>=55?'var(--proceed)':data.winRate>=45?'var(--watch)':'var(--short)'};">${data.winRate}%</div>
         </div>
-        <div style="background:#0a0a18;border:1px solid #1a1a28;border-radius:5px;padding:8px;text-align:center;">
-          <div style="font-size:8px;color:#333348;letter-spacing:.08em;margin-bottom:4px;">A vs B WR</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:#eeeef5;">${data.classComparison.A_vs_B_wr_diff!=null?(data.classComparison.A_vs_B_wr_diff>0?'+':'')+data.classComparison.A_vs_B_wr_diff+'pp':'—'}</div>
+        <div style="background:var(--bg);border:1px solid var(--border2);border-radius:5px;padding:8px;text-align:center;">
+          <div style="font-size:8px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">A vs B WR</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--text);">${data.classComparison.A_vs_B_wr_diff!=null?(data.classComparison.A_vs_B_wr_diff>0?'+':'')+data.classComparison.A_vs_B_wr_diff+'pp':'—'}</div>
         </div>
-        <div style="background:#0a0a18;border:1px solid #1a1a28;border-radius:5px;padding:8px;text-align:center;">
-          <div style="font-size:8px;color:#333348;letter-spacing:.08em;margin-bottom:4px;">FXSSI EDGE</div>
+        <div style="background:var(--bg);border:1px solid var(--border2);border-radius:5px;padding:8px;text-align:center;">
+          <div style="font-size:8px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">FXSSI EDGE</div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:${data.classComparison.fxssi_worth_waiting_for?'var(--proceed)':'var(--short)'};">${data.classComparison.fxssi_aligned_vs_nodata_diff!=null?(data.classComparison.fxssi_aligned_vs_nodata_diff>0?'+':'')+data.classComparison.fxssi_aligned_vs_nodata_diff+'pp':'—'}</div>
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div>
-          <div style="font-size:9px;color:#444466;letter-spacing:.08em;margin-bottom:6px;">BY CLASS</div>
-          ${['A','B','C'].map(cls=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #0d0d1a;"><span style="font-size:11px;color:#8888b0;">${cls==='A'?'⭐':cls==='B'?'🔷':'🔹'} Class ${cls}</span><span>${wr(data.byClass[cls])}</span></div>`).join('')}
+          <div style="font-size:9px;color:var(--dim);letter-spacing:.08em;margin-bottom:6px;">BY CLASS</div>
+          ${['A','B','C'].map(cls=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border2);"><span style="font-size:11px;color:var(--text2);">${cls==='A'?'⭐':cls==='B'?'🔷':'🔹'} Class ${cls}</span><span>${wr(data.byClass[cls])}</span></div>`).join('')}
         </div>
         <div>
-          <div style="font-size:9px;color:#444466;letter-spacing:.08em;margin-bottom:6px;">BY FXSSI GATE</div>
-          ${Object.entries(data.byFxssi).map(([gate,d])=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #0d0d1a;"><span style="font-size:11px;color:#8888b0;">${gate}</span><span>${wr(d)}</span></div>`).join('')}
+          <div style="font-size:9px;color:var(--dim);letter-spacing:.08em;margin-bottom:6px;">BY FXSSI GATE</div>
+          ${Object.entries(data.byFxssi).map(([gate,d])=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border2);"><span style="font-size:11px;color:var(--text2);">${gate}</span><span>${wr(d)}</span></div>`).join('')}
         </div>
       </div>`;
   }).catch(()=>{});
@@ -2886,12 +2922,12 @@ function fetchAbcStats() {
 </script>
 
 <div id="action-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:9999;align-items:center;justify-content:center;">
-  <div style="background:#0e0e1b;border:1px solid #2a2a3a;border-radius:8px;padding:24px;width:360px;display:flex;flex-direction:column;gap:14px;box-shadow:0 8px 40px rgba(0,0,0,0.8);">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:24px;width:360px;display:flex;flex-direction:column;gap:14px;box-shadow:0 8px 40px rgba(0,0,0,0.8);">
     <div style="font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;color:#e8e8f0;" id="modal-title">Close Signal</div>
-    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#444466;" id="modal-subtitle"></div>
-    <textarea id="modal-reason" placeholder="Reason (optional)..." style="background:#111120;border:1px solid #2a2a3a;border-radius:5px;color:#8080b8;font-family:'Space Grotesk',sans-serif;font-size:12px;padding:10px 12px;resize:none;height:80px;outline:none;" onfocus="this.style.borderColor='#6644cc'" onblur="this.style.borderColor='#2a2a3a'"></textarea>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--dim);" id="modal-subtitle"></div>
+    <textarea id="modal-reason" placeholder="Reason (optional)..." style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;color:var(--text2);font-family:'Space Grotesk',sans-serif;font-size:12px;padding:10px 12px;resize:none;height:80px;outline:none;" onfocus="this.style.borderColor='#6644cc'" onblur="this.style.borderColor='#2a2a3a'"></textarea>
     <div style="display:flex;gap:8px;justify-content:flex-end;">
-      <button onclick="closeModal()" style="font-size:11px;color:#444466;border:1px solid #222238;border-radius:4px;padding:6px 16px;background:transparent;cursor:pointer;font-family:'Space Grotesk',sans-serif;">Cancel</button>
+      <button onclick="closeModal()" style="font-size:11px;color:var(--dim);border:1px solid #222238;border-radius:4px;padding:6px 16px;background:transparent;cursor:pointer;font-family:'Space Grotesk',sans-serif;">Cancel</button>
       <button id="modal-confirm" style="font-size:11px;color:#e8e8f0;border:1px solid #6644cc;border-radius:4px;padding:6px 16px;background:#6644cc22;cursor:pointer;font-family:'Space Grotesk',sans-serif;">Confirm</button>
     </div>
   </div>
