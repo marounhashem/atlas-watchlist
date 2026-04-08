@@ -305,9 +305,11 @@ function processAbcWebhook(data) {
     console.log(`[ABC] ${sym} — invalid direction: ${direction}`); return;
   }
 
-  const entry = parseFloat(data.entry);
-  const sl    = parseFloat(data.sl);
-  const tp    = parseFloat(data.tp);
+  const cfg = SYMBOLS[sym];
+  const dp = cfg?.type?.includes('forex') ? 10000 : cfg?.type?.includes('index') ? 100 : 1000;
+  const entry = Math.round(parseFloat(data.entry) * dp) / dp;
+  const sl    = Math.round(parseFloat(data.sl)    * dp) / dp;
+  const tp    = Math.round(parseFloat(data.tp)    * dp) / dp;
   const rr    = parseFloat(data.rr) || null;
   const score = parseInt(data.score) || (pineClass === 'A' ? 88 : pineClass === 'B' ? 75 : 62);
 
@@ -347,7 +349,6 @@ function processAbcWebhook(data) {
   if (gates.blocked || gates.verdict === 'SKIP') return;
 
   // Expiry
-  const cfg = SYMBOLS[sym];
   const expiryHours = cfg?.type?.includes('forex') ? 4 : cfg?.type?.includes('crypto') ? 8 : 6;
   const expiresAt = Date.now() + expiryHours * 3600000;
 

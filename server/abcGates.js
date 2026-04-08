@@ -135,6 +135,14 @@ function runAbcGates(symbol, payload, fxssiData, db) {
     return { verdict: 'SKIP', blocked: true, reason: `RR ${rr} below 1.5` };
   }
 
+  // 4b. Minimum SL distance — reject suspiciously tight stops
+  const isForex = symbol.length === 6 && !['BTCUSD','ETHUSD','OILWTI','GOLD','SILVER','COPPER','PLATINUM'].includes(symbol);
+  const minSlPct = isForex ? 0.0005 : 0.001;
+  const slPct = slDist / entry;
+  if (slPct < minSlPct) {
+    return { verdict: 'SKIP', blocked: true, reason: `SL too tight (${(slPct*100).toFixed(3)}% < min ${(minSlPct*100).toFixed(3)}%)` };
+  }
+
   // 5. Inject direction into fxssiData for gate checks
   if (fxssiData) fxssiData._direction = direction;
   if (fxssiData) fxssiData._entry     = entry;
