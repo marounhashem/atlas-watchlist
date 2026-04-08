@@ -44,28 +44,53 @@
     --gold:#8a6800;
     --card-bg:#ffffff;
   }
+  /* Light theme — use !important to override inline styles from renderCard() */
+  [data-theme="light"] body        { background: #f2f2f7 !important; color: var(--text) !important; }
+  [data-theme="light"] #app        { background: #f2f2f7 !important; }
+  [data-theme="light"] .header     { background: #ffffff !important; border-bottom: 1px solid #e2e2ec !important; }
+  [data-theme="light"] .sidebar    { background: #ffffff !important; border-left: 1px solid #e2e2ec !important; }
+  [data-theme="light"] .mtab-row   { background: #ffffff !important; border-bottom: 1px solid #e2e2ec !important; }
+  [data-theme="light"] .tab-bar    { background: #f7f7fc !important; }
+  [data-theme="light"] #signals-container { background: transparent !important; }
+
   [data-theme="light"] .card,
   [data-theme="light"] .signal-card {
-    box-shadow: 0 1px 6px rgba(0,0,0,0.10), 0 0 0 1px var(--border);
-    background: var(--surface);
+    background: #ffffff !important;
+    box-shadow: 0 1px 8px rgba(0,0,0,0.10) !important;
+    border-color: #e2e2ec !important;
   }
-  [data-theme="light"] .card.proceed::before { background: var(--proceed); }
-  [data-theme="light"] .card.watch::before   { background: var(--watch); }
-  [data-theme="light"] .tab-btn       { color: var(--muted); }
-  [data-theme="light"] .tab-btn.active { color: var(--text); border-bottom-color: var(--active); }
-  [data-theme="light"] .filter-btn        { background: var(--surface2); border-color: var(--border); color: var(--muted); }
-  [data-theme="light"] .filter-btn.active { background: var(--active); color: #fff; }
-  [data-theme="light"] body { background: var(--bg); color: var(--text); }
-  [data-theme="light"] .header { background: var(--surface); border-bottom-color: var(--border); }
-  [data-theme="light"] .sidebar { background: var(--surface); border-left-color: var(--border); }
-  [data-theme="light"] .mtab-row { background: var(--surface); border-bottom-color: var(--border); }
+  [data-theme="light"] .card > div,
+  [data-theme="light"] .card > div > div { background: transparent !important; }
+  [data-theme="light"] .card .card-levels,
+  [data-theme="light"] .card .card-bars,
+  [data-theme="light"] .card .card-reasoning { background: transparent !important; }
+  [data-theme="light"] .card .card-lvl-val  { background: #f5f5fa !important; }
+  [data-theme="light"] .card .card-footer   { border-top-color: #e2e2ec !important; background: transparent !important; }
+  [data-theme="light"] .card .bar-track     { background: #e2e2ec !important; }
+  [data-theme="light"] .card .no-ob-note    { color: var(--muted) !important; }
+  [data-theme="light"] .card .card-pills .card-pill { background: #f5f5fa !important; border-color: #e2e2ec !important; }
+
+  [data-theme="light"] .card.proceed::before { background: var(--proceed) !important; }
+  [data-theme="light"] .card.watch::before   { background: var(--watch) !important; }
+  [data-theme="light"] .card.active-state::before { background: var(--active) !important; }
+
   [data-theme="light"] .mtab { color: var(--muted); }
   [data-theme="light"] .mtab.active { color: var(--text); }
-  [data-theme="light"] input, [data-theme="light"] select { background: var(--surface2); color: var(--text); border-color: var(--border); }
-  [data-theme="light"] .no-ob-note { color: var(--muted); }
+  [data-theme="light"] .tab-btn       { color: var(--muted); }
+  [data-theme="light"] .tab-btn.active { color: var(--text); border-bottom-color: var(--active); }
+  [data-theme="light"] .filter-btn        { background: #f5f5fa !important; border-color: #e2e2ec !important; color: var(--muted); }
+  [data-theme="light"] .filter-btn.active { background: var(--active) !important; color: #fff !important; }
+  [data-theme="light"] input, [data-theme="light"] select { background: #f5f5fa !important; color: var(--text) !important; border-color: #e2e2ec !important; }
+
   [data-theme="light"] .bar-hi  { background: var(--proceed) !important; }
   [data-theme="light"] .bar-mid { background: var(--watch)   !important; }
   [data-theme="light"] .bar-lo  { background: var(--short)   !important; }
+
+  /* Agent panels, modals, misc */
+  [data-theme="light"] .agents-panel { background: #f5f5fa !important; border-color: #e2e2ec !important; }
+  [data-theme="light"] .agent-box    { background: #ffffff !important; }
+  [data-theme="light"] .modal-bg     { background: rgba(0,0,0,0.3) !important; }
+  [data-theme="light"] .modal        { background: #ffffff !important; border-color: #e2e2ec !important; }
   .abc-badge { background:color-mix(in srgb, var(--abc-c) 15%, transparent); color:var(--abc-c); border:1px solid color-mix(in srgb, var(--abc-c) 25%, transparent); border-radius:4px; padding:1px 6px; font-size:10px; font-weight:700; margin-left:6px; }
   @supports not (background: color-mix(in srgb, red 50%, blue)) {
     .abc-badge { background:var(--surface2); border-color:var(--border); }

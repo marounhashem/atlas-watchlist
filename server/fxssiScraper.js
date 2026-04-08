@@ -293,9 +293,10 @@ async function fetchSymbol(pair, period = 1200) {
 
       const data = await res.json();
 
-      // Reject stale snapshots (>25 min old)
+      // Reject stale snapshots (>45 min old) — FXSSI updates every 20-30min
+      // but can lag 35+ min during low liquidity (Asian session, weekends)
       const ageMin = (Date.now() / 1000 - (data.time || 0)) / 60;
-      if (ageMin > 25) { console.log(`[FXSSI] ${pair} stale (${Math.round(ageMin)}m)`); return null; }
+      if (ageMin > 45) { console.log(`[FXSSI] ${pair} stale (${Math.round(ageMin)}m)`); return null; }
 
       return data;
     } catch (e) {
