@@ -13,9 +13,11 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260407.2'`
+`SCORER_VERSION = '20260407.3'`
 
 Changes since 20260401.15:
+- **20260408.1** — ABC ACTIVE tracking: `checkAbcOutcomes()` runs every minute — entry touch (OPEN→ACTIVE), SL/TP hit detection (→WIN/LOSS), MFE tracking, progress bar (% toward TP), PARTIAL_CLOSE recommendation at TP1 (1:1 RR). New columns: mfe_price, progress_pct, tp1/tp2/tp3, active_ts, partial_closed. `claudeLearner.onOutcome` removed (post-trade API calls disabled). 07:00 UTC macro cron removed — macro fetch now manual via `/api/macro-refresh` only. FXSSI cacheAge fix (Date.now() per symbol, not stale captured timestamp).
+- **20260407.3** — ABC parallel system: `abcGates.js` gate engine, `/webhook/pine-abc`, `abc_signals` table, three-state verdict mapping (pass/fail/noData), swing Telegram routing for A+B, ⭐ ABC dashboard tab with class filters, outcome tracking (WIN/LOSS/IGNORE), stats by class/FXSSI/session/symbol, level rounding by asset class, min SL distance gate.
 - **20260407.2** — SCORING SIMPLIFICATION: removed COT, carry rate, CB consensus, forecast bias, Nikkei-JPY, macro superseded decay, cluster proximity, DXY, long% crowd, absorption multipliers. Kept: macro conflict (×0.70/×0.78/×0.88), intel key levels, pre-event/post-event, FXSSI stale, bank holiday. Weights rebalanced: pine=0.50, fxssi=0.50, session=0.00 for forex (session kept for noOB indices). Multiplier floor raised from 0.65 to 0.70.
 - **20260407.1** — Raised MIN_RR_PROCEED from 2.0 to 2.5, rrMax 4.0→5.0, ATR TP fallback 3.0→4.0. Trapped trader hard gate (buyersInProfitPct/sellersInProfitPct <35% blocks). Gravity proximity hard gate (entry within 0.3% of gravity blocks).
 - **20260406.1** — Telegram sendMessage retries (2 retries with 2s/4s backoff on fetch failure), morning brief splits >4000 chars on section boundaries with hard-split fallback for oversized sections, market_data_history snapshot offset to :03/:08/:13/… (was :00/:05/:10/… colliding with FXSSI at :01), DXY webhook handles object bias `{score,bull,bear}` from Pine (extracts .score), getClosedReason now symbol-aware (checks actual weeklyOpen config per symbol), Easter Monday removed from bank holidays (all symbols open), isBankHoliday diagnostic log, minutesUntilOpen removed from /api/market-status (just open/closed), WebSocket connects first on page load (before HTTP fetches), secondary API calls deferred 500ms
@@ -274,7 +276,7 @@ Auto-categorised on every WIN/LOSS:
 | :05 hourly | Market intel cleanup (expired) |
 | :05 hourly | Mark past events as fired |
 | 06:50 | Rate scrape (Trading Economics) |
-| 07:00 | Macro context fetch (Claude web search + intel key levels) + CB consensus |
+| — | Macro context fetch — MANUAL ONLY via /api/macro-refresh (07:00 cron removed) |
 | Every min | Score all symbols → PROCEED signals → Telegram |
 | Every min | Outcome check + PARTIAL_CLOSE + TIME_STOP + MOVE_SL |
 | :03/:08/:13/… | market_data_history snapshot (every 5min, offset from FXSSI) |
@@ -375,7 +377,7 @@ Auto-categorised on every WIN/LOSS:
 13. **Update CLAUDE.md before closing.** Every session that makes code changes must end with CLAUDE.md updated to reflect all changes. Never close a session without confirming CLAUDE.md matches the actual codebase.
 14. **Never replace the stream body parser with express.json().** Pine Script sends NaN literals which are invalid JSON. The stream parser with NaN sanitisation is intentional and must not be changed.
 15. **Never DELETE signals on startup.** No automatic cleanup queries that delete from the signals table during init. Signals expire naturally via `expires_at` or get replaced by new scoring runs. Previous cleanup queries wiped all signals after DB restores.
-16. **Anthropic API calls are FORBIDDEN outside the 07:00 UTC macro cron and explicit user-triggered `/api/macro-force` and `/api/macro-refresh` endpoints.** `runMacroContextFetch()` has a hard caller guard — it requires a `caller` string from `MACRO_ALLOWED_CALLERS` (`cron_0700`, `macro_force`, `macro_refresh`). Any other caller is blocked with a throw. On startup, macro context is loaded from DB only. This rule exists because startup macro fetches have regressed 3+ times.
+16. **Anthropic API calls are FORBIDDEN except via explicit user-triggered `/api/macro-force` and `/api/macro-refresh` endpoints.** The 07:00 UTC macro cron has been removed. `runMacroContextFetch()` has a hard caller guard — it requires a `caller` string from `MACRO_ALLOWED_CALLERS` (`cron_0700`, `macro_force`, `macro_refresh`). Any other caller is blocked with a throw. On startup, macro context is loaded from DB only. `claudeLearner.onOutcome` has been removed — no Anthropic API calls on WIN/LOSS outcomes.
 17. **persist() is debounced to max once per 30 seconds.** `db.export()` serializes the entire in-memory DB synchronously — at scale this blocks the event loop. `persist()` marks dirty, `_flushToDisk()` runs on a 30s setInterval. Backup copies happen ONLY in the 00:00 UTC daily cron, not on every persist. No `fs.statSync` on the hot path. PRAGMA table_info for fxssi_analysis column check is cached after first call.
 
 ## Pine Script backtest strategies
@@ -429,6 +431,25 @@ Bonus (0-2): RSI divergence + volume
 ### Cooldown
 
 30-minute cooldown per symbol + direction — prevents duplicate signals.
+
+### ACTIVE tracking (`checkAbcOutcomes`, every minute)
+
+- OPEN → ACTIVE: entry touch ±0.15% tolerance, saves TP1/TP2/TP3
+- SL hit → LOSS: barLow ≤ SL (LONG) or barHigh ≥ SL (SHORT)
+- TP hit → WIN: barHigh ≥ TP (LONG) or barLow ≤ TP (SHORT)
+- MFE: max favorable excursion tracked per bar, stored as mfe_pct + mfe_price
+- Progress: % toward TP, updated every minute
+- PARTIAL_CLOSE: recommended at TP1 (1:1 RR), uses `partial_closed` INTEGER column
+- WebSocket: ABC_OUTCOME (ACTIVE/WIN/LOSS), ABC_RECOMMENDATION (PARTIAL_CLOSE)
+
+### API endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | /api/abc-signals | All ABC signals (200 limit) |
+| POST | /api/abc-outcome | Log WIN/LOSS on ABC signal |
+| POST | /api/abc-ignore | Mark signal as not taken |
+| GET | /api/abc-stats | Analytics by class, FXSSI gate, session, symbol |
 
 ## FXSSI history collector
 
