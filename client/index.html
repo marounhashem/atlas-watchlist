@@ -1028,6 +1028,9 @@ function handleMessage(msg) {
     const s = abcSignals.find(x => x.id === msg.signalId);
     if (s) { s.outcome = msg.outcome; if (msg.pnl_pct != null) s.pnl_pct = msg.pnl_pct; }
     if (activeMainTab === 'abc') renderAbcSignals();
+    if (msg.outcome === 'WIN') showToast('✅ ABC WIN — ' + (msg.symbol||'') + ' +' + (msg.pnl_pct||'') + '%');
+    if (msg.outcome === 'LOSS') showToast('❌ ABC LOSS — ' + (msg.symbol||''));
+    if (msg.outcome === 'ACTIVE') showToast('🔔 ABC ENTRY — ' + (msg.symbol||'') + ' now ACTIVE');
     return;
   }
   if (msg.type==='ABC_RECOMMENDATION') {
@@ -1426,7 +1429,13 @@ function renderCard(sig, isPast) {
   const cardId = sig.id || sig.symbol;
 
   let btnHTML = '';
-  if (sig.outcome === 'ACTIVE') {
+  if (sig._isAbc) {
+    if (!['WIN','LOSS','IGNORED','EXPIRED'].includes(sig.outcome)) {
+      btnHTML = '<button class="btn-action" style="color:var(--proceed);border-color:var(--proceed);" onclick="logAbcOutcome('+sig.id+',\'WIN\')">WIN</button>'
+        + '<button class="btn-action" style="color:var(--short);border-color:var(--short);" onclick="logAbcOutcome('+sig.id+',\'LOSS\')">LOSS</button>'
+        + '<button class="btn-action" onclick="ignoreAbcSignal('+sig.id+')">Ignore</button>';
+    }
+  } else if (sig.outcome === 'ACTIVE') {
     btnHTML = '<button class="btn-action" onclick="forceCloseSignal(\'' + cardId + '\')" title="Force close at current price">Close</button>';
   } else if (sig.outcome === 'OPEN') {
     btnHTML = '<button class="btn-action" onclick="ignoreSignal(\'' + cardId + '\')" title="Signal not taken — remove">Ignore</button>';
@@ -1442,6 +1451,7 @@ function renderCard(sig, isPast) {
     // HEADER
     + '<div class="card-hd">'
     + '<span class="card-sym">'+esc(sig.symbol)+'</span>'
+    + (sig._abcClass ? (() => { const c=sig._abcClass,cl=c==='A'?'var(--proceed)':c==='B'?'#4d9eff':'#888',lb=c==='A'?'⭐ A':c==='B'?'🔷 B':'🔹 C'; return '<span style="background:'+cl+'22;color:'+cl+';border:1px solid '+cl+'44;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-left:6px;">'+lb+'</span>'; })() : '')
     + '<span class="card-pair">'+esc(sig.label||'')+'</span>'
     + '<div class="card-hd-mid">'
     + (isActive ? '<span class="card-tag tag-active">● ACTIVE</span>' : '')
@@ -2792,95 +2802,22 @@ function renderAbcSignals() {
     container.innerHTML = '<div class="empty">No ABC signals' + (abcClassFilter !== 'ALL' ? ' for Class ' + abcClassFilter : '') + '</div>';
     return;
   }
-  const INDEX_SYMS = new Set(['US500','DE40','UK100','HK50','J225','CN50','US30','US100']);
-  const COMMODITY_SYMS = new Set(['GOLD','SILVER','OILWTI','COPPER','PLATINUM']);
-  const abcRound = (sym, v) => { if (v == null) return '—'; const dp = INDEX_SYMS.has(sym) ? 2 : COMMODITY_SYMS.has(sym) ? 3 : 5; return Number(v).toFixed(dp); };
-  const abcTimeHeld = ts => { const m = Math.round((Date.now() - ts) / 60000); return m < 60 ? m + 'm' : Math.floor(m/60) + 'h ' + (m%60) + 'm'; };
-
-  container.innerHTML = filtered.map(s => {
-    const cls = s.pine_class || s.pineClass || '?';
-    const clsColor = cls === 'A' ? 'var(--proceed)' : cls === 'B' ? '#4d9eff' : '#888';
-    const clsLabel = cls === 'A' ? '⭐ A' : cls === 'B' ? '🔷 B' : '🔹 C';
-    const vColor = s.verdict === 'PROCEED' ? 'var(--proceed)' : s.outcome === 'ACTIVE' ? '#4d9eff' : 'var(--watch)';
-    const dColor = s.direction === 'LONG' ? 'var(--proceed)' : 'var(--short)';
-    const isPast = ['WIN','LOSS'].includes(s.outcome);
-    const isActive = s.outcome === 'ACTIVE';
-    const sym = s.symbol;
-
-    // TP1/TP2/TP3 calculation
-    const slDist = Math.abs(s.entry - s.sl);
-    const dir = s.direction === 'LONG' ? 1 : -1;
-    const tp1 = s.entry + dir * slDist;
-    const tp2 = s.entry + dir * slDist * (s.rr || 3);
-    const tp3 = s.entry + dir * slDist * (s.rr || 3) * 1.5;
-
-    const outcomeBadge = isPast
-      ? `<span style="margin-left:8px;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;background:${s.outcome==='WIN'?'#00c88022':'#c0708022'};color:${s.outcome==='WIN'?'var(--proceed)':'var(--short)'};">${s.outcome}${s.pnl_pct!=null?' '+(s.pnl_pct>0?'+':'')+s.pnl_pct+'%':''}</span>`
-      : isActive ? `<span style="margin-left:8px;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;background:#4d9eff22;color:#4d9eff;">ACTIVE</span>` : '';
-
-    const footer = !isPast ? `
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid #111120;">
-        <span style="font-size:9px;color:#333348;">${abcTimeHeld(s.ts)}</span>
-        <div style="display:flex;gap:6px;">
-          <button onclick="logAbcOutcome(${s.id},'WIN')" style="padding:4px 14px;border-radius:3px;border:1px solid var(--proceed);background:transparent;color:var(--proceed);font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.08em;" onmouseover="this.style.background='var(--proceed)';this.style.color='#000'" onmouseout="this.style.background='transparent';this.style.color='var(--proceed)'">WIN</button>
-          <button onclick="logAbcOutcome(${s.id},'LOSS')" style="padding:4px 14px;border-radius:3px;border:1px solid var(--short);background:transparent;color:var(--short);font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.08em;" onmouseover="this.style.background='var(--short)';this.style.color='#fff'" onmouseout="this.style.background='transparent';this.style.color='var(--short)'">LOSS</button>
-          <button onclick="ignoreAbcSignal(${s.id})" style="padding:4px 10px;border-radius:3px;border:1px solid #333348;background:transparent;color:#555575;font-size:10px;cursor:pointer;">Ignore</button>
-        </div>
-      </div>` : '';
-
-    return `<div class="signal-card" style="border-left:4px solid ${vColor}">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#eeeef5;">${esc(sym)}</span>
-          <span style="color:${dColor};font-size:11px;font-weight:600;">${esc(s.direction)}</span>
-          <span style="background:${clsColor}22;color:${clsColor};border:1px solid ${clsColor}44;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;">${clsLabel}</span>
-          ${outcomeBadge}
-        </div>
-        <span style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:#eeeef5;">${s.score}</span>
-      </div>
-      <div style="display:grid;grid-template-columns:185px 1fr;gap:10px;">
-        <div style="display:flex;flex-direction:column;gap:3px;">
-          <div style="display:grid;grid-template-columns:32px 1fr;align-items:center;">
-            <span style="font-size:7px;color:#444466;letter-spacing:.08em;">ENTRY</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#eeeef5;background:#0a0a18;padding:3px 6px;border-radius:3px;">${abcRound(sym,s.entry)}</span>
-          </div>
-          <div style="display:grid;grid-template-columns:32px 1fr;align-items:center;">
-            <span style="font-size:7px;color:#444466;letter-spacing:.08em;">SL</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--short);background:#0a0a18;padding:3px 6px;border-radius:3px;">${abcRound(sym,s.sl)}</span>
-          </div>
-          <div style="display:grid;grid-template-columns:32px 1fr;align-items:center;">
-            <span style="font-size:7px;color:#555520;letter-spacing:.08em;">TP1</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#cccc44;background:#0a0a18;padding:3px 6px;border-radius:3px;">${abcRound(sym,tp1)}</span>
-          </div>
-          <div style="display:grid;grid-template-columns:32px 1fr;align-items:center;">
-            <span style="font-size:7px;color:#225522;letter-spacing:.08em;">TP2</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--proceed);background:#0a0a18;padding:3px 6px;border-radius:3px;">${abcRound(sym,tp2)}</span>
-          </div>
-          <div style="display:grid;grid-template-columns:32px 1fr;align-items:center;">
-            <span style="font-size:7px;color:#225555;letter-spacing:.08em;">TP3</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--teal,#44cccc);background:#0a0a18;padding:3px 6px;border-radius:3px;">${abcRound(sym,tp3)}</span>
-          </div>
-        </div>
-        <div style="display:flex;flex-direction:column;justify-content:space-between;">
-          <div style="font-size:10px;color:#555575;line-height:1.5;">${esc(s.reasoning || '')}</div>
-          <div style="display:flex;gap:12px;font-size:10px;color:#444466;margin-top:6px;">
-            <span>RR <span style="color:#8888b0;">${s.rr}R</span></span>
-            ${s.mfe_pct ? `<span>MFE <span style="color:var(--proceed);">+${s.mfe_pct}%</span></span>` : ''}
-            <span>${esc(s.verdict)}</span>
-            <span>Session <span style="color:#8888b0;">${esc(s.session)}</span></span>
-          </div>
-          ${isActive && s.progress_pct != null ? `
-          <div style="margin-top:6px;height:6px;background:#111120;border-radius:3px;overflow:hidden;">
-            <div style="height:100%;width:${Math.min(Math.max(s.progress_pct,0),100)}%;background:${s.progress_pct>=100?'var(--proceed)':s.progress_pct>=50?'#4d9eff':'var(--watch)'};border-radius:3px;transition:width 0.3s;"></div>
-          </div>
-          <div style="font-size:9px;color:#444466;margin-top:2px;">${s.progress_pct}% toward TP</div>` : ''}
-          ${s._rec ? `<div style="margin-top:6px;padding:6px 8px;background:#332200;border:1px solid #664400;border-radius:4px;font-size:10px;color:#ffaa00;">⚡ ${esc(s._rec.type)} — ${esc(s._rec.reason)}</div>` : ''}
-          ${s.partial_closed && !s._rec ? `<div style="margin-top:6px;font-size:9px;color:#888;">✓ Partial close triggered</div>` : ''}
-        </div>
-      </div>
-      ${footer}
-    </div>`;
-  }).join('');
+  // Map ABC fields to renderCard() format
+  const mapped = filtered.map(s => ({
+    ...s,
+    is_swing: false,
+    weighted_struct_score: null,
+    macro_context_available: false,
+    event_risk_tag: null,
+    score_trace: null,
+    tp1: s.tp1 || null,
+    tp2: s.tp2 || s.tp || null,
+    tp3: s.tp3 || null,
+    breakdown: null,
+    _isAbc: true,
+    _abcClass: s.pine_class || s.pineClass
+  }));
+  container.innerHTML = mapped.map(s => renderCard(s, false)).join('');
 }
 
 async function logAbcOutcome(signalId, outcome) {
