@@ -10,185 +10,11 @@ const MODEL = MODEL_HAIKU;
 let outcomesSinceLastRegime = 0;
 let lastDailySummaryDate   = null;
 let regimeCache            = null; // current market regime
-let sessionPatterns        = {};   // { 'GOLD_london': { wins, losses, patterns[] } }
-let postTradeInsights      = [];   // last 50 insights
 
-// Rate limiting — max 1 post-trade analysis per symbol per 30 minutes
-// Prevents API burn when multiple trades close in quick succession
-const lastAnalysisTs = {}; // { symbol: timestamp }
-const ANALYSIS_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+// onOutcome, analysePostTrade, updateSessionPattern REMOVED (20260408)
+// Post-trade API calls were burning Anthropic budget on every WIN/LOSS
 
-// ── Main entry point ─────────────────────────────────────────────────────────
-async function onOutcome(signal, outcome, broadcast) {
-  if (outcome !== 'WIN' && outcome !== 'LOSS') return;
-
-  outcomesSinceLastRegime++;
-
-  // Rate limit post-trade analysis — skip if same symbol analysed recently
-  const now = Date.now();
-  const lastTs = lastAnalysisTs[signal.symbol] || 0;
-  if (now - lastTs < ANALYSIS_COOLDOWN_MS) {
-    const minsLeft = Math.round((ANALYSIS_COOLDOWN_MS - (now - lastTs)) / 60000);
-    console.log(`[Claude] ${signal.symbol} ${outcome} — post-trade skipped (cooldown ${minsLeft}m remaining)`);
-    updateSessionPattern(signal, outcome, null);
-    return;
-  }
-  lastAnalysisTs[signal.symbol] = now;
-
-  outcomesSinceLastRegime++;
-
-  // Layer 1 — Post-trade analysis after every WIN/LOSS
-  const insight = await analysePostTrade(signal, outcome);
-  if (insight) {
-    postTradeInsights.unshift(insight);
-    if (postTradeInsights.length > 50) postTradeInsights.pop();
-    if (broadcast) broadcast({ type: 'CLAUDE_INSIGHT', insight, ts: Date.now() });
-    console.log(`[Claude] Post-trade: ${signal.symbol} ${outcome} — ${insight.summary}`);
-  }
-
-  // Layer 2 — Session pattern update
-  updateSessionPattern(signal, outcome, insight);
-
-  // Layer 3 — Regime check every 20 outcomes (needs meaningful sample)
-  if (outcomesSinceLastRegime >= 20) {
-    outcomesSinceLastRegime = 0;
-    const regime = await detectRegime();
-    if (regime) {
-      regimeCache = regime;
-      if (broadcast) broadcast({ type: 'REGIME_UPDATE', regime, ts: Date.now() });
-      console.log(`[Claude] Regime: ${regime.regime} — ${regime.summary}`);
-    }
-  }
-}
-
-// ── Layer 1: Post-trade analysis ──────────────────────────────────────────────
-async function analysePostTrade(signal, outcome) {
-  if (!ANTHROPIC_API_KEY) return null;
-
-  try {
-    const db = require('./db');
-    // Get the market data snapshot at signal time
-    const marketData = db.getLatestMarketData(signal.symbol);
-    let fxssi = null;
-    try {
-      if (marketData?.fxssi_analysis) fxssi = JSON.parse(marketData.fxssi_analysis);
-    } catch(e) {}
-
-    // Build recommendation summary for prompt
-  let recSummary = 'None issued';
-  try {
-    const { getRecommendations } = require('./db');
-    const recs = getRecommendations(signal.id);
-    if (recs.length > 0) {
-      recSummary = recs.map(r => {
-        const age = Math.round((signal.outcome_ts - r.ts) / 60000);
-        const followed = r.followed ? 'FOLLOWED' : 'IGNORED';
-        return `${new Date(r.ts).toUTCString().slice(17,25)} — ${r.type} (${r.urgency}): ${r.reason} [${followed}, ${age}min before close]`;
-      }).join('\n  ');
-    }
-  } catch(e) {}
-
-  const prompt = `You are a trading analyst reviewing a completed trade for the ATLAS system.
-
-TRADE RESULT: ${outcome}
-Symbol: ${signal.symbol} | Direction: ${signal.direction} | Score: ${signal.score}%
-Entry: ${signal.entry} | SL: ${signal.sl} | TP: ${signal.tp} | R:R: ${signal.rr}
-Session: ${signal.session} | PnL: ${signal.pnl_pct != null ? signal.pnl_pct + '%' : 'unknown'}
-Max Favorable Excursion: ${signal.mfe != null ? signal.mfe_pct + '% toward TP' : 'unknown'}
-Signal reasoning: ${signal.reasoning}
-
-TRADE MONITOR RECOMMENDATIONS ISSUED:
-  ${recSummary}
-Note: Were CLOSE/MOVE_SL recommendations issued before the trade closed? If so, were they correct?
-Did ignoring them contribute to the outcome? Factor this into score_adjustment.
-
-${signal.mfe != null ? `MFE CONTEXT: Price moved ${signal.mfe_pct}% in the right direction before ${outcome === 'LOSS' ? 'reversing to hit SL' : 'hitting TP'}. ${outcome === 'LOSS' && signal.mfe_pct > 0.3 ? 'This suggests the direction was correct but SL was too tight.' : outcome === 'LOSS' && (signal.mfe_pct || 0) < 0.1 ? 'Price barely moved favorably — likely a wrong call entirely.' : ''}` : ''}
-
-MARKET CONDITIONS AT ENTRY:
-Technical bias score: ${marketData?.bias || 'N/A'} | RSI: ${marketData?.rsi || 'N/A'} | Structure: ${marketData?.structure || 'N/A'}
-Retail Order Book: longPct=${fxssi?.longPct || 'N/A'}% shortPct=${fxssi?.shortPct || 'N/A'}% trapped=${fxssi?.trapped || 'none'}
-inProfitPct: ${fxssi?.inProfitPct || 'N/A'}% | signalBias: ${fxssi?.signals?.bias || 'N/A'}
-gravity: ${fxssi?.gravity?.price || 'N/A'} | nearestSLAbove: ${fxssi?.nearestSLAbove?.price || 'N/A'} | nearestSLBelow: ${fxssi?.nearestSLBelow?.price || 'N/A'}
-losingClusters: ${fxssi?.losingClusters?.length || 0} | winningClusters: ${fxssi?.winningClusters?.length || 0}
-middleOfVolume: ${fxssi?.middleOfVolume || 'N/A'}
-
-Analyse this trade and return ONLY this JSON (no markdown):
-{
-  "outcome": "${outcome}",
-  "symbol": "${signal.symbol}",
-  "summary": "<one sentence max 15 words>",
-  "what_worked": ["<factor that contributed to outcome>"],
-  "what_failed": ["<factor that hurt outcome>"],
-  "key_pattern": "<most important pattern to remember for this symbol/session>",
-  "score_adjustment": {
-    "pine_weight": <-0.1 to +0.1, adjust pine scoring weight>,
-    "fxssi_weight": <-0.1 to +0.1, adjust combined FXSSI+OB weight>,
-    "min_score_threshold": <-5 to +5, points to adjust>,
-    "sl_too_tight": <true if MFE > 0.3% but still lost>,
-    "entry_fxssi_shift": <-0.1 to +0.1, shift entry toward FXSSI(+) or Pine(-)>,
-    "tp_fxssi_shift": <-0.1 to +0.1, shift TP toward FXSSI(+) or Pine(-)>
-  },
-  "avoid_next_time": "<condition to avoid for next ${signal.symbol} ${signal.direction} signal>"
-}`;
-
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: 600,
-        messages: [{ role: 'user', content: prompt }]
-      })
-    });
-
-    const data = await res.json();
-    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
-    const clean = text.replace(/```json|```/g, '').trim();
-    const insight = JSON.parse(clean);
-
-    // Apply score adjustments to DB weights
-    if (insight.score_adjustment) {
-      applyWeightAdjustment(signal.symbol, insight.score_adjustment);
-    }
-
-    // Store in learning log
-    db.insertLearningLog({
-      symbolsAnalysed: signal.symbol,
-      outcomesUsed: 1,
-      changes: JSON.stringify([insight]),
-      reasoning: insight.key_pattern
-    });
-
-    return insight;
-  } catch(e) {
-    console.error('[Claude] Post-trade analysis error:', e.message);
-    return null;
-  }
-}
-
-// ── Layer 2: Session pattern tracking ────────────────────────────────────────
-function updateSessionPattern(signal, outcome, insight) {
-  const key = `${signal.symbol}_${signal.session}`;
-  if (!sessionPatterns[key]) sessionPatterns[key] = { wins: 0, losses: 0, patterns: [] };
-
-  if (outcome === 'WIN') sessionPatterns[key].wins++;
-  else sessionPatterns[key].losses++;
-
-  if (insight?.key_pattern) {
-    sessionPatterns[key].patterns.push({
-      outcome,
-      pattern: insight.key_pattern,
-      ts: Date.now()
-    });
-    if (sessionPatterns[key].patterns.length > 20) sessionPatterns[key].patterns.shift();
-  }
-}
-
-// ── Layer 3: Market regime detection ─────────────────────────────────────────
+// ── Market regime detection ──────────────────────────────────────────────────
 async function detectRegime() {
   if (!ANTHROPIC_API_KEY) return null;
 
@@ -205,9 +31,7 @@ async function detectRegime() {
     const sessions = [...new Set(recentSignals.map(s => s.session))];
     const avgScore = recentSignals.reduce((s, r) => s + (r.score || 0), 0) / recentSignals.length;
 
-    const recentInsights = postTradeInsights.slice(0, 10).map(i =>
-      `${i.symbol} ${i.outcome}: ${i.key_pattern}`
-    ).join('\n');
+    const recentInsights = ''; // postTradeInsights removed
 
     const prompt = `You are a market regime analyst for the ATLAS trading system.
 
@@ -288,11 +112,7 @@ async function dailySessionSummary(broadcast) {
 TODAY'S RESULTS: ${wins}W / ${losses}L (${winRate}% win rate)
 Signals: ${todaySignals.map(s => `${s.symbol} ${s.direction} ${s.score}% → ${s.outcome}`).join(', ')}
 
-Session patterns today:
-${Object.entries(sessionPatterns)
-  .filter(([, v]) => v.wins + v.losses > 0)
-  .map(([k, v]) => `${k}: ${v.wins}W/${v.losses}L`)
-  .join('\n') || 'No patterns yet'}
+Session patterns: (tracking removed)
 
 Return ONLY this JSON (no markdown):
 {
@@ -611,12 +431,11 @@ function getEntryOptimisation(symbol) {
 
 // ── Getters for dashboard ─────────────────────────────────────────────────────
 function getRegime()          { return regimeCache; }
-function getSessionPatterns() { return sessionPatterns; }
-function getInsights()        { return postTradeInsights.slice(0, 20); }
+function getSessionPatterns() { return {}; }
+function getInsights()        { return []; }
 function getAllOptimisations() { return entryOptimisation; }
 
 module.exports = {
-  onOutcome,
   dailySessionSummary,
   detectRegime,
   optimiseEntryLevels,

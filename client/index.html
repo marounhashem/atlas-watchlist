@@ -1106,9 +1106,7 @@ function handleMessage(msg) {
   } else if (msg.type==='LEARNING_UPDATE') {
     fetchLearningLog();
     showToast('↺ Weights updated for '+msg.changes.map(c=>c.symbol).join(', '));
-  } else if (msg.type==='CLAUDE_INSIGHT') {
-    showToast(`🧠 ${msg.insight.symbol} ${msg.insight.outcome}: ${msg.insight.summary}`);
-    fetchRegime();
+  // CLAUDE_INSIGHT handler removed (20260408)
   } else if (msg.type==='REGIME_UPDATE') {
     renderRegime(msg.regime);
     showToast(`📊 Regime: ${msg.regime.regime} — ${msg.regime.summary}`);

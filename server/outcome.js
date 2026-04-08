@@ -291,10 +291,7 @@ function checkOutcomes(broadcast) {
             ts: sig.ts, outcome_ts: Date.now()
           });
         } catch(e) { console.error('[Journal] Error:', e.message); }
-        // Fire Claude learning automatically
-        claudeLearner.onOutcome({ ...sig, pnl_pct: pnlPct }, outcome, broadcast).catch(e =>
-          console.error('[Claude] Auto-learning error:', e.message)
-        );
+        // claudeLearner.onOutcome removed (20260408) — post-trade API calls disabled
       }
 
       // ── Expire ACTIVE signals older than 24h ────────────────────────────────
