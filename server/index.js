@@ -2706,10 +2706,12 @@ function checkAbcOutcomes(broadcast) {
     const tolerance = entry * 0.0015;
     const dir = direction === 'LONG' ? 1 : -1;
 
-    // TP levels
-    const tp1 = entry + dir * slDist;
-    const tp2 = tp;
-    const tp3 = entry + dir * slDist * ((sig.rr || 3) * 1.5);
+    // TP levels — rounded per asset class
+    const cfg = SYMBOLS[sig.symbol];
+    const dp = cfg?.type?.includes('forex') ? 100000 : cfg?.type?.includes('index') ? 100 : cfg?.type?.includes('crypto') ? 100 : 1000;
+    const tp1 = Math.round((entry + dir * slDist) * dp) / dp;
+    const tp2 = Math.round(tp * dp) / dp;
+    const tp3 = Math.round((tp + dir * slDist * 0.5) * dp) / dp;
 
     // ── OPEN → ACTIVE (entry touch) ─────────────────────────────────
     if (sig.outcome === 'OPEN') {
