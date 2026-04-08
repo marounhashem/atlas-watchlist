@@ -2809,12 +2809,8 @@ cron.schedule('50 6 * * *', async () => {
 });
 
 // Daily macro context — fires at 07:00 UTC (before London open)
-// Fetches current macro environment for each symbol via web search
-// Stored in DB and used by scorer as a macro alignment check
-cron.schedule('0 7 * * *', async () => {
-  console.log('[Cron] Running daily macro context fetch...');
-  await runMacroContextFetch(broadcast, 'cron_0700');
-});
+// 07:00 UTC macro cron REMOVED (20260408) — macro fetch now only via /api/macro-refresh
+// runMacroContextFetch still exists and works when called manually
 
 // Weekly COT fetch — every Friday at 20:45 UTC (15 min after CFTC 15:30 EST release)
 cron.schedule('45 20 * * 5', async () => {
