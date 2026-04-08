@@ -293,10 +293,20 @@ async function fetchSymbol(pair, period = 1200) {
 
       const data = await res.json();
 
-      // Reject stale snapshots (>45 min old) — FXSSI updates every 20-30min
-      // but can lag 35+ min during low liquidity (Asian session, weekends)
+      // Diagnostic: FXSSI should update at :00/:20/:40 — log actual vs expected
+      const nowDate = new Date();
+      const snapDate = new Date((data.time || 0) * 1000);
+      const snapMin = snapDate.getUTCMinutes();
+      const expectedSlot = [0, 20, 40].reduce((best, slot) => Math.abs(snapMin - slot) < Math.abs(snapMin - best) ? slot : best, 0);
       const ageMin = (Date.now() / 1000 - (data.time || 0)) / 60;
-      if (ageMin > 45) { console.log(`[FXSSI] ${pair} stale (${Math.round(ageMin)}m)`); return null; }
+      const driftMin = Math.abs(snapMin - expectedSlot);
+
+      if (ageMin > 25 || driftMin > 5) {
+        console.log(`[FXSSI-DIAG] ${pair} snap=${snapDate.toISOString().slice(11,19)} age=${Math.round(ageMin)}m expected=:${String(expectedSlot).padStart(2,'0')} drift=${driftMin}m now=${nowDate.toISOString().slice(11,19)} levels=${data.levels?.length||0}`);
+      }
+
+      // Reject stale snapshots (>45 min old) — FXSSI updates at :00/:20/:40
+      if (ageMin > 45) { console.log(`[FXSSI] ${pair} REJECTED stale (${Math.round(ageMin)}m)`); return null; }
 
       return data;
     } catch (e) {
