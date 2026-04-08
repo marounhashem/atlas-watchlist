@@ -2786,56 +2786,81 @@ function renderAbcSignals() {
     container.innerHTML = '<div class="empty">No ABC signals' + (abcClassFilter !== 'ALL' ? ' for Class ' + abcClassFilter : '') + '</div>';
     return;
   }
+  const INDEX_SYMS = new Set(['US500','DE40','UK100','HK50','J225','CN50','US30','US100']);
+  const COMMODITY_SYMS = new Set(['GOLD','SILVER','OILWTI','COPPER','PLATINUM']);
+  const abcRound = (sym, v) => { if (v == null) return '—'; const dp = INDEX_SYMS.has(sym) ? 2 : COMMODITY_SYMS.has(sym) ? 3 : 5; return Number(v).toFixed(dp); };
+  const abcTimeHeld = ts => { const m = Math.round((Date.now() - ts) / 60000); return m < 60 ? m + 'm' : Math.floor(m/60) + 'h ' + (m%60) + 'm'; };
+
   container.innerHTML = filtered.map(s => {
     const cls = s.pine_class || s.pineClass || '?';
     const clsColor = cls === 'A' ? 'var(--proceed)' : cls === 'B' ? '#4d9eff' : '#888';
     const clsLabel = cls === 'A' ? '⭐ A' : cls === 'B' ? '🔷 B' : '🔹 C';
-    const vColor = s.verdict === 'PROCEED' ? 'var(--proceed)' : 'var(--watch)';
+    const vColor = s.verdict === 'PROCEED' ? 'var(--proceed)' : s.outcome === 'ACTIVE' ? '#4d9eff' : 'var(--watch)';
     const dColor = s.direction === 'LONG' ? 'var(--proceed)' : 'var(--short)';
-    const age = Math.round((Date.now() - s.ts) / 60000);
     const isPast = ['WIN','LOSS'].includes(s.outcome);
+    const isActive = s.outcome === 'ACTIVE';
+    const sym = s.symbol;
+
+    // TP1/TP2/TP3 calculation
+    const slDist = Math.abs(s.entry - s.sl);
+    const dir = s.direction === 'LONG' ? 1 : -1;
+    const tp1 = s.entry + dir * slDist;
+    const tp2 = s.entry + dir * slDist * (s.rr || 3);
+    const tp3 = s.entry + dir * slDist * (s.rr || 3) * 1.5;
+
     const outcomeBadge = isPast
-      ? `<span style="margin-left:8px;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;background:${s.outcome==='WIN'?'#00c88022':'#c0708022'};color:${s.outcome==='WIN'?'var(--proceed)':'var(--short)'};">${s.outcome}${s.pnl_pct!=null?' '+(s.pnl_pct>0?'+':'')+s.pnl_pct+'%':''}</span>` : '';
+      ? `<span style="margin-left:8px;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;background:${s.outcome==='WIN'?'#00c88022':'#c0708022'};color:${s.outcome==='WIN'?'var(--proceed)':'var(--short)'};">${s.outcome}${s.pnl_pct!=null?' '+(s.pnl_pct>0?'+':'')+s.pnl_pct+'%':''}</span>`
+      : isActive ? `<span style="margin-left:8px;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;background:#4d9eff22;color:#4d9eff;">ACTIVE</span>` : '';
+
     const footer = !isPast ? `
-      <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #111120;">
-        <button onclick="logAbcOutcome(${s.id},'WIN')" style="padding:4px 14px;border-radius:3px;border:1px solid var(--proceed);background:transparent;color:var(--proceed);font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.08em;" onmouseover="this.style.background='var(--proceed)';this.style.color='#000'" onmouseout="this.style.background='transparent';this.style.color='var(--proceed)'">WIN</button>
-        <button onclick="logAbcOutcome(${s.id},'LOSS')" style="padding:4px 14px;border-radius:3px;border:1px solid var(--short);background:transparent;color:var(--short);font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.08em;" onmouseover="this.style.background='var(--short)';this.style.color='#fff'" onmouseout="this.style.background='transparent';this.style.color='var(--short)'">LOSS</button>
-        <button onclick="ignoreAbcSignal(${s.id})" style="padding:4px 10px;border-radius:3px;border:1px solid #333348;background:transparent;color:#555575;font-size:10px;cursor:pointer;" onmouseover="this.style.borderColor='#555575'" onmouseout="this.style.borderColor='#333348'">Ignore</button>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid #111120;">
+        <span style="font-size:9px;color:#333348;">${abcTimeHeld(s.ts)}</span>
+        <div style="display:flex;gap:6px;">
+          <button onclick="logAbcOutcome(${s.id},'WIN')" style="padding:4px 14px;border-radius:3px;border:1px solid var(--proceed);background:transparent;color:var(--proceed);font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.08em;" onmouseover="this.style.background='var(--proceed)';this.style.color='#000'" onmouseout="this.style.background='transparent';this.style.color='var(--proceed)'">WIN</button>
+          <button onclick="logAbcOutcome(${s.id},'LOSS')" style="padding:4px 14px;border-radius:3px;border:1px solid var(--short);background:transparent;color:var(--short);font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.08em;" onmouseover="this.style.background='var(--short)';this.style.color='#fff'" onmouseout="this.style.background='transparent';this.style.color='var(--short)'">LOSS</button>
+          <button onclick="ignoreAbcSignal(${s.id})" style="padding:4px 10px;border-radius:3px;border:1px solid #333348;background:transparent;color:#555575;font-size:10px;cursor:pointer;">Ignore</button>
+        </div>
       </div>` : '';
+
     return `<div class="signal-card" style="border-left:4px solid ${vColor}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
         <div style="display:flex;align-items:center;gap:8px;">
-          <span style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#eeeef5;">${esc(s.symbol)}</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#eeeef5;">${esc(sym)}</span>
           <span style="color:${dColor};font-size:11px;font-weight:600;">${esc(s.direction)}</span>
           <span style="background:${clsColor}22;color:${clsColor};border:1px solid ${clsColor}44;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;">${clsLabel}</span>
           ${outcomeBadge}
         </div>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <span style="color:${vColor};font-size:11px;font-weight:600;">${esc(s.verdict)}</span>
-          <span style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;color:#eeeef5;">${s.score}</span>
-        </div>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700;color:#eeeef5;">${s.score}</span>
       </div>
       <div style="display:grid;grid-template-columns:185px 1fr;gap:10px;">
-        <div style="display:flex;flex-direction:column;gap:4px;">
-          <div style="display:grid;grid-template-columns:40px 1fr;align-items:center;gap:4px;">
-            <span style="font-size:8px;color:#444466;letter-spacing:.08em;">ENTRY</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#eeeef5;background:#0a0a18;padding:4px 8px;border-radius:3px;">${s.entry}</span>
+        <div style="display:flex;flex-direction:column;gap:3px;">
+          <div style="display:grid;grid-template-columns:32px 1fr;align-items:center;">
+            <span style="font-size:7px;color:#444466;letter-spacing:.08em;">ENTRY</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#eeeef5;background:#0a0a18;padding:3px 6px;border-radius:3px;">${abcRound(sym,s.entry)}</span>
           </div>
-          <div style="display:grid;grid-template-columns:40px 1fr;align-items:center;gap:4px;">
-            <span style="font-size:8px;color:#444466;letter-spacing:.08em;">STOP</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--short);background:#0a0a18;padding:4px 8px;border-radius:3px;">${s.sl}</span>
+          <div style="display:grid;grid-template-columns:32px 1fr;align-items:center;">
+            <span style="font-size:7px;color:#444466;letter-spacing:.08em;">SL</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--short);background:#0a0a18;padding:3px 6px;border-radius:3px;">${abcRound(sym,s.sl)}</span>
           </div>
-          <div style="display:grid;grid-template-columns:40px 1fr;align-items:center;gap:4px;">
-            <span style="font-size:8px;color:#444466;letter-spacing:.08em;">TARGET</span>
-            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--proceed);background:#0a0a18;padding:4px 8px;border-radius:3px;">${s.tp}</span>
+          <div style="display:grid;grid-template-columns:32px 1fr;align-items:center;">
+            <span style="font-size:7px;color:#555520;letter-spacing:.08em;">TP1</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#cccc44;background:#0a0a18;padding:3px 6px;border-radius:3px;">${abcRound(sym,tp1)}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:32px 1fr;align-items:center;">
+            <span style="font-size:7px;color:#225522;letter-spacing:.08em;">TP2</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--proceed);background:#0a0a18;padding:3px 6px;border-radius:3px;">${abcRound(sym,tp2)}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:32px 1fr;align-items:center;">
+            <span style="font-size:7px;color:#225555;letter-spacing:.08em;">TP3</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--teal,#44cccc);background:#0a0a18;padding:3px 6px;border-radius:3px;">${abcRound(sym,tp3)}</span>
           </div>
         </div>
         <div style="display:flex;flex-direction:column;justify-content:space-between;">
           <div style="font-size:10px;color:#555575;line-height:1.5;">${esc(s.reasoning || '')}</div>
           <div style="display:flex;gap:12px;font-size:10px;color:#444466;margin-top:6px;">
             <span>RR <span style="color:#8888b0;">${s.rr}R</span></span>
+            <span>${esc(s.verdict)}</span>
             <span>Session <span style="color:#8888b0;">${esc(s.session)}</span></span>
-            <span style="color:#333348;">${age < 60 ? age + 'm' : Math.round(age/60) + 'h'} ago</span>
           </div>
         </div>
       </div>

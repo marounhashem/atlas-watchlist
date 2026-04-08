@@ -2728,6 +2728,20 @@ cron.schedule('* * * * *', () => {
   } catch(e) {
     console.error('[Cron] Outcome check error:', e.message);
   }
+  // ABC entry touch detection — OPEN → ACTIVE when price hits entry (±0.15%)
+  try {
+    const openAbc = db.getOpenAbcSignals();
+    for (const sig of openAbc) {
+      const md = db.getLatestMarketData(sig.symbol);
+      if (!md || !md.close || !sig.entry) continue;
+      const dist = Math.abs(md.close - sig.entry) / sig.entry;
+      if (dist <= 0.0015) {
+        db.activateAbcSignal(sig.id);
+        console.log(`[ABC] ${sig.symbol} ${sig.direction} id:${sig.id} → ACTIVE (price ${md.close} touched entry ${sig.entry})`);
+        if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: sig.id, outcome: 'ACTIVE', ts: Date.now() });
+      }
+    }
+  } catch(e) {}
 });
 
 // FXSSI auto-scrape — fires at :01/:21/:41, aligned with 20-min FXSSI refresh cycle

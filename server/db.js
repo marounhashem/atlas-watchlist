@@ -1393,6 +1393,17 @@ function getAbcSignals(limit = 100) {
   return all('SELECT * FROM abc_signals ORDER BY ts DESC LIMIT ?', [limit]);
 }
 
+function getOpenAbcSignals() {
+  return all("SELECT * FROM abc_signals WHERE outcome='OPEN'");
+}
+
+function activateAbcSignal(signalId) {
+  try {
+    run("UPDATE abc_signals SET outcome='ACTIVE' WHERE id=? AND outcome='OPEN'", [signalId]);
+    persist();
+  } catch(e) { console.error('[DB] activateAbcSignal error:', e?.message); }
+}
+
 function updateAbcOutcome(signalId, outcome, pnlPct, notes) {
   try {
     run('UPDATE abc_signals SET outcome=?, outcome_ts=?, pnl_pct=?, outcome_notes=? WHERE id=?',
@@ -1477,7 +1488,7 @@ function getAbcStats() {
 
 module.exports = {
   init, isReady, persist, persistNow, run, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
-  upsertMarketData, getLatestMarketData, insertAbcSignal, getAbcSignals, updateAbcOutcome, getAbcStats,
+  upsertMarketData, getLatestMarketData, insertAbcSignal, getAbcSignals, getOpenAbcSignals, activateAbcSignal, updateAbcOutcome, getAbcStats,
   insertSignal, refineSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,
   getWeights, updateWeights,
