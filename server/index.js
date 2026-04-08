@@ -275,6 +275,22 @@ function processPineWebhook(data) {
   broadcast({ type: 'MARKET_UPDATE', symbol: sym, close: price, ts: Date.now() });
 }
 
+// ── ABC decimal precision per symbol ─────────────────────────────────────────
+function getAbcDp(symbol) {
+  const JPY_PAIRS = ['USDJPY','EURJPY','GBPJPY','AUDJPY'];
+  const INDICES   = ['US30','US100','US500','DE40','UK100','J225','HK50','CN50'];
+  const CRYPTO    = ['BTCUSD','ETHUSD'];
+  if (JPY_PAIRS.includes(symbol))  return 1000;    // 3dp for JPY
+  if (INDICES.includes(symbol))    return 100;     // 2dp
+  if (CRYPTO.includes(symbol))     return 10;      // 1dp
+  if (symbol === 'GOLD')           return 100;     // 2dp
+  if (symbol === 'SILVER')         return 1000;    // 3dp
+  if (symbol === 'OILWTI')         return 100;     // 2dp
+  if (symbol === 'COPPER')         return 100;     // 2dp
+  if (symbol === 'PLATINUM')       return 100;     // 2dp
+  return 100000; // 5dp forex majors/minors
+}
+
 // ── Webhook: ABC Pine signals ────────────────────────────────────────────────
 function processAbcWebhook(data) {
   if (!data || !Object.keys(data).length) { console.log('[ABC] Empty body — skipping'); return; }
@@ -306,7 +322,7 @@ function processAbcWebhook(data) {
   }
 
   const cfg = SYMBOLS[sym];
-  const dp = cfg?.type?.includes('forex') ? 10000 : cfg?.type?.includes('index') ? 100 : 1000;
+  const dp = getAbcDp(sym);
   const entry = Math.round(parseFloat(data.entry) * dp) / dp;
   const sl    = Math.round(parseFloat(data.sl)    * dp) / dp;
   const tp    = Math.round(parseFloat(data.tp)    * dp) / dp;
@@ -2709,9 +2725,8 @@ function checkAbcOutcomes(broadcast) {
     const tolerance = entry * 0.0015;
     const dir = direction === 'LONG' ? 1 : -1;
 
-    // TP levels — rounded per asset class
-    const cfg = SYMBOLS[sig.symbol];
-    const dp = cfg?.type?.includes('forex') ? 100000 : cfg?.type?.includes('index') ? 100 : cfg?.type?.includes('crypto') ? 100 : 1000;
+    // TP levels — rounded per symbol
+    const dp = getAbcDp(sig.symbol);
     const tp1 = Math.round((entry + dir * slDist) * dp) / dp;
     const tp2 = Math.round(tp * dp) / dp;
     const tp3 = Math.round((tp + dir * slDist * 0.5) * dp) / dp;

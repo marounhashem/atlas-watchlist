@@ -1352,8 +1352,8 @@ function renderCard(sig, isPast) {
   const obPct = Math.round((bd.ob||0)*100);
   const sessPct = Math.round((bd.session||0)*100);
 
-  const barsHTML = noOB
-    ? '<div class="no-ob-note">No Retail<br>Order Book</div>'
+  const barsHTML = (noOB || sig._isAbc)
+    ? '<div class="no-ob-note">' + (sig._isAbc ? 'ABC<br>Signal' : 'No Retail<br>Order Book') + '</div>'
     : `<div class="bar-row"><span class="bar-name">Technical</span><div class="bar-track"><div class="bar-fill ${barClass(biasPct)}" style="width:${biasPct}%"></div></div><span class="bar-pct">${biasPct}%</span></div>
        <div class="bar-row"><span class="bar-name">Sentiment</span><div class="bar-track"><div class="bar-fill ${barClass(fxssiPct)}" style="width:${fxssiPct}%"></div></div><span class="bar-pct">${fxssiPct}%</span></div>
        <div class="bar-row"><span class="bar-name">OB Levels</span><div class="bar-track"><div class="bar-fill ${barClass(obPct)}" style="width:${obPct}%"></div></div><span class="bar-pct">${obPct}%</span></div>
