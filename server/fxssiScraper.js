@@ -325,7 +325,7 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
       await new Promise(r => setTimeout(r, 300));
 
       const cached   = cache[symbol];
-      const cacheAge = cached ? (now - cached.ts) / 60000 : 999;
+      const cacheAge = cached ? (Date.now() - cached.ts) / 60000 : 999;
 
       let raw;
       if (shouldFetch(symbol) || cacheAge > 21) {
