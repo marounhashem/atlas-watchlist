@@ -340,6 +340,11 @@ function processAbcWebhook(data) {
     } catch(e) { return null; }
   })();
 
+  // Compute fxssi_gate for stats tracking
+  const fxssiGate = !fxssiData || fxssiData.fxssi_trapped == null ? 'NO_DATA'
+    : ((direction === 'LONG'  && fxssiData.fxssi_trapped === 'SHORT') ||
+       (direction === 'SHORT' && fxssiData.fxssi_trapped === 'LONG'))  ? 'ALIGNED' : 'MISALIGNED';
+
   // Run gates
   const payload = { pineClass, direction, entry, sl, tp, rr };
   const gates   = runAbcGates(sym, payload, fxssiData, db);
@@ -361,7 +366,7 @@ function processAbcWebhook(data) {
     verdict: gates.verdict, entry, sl, tp,
     rr: gates.rr || rr, session,
     reasoning: gates.reason, expiresAt,
-    fxssiStale: !fxssiData, rawPayload: JSON.stringify(data)
+    fxssiStale: !fxssiData, fxssiGate, rawPayload: JSON.stringify(data)
   });
 
   if (!signalId) { console.log(`[ABC] ${sym} — failed to save`); return; }
@@ -635,6 +640,28 @@ app.get('/api/past-signals', (req, res) => {
 app.get('/api/abc-signals', (req, res) => {
   try { res.json(db.getAbcSignals(200)); }
   catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/abc-outcome', (req, res) => {
+  const { id, outcome, pnl_pct, notes } = req.body || {};
+  if (!id || !['WIN','LOSS'].includes(outcome)) return res.status(400).json({ error: 'Missing id or invalid outcome' });
+  db.updateAbcOutcome(id, outcome, pnl_pct || null, notes || null);
+  console.log(`[ABC] Outcome logged: id:${id} → ${outcome}`);
+  if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, outcome, ts: Date.now() });
+  res.json({ ok: true });
+});
+
+app.get('/api/abc-stats', (req, res) => {
+  try { res.json(db.getAbcStats()); }
+  catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/abc-ignore', (req, res) => {
+  const { id, reason } = req.body || {};
+  if (!id) return res.status(400).json({ error: 'Missing id' });
+  db.updateAbcOutcome(id, 'IGNORED', null, 'Not taken by trader' + (reason ? ' — ' + reason : ''));
+  if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, outcome: 'IGNORED', ts: Date.now() });
+  res.json({ ok: true });
 });
 
 // Manual retirement trigger

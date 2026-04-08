@@ -253,14 +253,23 @@ function initSchema() {
     rr          REAL,
     session     TEXT,
     reasoning   TEXT,
-    outcome     TEXT DEFAULT 'OPEN',
-    outcome_ts  INTEGER,
-    mfe_pct     REAL,
-    ts          INTEGER,
-    expires_at  INTEGER,
-    fxssi_stale INTEGER DEFAULT 0,
-    raw_payload TEXT
+    outcome          TEXT DEFAULT 'OPEN',
+    outcome_ts       INTEGER,
+    outcome_category TEXT,
+    outcome_notes    TEXT,
+    pnl_pct          REAL,
+    mfe_pct          REAL,
+    fxssi_gate       TEXT,
+    ts               INTEGER,
+    expires_at       INTEGER,
+    fxssi_stale      INTEGER DEFAULT 0,
+    raw_payload      TEXT
   )`);
+  // Migration — add columns for existing deployments
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN outcome_category TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN outcome_notes TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN pnl_pct REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN fxssi_gate TEXT'); } catch(e) {}
   console.log('[DB] abc_signals table ready');
 
   db.run(`CREATE TABLE IF NOT EXISTS weights (
@@ -1364,12 +1373,12 @@ function insertAbcSignal(sig) {
   try {
     run(`INSERT INTO abc_signals
       (symbol, direction, pine_class, score, verdict, entry, sl, tp, rr,
-       session, reasoning, outcome, ts, expires_at, fxssi_stale, raw_payload)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       session, reasoning, outcome, ts, expires_at, fxssi_stale, fxssi_gate, raw_payload)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [sig.symbol, sig.direction, sig.pineClass, sig.score || 0, sig.verdict,
        sig.entry, sig.sl, sig.tp, sig.rr, sig.session, sig.reasoning,
        'OPEN', sig.ts || Date.now(), sig.expiresAt || (Date.now() + 8 * 3600000),
-       sig.fxssiStale ? 1 : 0, sig.rawPayload || null]);
+       sig.fxssiStale ? 1 : 0, sig.fxssiGate || 'NO_DATA', sig.rawPayload || null]);
     persist();
     // Get last inserted id
     const row = get('SELECT last_insert_rowid() as id');
@@ -1384,9 +1393,91 @@ function getAbcSignals(limit = 100) {
   return all('SELECT * FROM abc_signals ORDER BY ts DESC LIMIT ?', [limit]);
 }
 
+function updateAbcOutcome(signalId, outcome, pnlPct, notes) {
+  try {
+    run('UPDATE abc_signals SET outcome=?, outcome_ts=?, pnl_pct=?, outcome_notes=? WHERE id=?',
+      [outcome, Date.now(), pnlPct || null, notes || null, signalId]);
+    persist();
+  } catch(e) {
+    console.error('[DB] updateAbcOutcome error:', e?.message);
+  }
+}
+
+function getAbcStats() {
+  try {
+    const closed = all("SELECT * FROM abc_signals WHERE outcome IN ('WIN','LOSS') ORDER BY ts DESC LIMIT 500");
+    if (!closed.length) return { empty: true };
+
+    const total = closed.length;
+    const wins = closed.filter(s => s.outcome === 'WIN');
+    const losses = closed.filter(s => s.outcome === 'LOSS');
+    const winRate = Math.round(wins.length / total * 100);
+
+    const byClass = { A: {wins:0,losses:0}, B: {wins:0,losses:0}, C: {wins:0,losses:0} };
+    for (const s of closed) {
+      const cls = s.pine_class;
+      if (!byClass[cls]) continue;
+      s.outcome === 'WIN' ? byClass[cls].wins++ : byClass[cls].losses++;
+    }
+    for (const cls of ['A','B','C']) {
+      const t = byClass[cls].wins + byClass[cls].losses;
+      byClass[cls].total = t;
+      byClass[cls].winRate = t > 0 ? Math.round(byClass[cls].wins / t * 100) : null;
+    }
+
+    const byFxssi = { ALIGNED: {wins:0,losses:0}, MISALIGNED: {wins:0,losses:0}, NO_DATA: {wins:0,losses:0} };
+    for (const s of closed) {
+      const gate = s.fxssi_gate || 'NO_DATA';
+      if (!byFxssi[gate]) byFxssi[gate] = {wins:0,losses:0};
+      s.outcome === 'WIN' ? byFxssi[gate].wins++ : byFxssi[gate].losses++;
+    }
+    for (const gate of Object.keys(byFxssi)) {
+      const t = byFxssi[gate].wins + byFxssi[gate].losses;
+      byFxssi[gate].total = t;
+      byFxssi[gate].winRate = t > 0 ? Math.round(byFxssi[gate].wins / t * 100) : null;
+    }
+
+    const bySession = {};
+    for (const s of closed) {
+      const sess = s.session || 'unknown';
+      if (!bySession[sess]) bySession[sess] = {wins:0,losses:0};
+      s.outcome === 'WIN' ? bySession[sess].wins++ : bySession[sess].losses++;
+    }
+    for (const sess of Object.keys(bySession)) {
+      const t = bySession[sess].wins + bySession[sess].losses;
+      bySession[sess].total = t;
+      bySession[sess].winRate = t > 0 ? Math.round(bySession[sess].wins / t * 100) : null;
+    }
+
+    const bySymbol = {};
+    for (const s of closed) {
+      if (!bySymbol[s.symbol]) bySymbol[s.symbol] = {wins:0,losses:0};
+      s.outcome === 'WIN' ? bySymbol[s.symbol].wins++ : bySymbol[s.symbol].losses++;
+    }
+    for (const sym of Object.keys(bySymbol)) {
+      const t = bySymbol[sym].wins + bySymbol[sym].losses;
+      bySymbol[sym].total = t;
+      bySymbol[sym].winRate = t > 0 ? Math.round(bySymbol[sym].wins / t * 100) : null;
+    }
+
+    const classComparison = {
+      A_vs_B_wr_diff: byClass.A.winRate != null && byClass.B.winRate != null
+        ? byClass.A.winRate - byClass.B.winRate : null,
+      fxssi_aligned_vs_nodata_diff: byFxssi.ALIGNED.winRate != null && byFxssi.NO_DATA.winRate != null
+        ? byFxssi.ALIGNED.winRate - byFxssi.NO_DATA.winRate : null,
+      fxssi_worth_waiting_for: byFxssi.ALIGNED.winRate > byFxssi.NO_DATA.winRate
+    };
+
+    return { total, winRate, wins: wins.length, losses: losses.length, byClass, byFxssi, bySession, bySymbol, classComparison, recentClosed: closed.slice(0, 20) };
+  } catch(e) {
+    console.error('[DB] getAbcStats error:', e?.message);
+    return { empty: true, error: e?.message };
+  }
+}
+
 module.exports = {
   init, isReady, persist, persistNow, run, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
-  upsertMarketData, getLatestMarketData, insertAbcSignal, getAbcSignals,
+  upsertMarketData, getLatestMarketData, insertAbcSignal, getAbcSignals, updateAbcOutcome, getAbcStats,
   insertSignal, refineSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,
   getWeights, updateWeights,

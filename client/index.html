@@ -821,6 +821,7 @@
           <button class="filter-btn" onclick="setAbcClass('C')" style="font-size:10px;padding:3px 8px;">🔹 C</button>
         </div>
       </div>
+      <div id="abc-stats-panel" style="margin-bottom:12px;padding:10px;background:#07070f;border:1px solid #111120;border-radius:6px;"></div>
       <div id="abc-container"><div class="empty">No ABC signals yet — waiting for Pine alerts on /webhook/pine-abc</div></div>
     </div>
   </div>
@@ -1020,6 +1021,12 @@ function connect() {
 function handleMessage(msg) {
   if (msg.type==='ABC_SIGNAL') {
     abcSignals.unshift(msg);
+    if (activeMainTab === 'abc') renderAbcSignals();
+    return;
+  }
+  if (msg.type==='ABC_OUTCOME') {
+    const s = abcSignals.find(x => x.id === msg.signalId);
+    if (s) s.outcome = msg.outcome;
     if (activeMainTab === 'abc') renderAbcSignals();
     return;
   }
@@ -2405,7 +2412,7 @@ function switchMainTab(tab) {
   if (tab === 'stats') renderStatsTab();
   if (tab === 'backtest') populateBtSymbols();
   if (tab === 'settings') loadSettings();
-  if (tab === 'abc') renderAbcSignals();
+  if (tab === 'abc') { renderAbcSignals(); fetchAbcStats(); }
 }
 
 // ── Forex data ─────────────────────────────────────────────────────────────
@@ -2766,17 +2773,17 @@ function setAbcClass(cls) {
 function renderAbcSignals() {
   const container = document.getElementById('abc-container');
   if (!container) return;
-  // Fetch from API if empty
   if (!abcSignals.length) {
     fetch('/api/abc-signals').then(r=>r.json()).then(data => {
       if (Array.isArray(data)) { abcSignals = data; renderAbcSignals(); }
     }).catch(()=>{});
     return;
   }
-  let filtered = abcSignals;
-  if (abcClassFilter !== 'ALL') {
-    filtered = abcSignals.filter(s => (s.pine_class || s.pineClass) === abcClassFilter);
-  }
+  let filtered = abcSignals.filter(s => {
+    if (['IGNORED','EXPIRED'].includes(s.outcome)) return false;
+    if (abcClassFilter !== 'ALL' && (s.pine_class || s.pineClass) !== abcClassFilter) return false;
+    return true;
+  });
   if (!filtered.length) {
     container.innerHTML = '<div class="empty">No ABC signals' + (abcClassFilter !== 'ALL' ? ' for Class ' + abcClassFilter : '') + '</div>';
     return;
@@ -2788,38 +2795,118 @@ function renderAbcSignals() {
     const vColor = s.verdict === 'PROCEED' ? 'var(--proceed)' : 'var(--watch)';
     const dColor = s.direction === 'LONG' ? 'var(--proceed)' : 'var(--short)';
     const age = Math.round((Date.now() - s.ts) / 60000);
+    const isPast = ['WIN','LOSS'].includes(s.outcome);
+    const outcomeBadge = isPast
+      ? `<span style="margin-left:8px;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;background:${s.outcome==='WIN'?'#00c88022':'#c0708022'};color:${s.outcome==='WIN'?'var(--proceed)':'var(--short)'};">${s.outcome}${s.pnl_pct!=null?' '+(s.pnl_pct>0?'+':'')+s.pnl_pct+'%':''}</span>` : '';
+    const footer = !isPast ? `
+      <div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid #111120;">
+        <button onclick="logAbcOutcome(${s.id},'WIN')" style="padding:4px 14px;border-radius:3px;border:1px solid var(--proceed);background:transparent;color:var(--proceed);font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.08em;" onmouseover="this.style.background='var(--proceed)';this.style.color='#000'" onmouseout="this.style.background='transparent';this.style.color='var(--proceed)'">WIN</button>
+        <button onclick="logAbcOutcome(${s.id},'LOSS')" style="padding:4px 14px;border-radius:3px;border:1px solid var(--short);background:transparent;color:var(--short);font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.08em;" onmouseover="this.style.background='var(--short)';this.style.color='#fff'" onmouseout="this.style.background='transparent';this.style.color='var(--short)'">LOSS</button>
+        <button onclick="ignoreAbcSignal(${s.id})" style="padding:4px 10px;border-radius:3px;border:1px solid #333348;background:transparent;color:#555575;font-size:10px;cursor:pointer;" onmouseover="this.style.borderColor='#555575'" onmouseout="this.style.borderColor='#333348'">Ignore</button>
+      </div>` : '';
     return `<div class="signal-card" style="border-left:4px solid ${vColor}">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="display:flex;align-items:center;gap:8px;">
           <span style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:700;color:#eeeef5;">${esc(s.symbol)}</span>
-          <span style="margin-left:8px;color:${dColor};font-size:12px;font-weight:600;">${esc(s.direction)}</span>
-          <span style="margin-left:8px;background:${clsColor}22;color:${clsColor};border:1px solid ${clsColor}44;border-radius:4px;padding:2px 7px;font-size:11px;font-weight:700;">${clsLabel}</span>
+          <span style="color:${dColor};font-size:11px;font-weight:600;">${esc(s.direction)}</span>
+          <span style="background:${clsColor}22;color:${clsColor};border:1px solid ${clsColor}44;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;">${clsLabel}</span>
+          ${outcomeBadge}
         </div>
-        <div style="color:${vColor};font-size:11px;font-weight:600;">${esc(s.verdict)}</div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px;">
-        <div style="background:#0a0a18;border-radius:4px;padding:5px 8px;text-align:center;">
-          <div style="font-size:8px;color:#444466;letter-spacing:.06em;margin-bottom:2px;">ENTRY</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#eeeef5;">${s.entry}</div>
-        </div>
-        <div style="background:#0a0a18;border-radius:4px;padding:5px 8px;text-align:center;">
-          <div style="font-size:8px;color:#444466;letter-spacing:.06em;margin-bottom:2px;">STOP</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--short);">${s.sl}</div>
-        </div>
-        <div style="background:#0a0a18;border-radius:4px;padding:5px 8px;text-align:center;">
-          <div style="font-size:8px;color:#444466;letter-spacing:.06em;margin-bottom:2px;">TARGET</div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--proceed);">${s.tp}</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="color:${vColor};font-size:11px;font-weight:600;">${esc(s.verdict)}</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:700;color:#eeeef5;">${s.score}</span>
         </div>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:10px;color:#444466;">
-        <span>RR: <span style="color:#8888b0;">${s.rr}R</span></span>
-        <span>Score: <span style="color:#8888b0;">${s.score}</span></span>
-        <span>Session: <span style="color:#8888b0;">${esc(s.session)}</span></span>
-        <span style="color:#333348;">${age}m ago</span>
+      <div style="display:grid;grid-template-columns:185px 1fr;gap:10px;">
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <div style="display:grid;grid-template-columns:40px 1fr;align-items:center;gap:4px;">
+            <span style="font-size:8px;color:#444466;letter-spacing:.08em;">ENTRY</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:#eeeef5;background:#0a0a18;padding:4px 8px;border-radius:3px;">${s.entry}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:40px 1fr;align-items:center;gap:4px;">
+            <span style="font-size:8px;color:#444466;letter-spacing:.08em;">STOP</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--short);background:#0a0a18;padding:4px 8px;border-radius:3px;">${s.sl}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:40px 1fr;align-items:center;gap:4px;">
+            <span style="font-size:8px;color:#444466;letter-spacing:.08em;">TARGET</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--proceed);background:#0a0a18;padding:4px 8px;border-radius:3px;">${s.tp}</span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;justify-content:space-between;">
+          <div style="font-size:10px;color:#555575;line-height:1.5;">${esc(s.reasoning || '')}</div>
+          <div style="display:flex;gap:12px;font-size:10px;color:#444466;margin-top:6px;">
+            <span>RR <span style="color:#8888b0;">${s.rr}R</span></span>
+            <span>Session <span style="color:#8888b0;">${esc(s.session)}</span></span>
+            <span style="color:#333348;">${age < 60 ? age + 'm' : Math.round(age/60) + 'h'} ago</span>
+          </div>
+        </div>
       </div>
-      ${s.reasoning ? `<div style="font-size:10px;color:#555575;margin-top:6px;padding-top:6px;border-top:1px solid #111120;">${esc(s.reasoning)}</div>` : ''}
+      ${footer}
     </div>`;
   }).join('');
+}
+
+async function logAbcOutcome(signalId, outcome) {
+  if (!signalId) return;
+  try {
+    await fetch('/api/abc-outcome', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:signalId,outcome}) });
+    const s = abcSignals.find(x => x.id === signalId);
+    if (s) s.outcome = outcome;
+    renderAbcSignals();
+    showToast(outcome === 'WIN' ? '✅ ABC WIN — logged' : '❌ ABC LOSS — logged');
+  } catch(e) { showToast('Failed: ' + e.message); }
+}
+
+async function ignoreAbcSignal(signalId) {
+  if (!signalId) return;
+  try {
+    await fetch('/api/abc-ignore', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:signalId}) });
+    abcSignals = abcSignals.filter(s => s.id !== signalId);
+    renderAbcSignals();
+  } catch(e) {}
+}
+
+function fetchAbcStats() {
+  fetch('/api/abc-stats').then(r=>r.json()).then(data => {
+    const el = document.getElementById('abc-stats-panel');
+    if (!el) return;
+    if (data.empty || data.total < 3) {
+      el.innerHTML = '<div style="color:#333348;font-size:10px;padding:8px;">Log WIN/LOSS on signals to build stats</div>';
+      return;
+    }
+    const wr = d => d.winRate != null
+      ? `<span style="color:${d.winRate>=55?'var(--proceed)':d.winRate>=45?'var(--watch)':'var(--short)'};font-weight:700;">${d.winRate}%</span> <span style="color:#444466;font-size:9px;">${d.wins}W/${d.losses}L</span>`
+      : '<span style="color:#333348;">—</span>';
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;">
+        <div style="background:#0a0a18;border:1px solid #1a1a28;border-radius:5px;padding:8px;text-align:center;">
+          <div style="font-size:8px;color:#333348;letter-spacing:.08em;margin-bottom:4px;">TOTAL</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:#eeeef5;">${data.total}</div>
+        </div>
+        <div style="background:#0a0a18;border:1px solid #1a1a28;border-radius:5px;padding:8px;text-align:center;">
+          <div style="font-size:8px;color:#333348;letter-spacing:.08em;margin-bottom:4px;">WIN RATE</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:${data.winRate>=55?'var(--proceed)':data.winRate>=45?'var(--watch)':'var(--short)'};">${data.winRate}%</div>
+        </div>
+        <div style="background:#0a0a18;border:1px solid #1a1a28;border-radius:5px;padding:8px;text-align:center;">
+          <div style="font-size:8px;color:#333348;letter-spacing:.08em;margin-bottom:4px;">A vs B WR</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:#eeeef5;">${data.classComparison.A_vs_B_wr_diff!=null?(data.classComparison.A_vs_B_wr_diff>0?'+':'')+data.classComparison.A_vs_B_wr_diff+'pp':'—'}</div>
+        </div>
+        <div style="background:#0a0a18;border:1px solid #1a1a28;border-radius:5px;padding:8px;text-align:center;">
+          <div style="font-size:8px;color:#333348;letter-spacing:.08em;margin-bottom:4px;">FXSSI EDGE</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:${data.classComparison.fxssi_worth_waiting_for?'var(--proceed)':'var(--short)'};">${data.classComparison.fxssi_aligned_vs_nodata_diff!=null?(data.classComparison.fxssi_aligned_vs_nodata_diff>0?'+':'')+data.classComparison.fxssi_aligned_vs_nodata_diff+'pp':'—'}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div>
+          <div style="font-size:9px;color:#444466;letter-spacing:.08em;margin-bottom:6px;">BY CLASS</div>
+          ${['A','B','C'].map(cls=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #0d0d1a;"><span style="font-size:11px;color:#8888b0;">${cls==='A'?'⭐':cls==='B'?'🔷':'🔹'} Class ${cls}</span><span>${wr(data.byClass[cls])}</span></div>`).join('')}
+        </div>
+        <div>
+          <div style="font-size:9px;color:#444466;letter-spacing:.08em;margin-bottom:6px;">BY FXSSI GATE</div>
+          ${Object.entries(data.byFxssi).map(([gate,d])=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #0d0d1a;"><span style="font-size:11px;color:#8888b0;">${gate}</span><span>${wr(d)}</span></div>`).join('')}
+        </div>
+      </div>`;
+  }).catch(()=>{});
 }
 
 </script>
