@@ -152,11 +152,12 @@ wss.on('connection', ws => {
     try {
       const signals     = db.getAllSignals(100);
       const pastSignals = db.getPastCycleSignals(200);
-      console.log('[WS] Sending INIT: signals=' + signals.length + ' past=' + pastSignals.length);
-      ws.send(JSON.stringify({ type: 'INIT', signals, pastSignals, symbols: Object.keys(SYMBOLS) }));
+      const abcSignals  = db.getAbcSignals(100);
+      console.log('[WS] Sending INIT: signals=' + signals.length + ' past=' + pastSignals.length + ' abc=' + abcSignals.length);
+      ws.send(JSON.stringify({ type: 'INIT', signals, pastSignals, abcSignals, symbols: Object.keys(SYMBOLS) }));
     } catch(e) {
       console.error('[WS] INIT error:', e.message);
-      ws.send(JSON.stringify({ type: 'INIT', signals: [], pastSignals: [], symbols: Object.keys(SYMBOLS) }));
+      ws.send(JSON.stringify({ type: 'INIT', signals: [], pastSignals: [], abcSignals: [], symbols: Object.keys(SYMBOLS) }));
     }
   }
 
@@ -347,11 +348,18 @@ function processAbcWebhook(data) {
     try {
       const md = db.getLatestMarketData(sym);
       if (!md) return null;
+      // Parse gravity from fxssi_analysis JSON (no gravity_price column on market_data)
+      let gravPrice = null;
+      try {
+        const fa = md.fxssi_analysis ? JSON.parse(md.fxssi_analysis) : null;
+        const fx = fa?.fxssiAnalysis ? (typeof fa.fxssiAnalysis === 'string' ? JSON.parse(fa.fxssiAnalysis) : fa.fxssiAnalysis) : (fa?.longPct != null ? fa : null);
+        gravPrice = fx?.gravity?.price || null;
+      } catch(e) {}
       return {
         fxssi_long_pct:  md.fxssi_long_pct,
         fxssi_short_pct: md.fxssi_short_pct,
         fxssi_trapped:   md.fxssi_trapped,
-        gravity_price:   md.gravity_price
+        gravity_price:   gravPrice
       };
     } catch(e) { return null; }
   })();
@@ -705,7 +713,7 @@ app.post('/api/outcome', (req, res) => {
   const { signalId, outcome } = req.body;
   if (!signalId || !outcome) return res.status(400).json({ error: 'Missing signalId or outcome' });
   updateOutcome(signalId, outcome, req.body.pnlPct || 0);
-  broadcast({ type: 'OUTCOME_MANUAL', signalId, outcome, ts: Date.now() });
+  broadcast({ type: 'OUTCOME', signalId, outcome, ts: Date.now() });
   res.json({ ok: true });
 });
 
