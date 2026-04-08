@@ -32,15 +32,27 @@ function mapVerdict(pineClass, fxssiPassed, fxssiNoData) {
 // ── FXSSI gate — same logic as scorer ────────────────────────────────────────
 // Returns { passed: bool, reason: string }
 function checkFxssi(symbol, fxssiData) {
-  if (!fxssiData || fxssiData.fxssi_trapped == null) {
+  // Truly no data — market data record doesn't exist or has no FXSSI fields at all
+  if (!fxssiData || (fxssiData.fxssi_long_pct == null && fxssiData.fxssi_short_pct == null)) {
     return { passed: false, noData: true, reason: 'No FXSSI data for symbol' };
   }
+
   const direction = fxssiData._direction;
   const trapped   = fxssiData.fxssi_trapped;
+
+  // Data present but no trapped crowd — crowd not sufficiently one-sided (neither side >60%)
+  if (trapped == null) {
+    return {
+      passed: false,
+      noData: false,
+      reason: `No trapped crowd — long:${fxssiData.fxssi_long_pct?.toFixed(1)}% short:${fxssiData.fxssi_short_pct?.toFixed(1)}% (need >60% one side)`
+    };
+  }
+
   const trappedAligned = (direction === 'LONG'  && trapped === 'SHORT') ||
                          (direction === 'SHORT' && trapped === 'LONG');
   if (!trappedAligned) {
-    return { passed: false, noData: false, reason: `Trapped not aligned (trapped=${trapped}, dir=${direction})` };
+    return { passed: false, noData: false, reason: `Trapped ${trapped} not aligned with ${direction}` };
   }
   return { passed: true, noData: false, reason: `Trapped ${trapped} aligned with ${direction}` };
 }

@@ -341,7 +341,10 @@ function processAbcWebhook(data) {
   })();
 
   // Compute fxssi_gate for stats tracking
-  const fxssiGate = !fxssiData || fxssiData.fxssi_trapped == null ? 'NO_DATA'
+  const hasAnyFxssiData = fxssiData &&
+    (fxssiData.fxssi_long_pct != null || fxssiData.fxssi_short_pct != null);
+  const fxssiGate = !hasAnyFxssiData ? 'NO_DATA'
+    : fxssiData.fxssi_trapped == null ? 'NO_TRAP'
     : ((direction === 'LONG'  && fxssiData.fxssi_trapped === 'SHORT') ||
        (direction === 'SHORT' && fxssiData.fxssi_trapped === 'LONG'))  ? 'ALIGNED' : 'MISALIGNED';
 

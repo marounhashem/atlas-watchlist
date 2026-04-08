@@ -1456,7 +1456,7 @@ function getAbcStats() {
       byClass[cls].winRate = t > 0 ? Math.round(byClass[cls].wins / t * 100) : null;
     }
 
-    const byFxssi = { ALIGNED: {wins:0,losses:0}, MISALIGNED: {wins:0,losses:0}, NO_DATA: {wins:0,losses:0} };
+    const byFxssi = { ALIGNED: {wins:0,losses:0}, MISALIGNED: {wins:0,losses:0}, NO_TRAP: {wins:0,losses:0}, NO_DATA: {wins:0,losses:0} };
     for (const s of closed) {
       const gate = s.fxssi_gate || 'NO_DATA';
       if (!byFxssi[gate]) byFxssi[gate] = {wins:0,losses:0};
