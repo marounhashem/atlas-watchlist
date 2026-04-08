@@ -2686,6 +2686,97 @@ app.post('/api/paper-outcome', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── ABC Outcome Tracking ────────────────────────────────────────────────────
+function checkAbcOutcomes(broadcast) {
+  const signals = db.getOpenAbcSignals(); // returns OPEN + ACTIVE
+  if (!signals.length) return;
+
+  for (const sig of signals) {
+    const md = db.getLatestMarketData(sig.symbol);
+    if (!md || !md.close) continue;
+
+    const price = md.close;
+    const barHigh = md.high || price;
+    const barLow = md.low || price;
+    const { direction, entry, sl, tp, id } = sig;
+    if (!entry || !sl || !tp) continue;
+
+    const slDist = Math.abs(sl - entry);
+    const tpDist = Math.abs(tp - entry);
+    const tolerance = entry * 0.0015;
+    const dir = direction === 'LONG' ? 1 : -1;
+
+    // TP levels
+    const tp1 = entry + dir * slDist;
+    const tp2 = tp;
+    const tp3 = entry + dir * slDist * ((sig.rr || 3) * 1.5);
+
+    // ── OPEN → ACTIVE (entry touch) ─────────────────────────────────
+    if (sig.outcome === 'OPEN') {
+      const touched = direction === 'LONG'
+        ? barLow <= entry + tolerance
+        : barHigh >= entry - tolerance;
+      if (touched) {
+        db.activateAbcSignal(id, tp1, tp2, tp3);
+        console.log(`[ABC Outcome] ${sig.symbol} ${direction} id:${id} → ACTIVE`);
+        if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, outcome: 'ACTIVE', ts: Date.now() });
+      }
+      continue;
+    }
+
+    // Only process ACTIVE from here
+    if (sig.outcome !== 'ACTIVE') continue;
+
+    // ── SL hit ──────────────────────────────────────────────────────
+    const slHit = direction === 'LONG' ? barLow <= sl : barHigh >= sl;
+    if (slHit) {
+      const pnl = -Math.round((slDist / entry) * 10000) / 100;
+      db.updateAbcOutcome(id, 'LOSS', pnl, 'SL hit');
+      console.log(`[ABC Outcome] ${sig.symbol} ${direction} → LOSS ${pnl}%`);
+      if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, symbol: sig.symbol, outcome: 'LOSS', pnl_pct: pnl, ts: Date.now() });
+      continue;
+    }
+
+    // ── TP hit ──────────────────────────────────────────────────────
+    const tpHit = direction === 'LONG' ? barHigh >= tp : barLow <= tp;
+    if (tpHit) {
+      const pnl = Math.round((tpDist / entry) * 10000) / 100;
+      db.updateAbcOutcome(id, 'WIN', pnl, 'TP hit');
+      console.log(`[ABC Outcome] ${sig.symbol} ${direction} → WIN +${pnl}%`);
+      if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, symbol: sig.symbol, outcome: 'WIN', pnl_pct: pnl, ts: Date.now() });
+      continue;
+    }
+
+    // ── MFE tracking ────────────────────────────────────────────────
+    const favorablePrice = direction === 'LONG' ? barHigh : barLow;
+    const currentMfe = direction === 'LONG'
+      ? (favorablePrice - entry) / entry * 100
+      : (entry - favorablePrice) / entry * 100;
+    const newMfe = Math.max(sig.mfe_pct || 0, Math.round(currentMfe * 100) / 100);
+    const mfePrice = newMfe > (sig.mfe_pct || 0) ? favorablePrice : (sig.mfe_price || favorablePrice);
+
+    // ── Progress toward TP ──────────────────────────────────────────
+    const priceDist = direction === 'LONG' ? price - entry : entry - price;
+    const progressPct = tpDist > 0 ? Math.round((priceDist / tpDist) * 100) : 0;
+
+    db.updateAbcActive(id, { mfe_pct: newMfe, mfe_price: mfePrice, progress_pct: progressPct });
+
+    // ── PARTIAL_CLOSE at 1:1 RR ─────────────────────────────────────
+    if (progressPct >= 30 && !sig.partial_closed) {
+      const tp1Hit = direction === 'LONG' ? barHigh >= tp1 : barLow <= tp1;
+      if (tp1Hit) {
+        db.updateAbcActive(id, { partial_closed: 1 });
+        console.log(`[ABC Outcome] ${sig.symbol} ${direction} — TP1 hit, PARTIAL_CLOSE recommended`);
+        if (broadcast) broadcast({
+          type: 'ABC_RECOMMENDATION', signalId: id, symbol: sig.symbol,
+          rec: { type: 'PARTIAL_CLOSE', reason: `1:1 R:R achieved — close 50%, move SL to breakeven (${entry})`, urgency: 'MEDIUM' },
+          ts: Date.now()
+        });
+      }
+    }
+  }
+}
+
 // ── Cron jobs ─────────────────────────────────────────────────────────────────
 // Score all priority symbols every 5 minutes
 cron.schedule('* * * * *', async () => {
@@ -2728,20 +2819,8 @@ cron.schedule('* * * * *', () => {
   } catch(e) {
     console.error('[Cron] Outcome check error:', e.message);
   }
-  // ABC entry touch detection — OPEN → ACTIVE when price hits entry (±0.15%)
-  try {
-    const openAbc = db.getOpenAbcSignals();
-    for (const sig of openAbc) {
-      const md = db.getLatestMarketData(sig.symbol);
-      if (!md || !md.close || !sig.entry) continue;
-      const dist = Math.abs(md.close - sig.entry) / sig.entry;
-      if (dist <= 0.0015) {
-        db.activateAbcSignal(sig.id);
-        console.log(`[ABC] ${sig.symbol} ${sig.direction} id:${sig.id} → ACTIVE (price ${md.close} touched entry ${sig.entry})`);
-        if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: sig.id, outcome: 'ACTIVE', ts: Date.now() });
-      }
-    }
-  } catch(e) {}
+  // ABC outcome tracking — entry touch, SL/TP hit, MFE, partial close
+  try { checkAbcOutcomes(broadcast); } catch(e) { console.error('[ABC Outcome] Error:', e.message); }
 });
 
 // FXSSI auto-scrape — fires at :01/:21/:41, aligned with 20-min FXSSI refresh cycle

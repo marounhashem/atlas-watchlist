@@ -1026,7 +1026,13 @@ function handleMessage(msg) {
   }
   if (msg.type==='ABC_OUTCOME') {
     const s = abcSignals.find(x => x.id === msg.signalId);
-    if (s) s.outcome = msg.outcome;
+    if (s) { s.outcome = msg.outcome; if (msg.pnl_pct != null) s.pnl_pct = msg.pnl_pct; }
+    if (activeMainTab === 'abc') renderAbcSignals();
+    return;
+  }
+  if (msg.type==='ABC_RECOMMENDATION') {
+    const s = abcSignals.find(x => x.id === msg.signalId);
+    if (s) { s._rec = msg.rec; s.partial_closed = 1; }
     if (activeMainTab === 'abc') renderAbcSignals();
     return;
   }
@@ -2859,9 +2865,17 @@ function renderAbcSignals() {
           <div style="font-size:10px;color:#555575;line-height:1.5;">${esc(s.reasoning || '')}</div>
           <div style="display:flex;gap:12px;font-size:10px;color:#444466;margin-top:6px;">
             <span>RR <span style="color:#8888b0;">${s.rr}R</span></span>
+            ${s.mfe_pct ? `<span>MFE <span style="color:var(--proceed);">+${s.mfe_pct}%</span></span>` : ''}
             <span>${esc(s.verdict)}</span>
             <span>Session <span style="color:#8888b0;">${esc(s.session)}</span></span>
           </div>
+          ${isActive && s.progress_pct != null ? `
+          <div style="margin-top:6px;height:6px;background:#111120;border-radius:3px;overflow:hidden;">
+            <div style="height:100%;width:${Math.min(Math.max(s.progress_pct,0),100)}%;background:${s.progress_pct>=100?'var(--proceed)':s.progress_pct>=50?'#4d9eff':'var(--watch)'};border-radius:3px;transition:width 0.3s;"></div>
+          </div>
+          <div style="font-size:9px;color:#444466;margin-top:2px;">${s.progress_pct}% toward TP</div>` : ''}
+          ${s._rec ? `<div style="margin-top:6px;padding:6px 8px;background:#332200;border:1px solid #664400;border-radius:4px;font-size:10px;color:#ffaa00;">⚡ ${esc(s._rec.type)} — ${esc(s._rec.reason)}</div>` : ''}
+          ${s.partial_closed && !s._rec ? `<div style="margin-top:6px;font-size:9px;color:#888;">✓ Partial close triggered</div>` : ''}
         </div>
       </div>
       ${footer}

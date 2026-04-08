@@ -270,6 +270,14 @@ function initSchema() {
   try { db.run('ALTER TABLE abc_signals ADD COLUMN outcome_notes TEXT'); } catch(e) {}
   try { db.run('ALTER TABLE abc_signals ADD COLUMN pnl_pct REAL'); } catch(e) {}
   try { db.run('ALTER TABLE abc_signals ADD COLUMN fxssi_gate TEXT'); } catch(e) {}
+  // Migration — ACTIVE tracking columns
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN mfe_price REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN progress_pct REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN tp1 REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN tp2 REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN tp3 REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN active_ts INTEGER'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN partial_closed INTEGER DEFAULT 0'); } catch(e) {}
   console.log('[DB] abc_signals table ready');
 
   db.run(`CREATE TABLE IF NOT EXISTS weights (
@@ -1394,14 +1402,26 @@ function getAbcSignals(limit = 100) {
 }
 
 function getOpenAbcSignals() {
-  return all("SELECT * FROM abc_signals WHERE outcome='OPEN'");
+  return all("SELECT * FROM abc_signals WHERE outcome IN ('OPEN','ACTIVE')");
 }
 
-function activateAbcSignal(signalId) {
+function activateAbcSignal(signalId, tp1, tp2, tp3) {
   try {
-    run("UPDATE abc_signals SET outcome='ACTIVE' WHERE id=? AND outcome='OPEN'", [signalId]);
+    run("UPDATE abc_signals SET outcome='ACTIVE', active_ts=?, tp1=?, tp2=?, tp3=? WHERE id=? AND outcome='OPEN'",
+      [Date.now(), tp1 || null, tp2 || null, tp3 || null, signalId]);
     persist();
   } catch(e) { console.error('[DB] activateAbcSignal error:', e?.message); }
+}
+
+function updateAbcActive(id, fields) {
+  try {
+    const allowed = ['mfe_pct','mfe_price','progress_pct','outcome','active_ts','partial_closed'];
+    const keys = Object.keys(fields).filter(k => allowed.includes(k));
+    if (!keys.length) return;
+    const sets = keys.map(k => `${k}=?`).join(',');
+    const vals = keys.map(k => fields[k]);
+    run(`UPDATE abc_signals SET ${sets} WHERE id=?`, [...vals, id]);
+  } catch(e) { console.error('[DB] updateAbcActive error:', e?.message); }
 }
 
 function updateAbcOutcome(signalId, outcome, pnlPct, notes) {
@@ -1488,7 +1508,7 @@ function getAbcStats() {
 
 module.exports = {
   init, isReady, persist, persistNow, run, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
-  upsertMarketData, getLatestMarketData, insertAbcSignal, getAbcSignals, getOpenAbcSignals, activateAbcSignal, updateAbcOutcome, getAbcStats,
+  upsertMarketData, getLatestMarketData, insertAbcSignal, getAbcSignals, getOpenAbcSignals, activateAbcSignal, updateAbcActive, updateAbcOutcome, getAbcStats,
   insertSignal, refineSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,
   getWeights, updateWeights,
