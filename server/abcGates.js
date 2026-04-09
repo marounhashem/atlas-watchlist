@@ -3,16 +3,16 @@
 // ── ABC Gate Engine ───────────────────────────────────────────────────────────
 // Applies server-side filters to Pine ABC signals.
 // Pine has already done structural classification (A/B/C).
-// This layer adds: macro blocks, FXSSI gates, RR sanity, cooldown, verdict mapping.
+// This layer adds: macro blocks, crowd sentiment gates, RR sanity, cooldown, verdict mapping.
 
 const { isBankHoliday } = require('./marketHours');
 const { SYMBOLS } = require('./config');
 const { isPreEventRisk, isPostEventSuppressed } = require('./forexCalendar');
 
-// ── Verdict mapping by class × FXSSI ─────────────────────────────────────────
-// Class A: structurally strongest — FXSSI pass=PROCEED, fail=WATCH
-// Class B: needs FXSSI — FXSSI pass=PROCEED, fail=SKIP
-// Class C: weakest — FXSSI pass=WATCH, fail=SKIP
+// ── Verdict mapping by class × crowd sentiment ────────────────────────────────
+// Class A: structurally strongest — crowd sentiment pass=PROCEED, fail=WATCH
+// Class B: needs crowd sentiment — pass=PROCEED, fail=SKIP
+// Class C: weakest — crowd sentiment pass=WATCH, fail=SKIP
 function mapVerdict(pineClass, fxssiPassed, fxssiNoData) {
   if (fxssiPassed) {
     if (pineClass === 'A') return 'PROCEED';
@@ -30,32 +30,32 @@ function mapVerdict(pineClass, fxssiPassed, fxssiNoData) {
   return 'SKIP';
 }
 
-// ── FXSSI gate — same logic as scorer ────────────────────────────────────────
+// ── Crowd sentiment gate — same logic as scorer ───────────────────────────────
 // Returns { passed: bool, reason: string }
 function checkFxssi(symbol, fxssiData) {
   // Truly no data — market data record doesn't exist or has no FXSSI fields at all
   if (!fxssiData || (fxssiData.fxssi_long_pct == null && fxssiData.fxssi_short_pct == null)) {
-    return { passed: false, noData: true, reason: 'No FXSSI data for symbol' };
+    return { passed: false, noData: true, reason: 'No crowd sentiment data available for this symbol' };
   }
 
   const direction = fxssiData._direction;
   const trapped   = fxssiData.fxssi_trapped;
 
-  // Data present but no trapped crowd — crowd not sufficiently one-sided (neither side >60%)
+  // Data present but crowd not sufficiently one-sided (neither side >60%)
   if (trapped == null) {
     return {
       passed: false,
       noData: false,
-      reason: `No trapped crowd — long:${fxssiData.fxssi_long_pct?.toFixed(1)}% short:${fxssiData.fxssi_short_pct?.toFixed(1)}% (need >60% one side)`
+      reason: `Crowd split (long:${fxssiData.fxssi_long_pct?.toFixed(1)}% short:${fxssiData.fxssi_short_pct?.toFixed(1)}%) — no contrarian edge`
     };
   }
 
   const trappedAligned = (direction === 'LONG'  && trapped === 'SHORT') ||
                          (direction === 'SHORT' && trapped === 'LONG');
   if (!trappedAligned) {
-    return { passed: false, noData: false, reason: `Trapped ${trapped} not aligned with ${direction}` };
+    return { passed: false, noData: false, reason: 'Crowd aligned with direction — no contrarian squeeze' };
   }
-  return { passed: true, noData: false, reason: `Trapped ${trapped} aligned with ${direction}` };
+  return { passed: true, noData: false, reason: `Crowd majority ${trapped === 'SHORT' ? 'short' : 'long'} — contrarian ${direction.toLowerCase()} pressure` };
 }
 
 // ── Gravity proximity gate ────────────────────────────────────────────────────
@@ -167,7 +167,7 @@ function runAbcGates(symbol, payload, fxssiData, db) {
   if (fxssiData) fxssiData._direction = direction;
   if (fxssiData) fxssiData._entry     = entry;
 
-  // 6. FXSSI trapped gate
+  // 6. Crowd sentiment gate
   const fxssiCheck = checkFxssi(symbol, fxssiData);
 
   // 7. Gravity proximity gate
@@ -176,10 +176,10 @@ function runAbcGates(symbol, payload, fxssiData, db) {
     return { verdict: 'SKIP', blocked: true, reason: gravityCheck.reason };
   }
 
-  // 8. Class × FXSSI verdict mapping
+  // 8. Class × crowd sentiment verdict mapping
   const verdict = mapVerdict(pineClass, fxssiCheck.passed, fxssiCheck.noData);
   if (verdict === 'SKIP') {
-    return { verdict: 'SKIP', blocked: true, reason: `Class ${pineClass} + FXSSI fail → SKIP. ${fxssiCheck.reason}` };
+    return { verdict: 'SKIP', blocked: true, reason: `Class ${pineClass} + crowd sentiment fail → SKIP. ${fxssiCheck.reason}` };
   }
 
   // 9. Intel key levels context (annotation only)
