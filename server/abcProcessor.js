@@ -38,6 +38,27 @@ function getAbcDp(symbol) {
   return 100000; // 5dp forex majors/minors
 }
 
+// ── Asset class caps for SL and TP distance ─────────────────────────────────
+function getSlMaxPct(symbol) {
+  const INDICES = ['US30','US100','US500','DE40','UK100','J225','HK50','CN50'];
+  const CRYPTO  = ['BTCUSD','ETHUSD'];
+  const COMMODITIES = ['GOLD','SILVER','OILWTI','COPPER','PLATINUM'];
+  if (INDICES.includes(symbol))    return 0.02;  // 2%
+  if (CRYPTO.includes(symbol))     return 0.05;  // 5%
+  if (COMMODITIES.includes(symbol)) return 0.03; // 3%
+  return 0.015; // 1.5% forex
+}
+
+function getTpMaxPct(symbol) {
+  const INDICES = ['US30','US100','US500','DE40','UK100','J225','HK50','CN50'];
+  const CRYPTO  = ['BTCUSD','ETHUSD'];
+  const COMMODITIES = ['GOLD','SILVER','OILWTI','COPPER','PLATINUM'];
+  if (INDICES.includes(symbol))    return 0.05;  // 5%
+  if (CRYPTO.includes(symbol))     return 0.15;  // 15%
+  if (COMMODITIES.includes(symbol)) return 0.08; // 8%
+  return 0.03; // 3% forex
+}
+
 // ── Process ABC webhook ─────────────────────────────────────────────────────
 function processAbcWebhook(data, deps) {
   const { db, broadcast, SYMBOLS } = deps;
@@ -105,17 +126,33 @@ function processAbcWebhook(data, deps) {
       : Math.round((entry + slAtr * 1.5) * dp) / dp);
   }
 
-  const slDist = Math.abs(entry - sl);
+  // ── SL distance cap by asset class ──────────────────────────────────────
+  const slMaxPct = getSlMaxPct(sym);
+  let slDist = Math.abs(entry - sl);
+  const slPct = entry > 0 ? slDist / entry : 0;
+  if (slPct > slMaxPct && entry > 0) {
+    const cappedDist = entry * slMaxPct;
+    console.log(`[ABC] ${sym} SL capped at ${(slMaxPct*100).toFixed(1)}% (structural SL was ${(slPct*100).toFixed(2)}% away)`);
+    sl = direction === 'LONG'
+      ? Math.round((entry - cappedDist) * dp) / dp
+      : Math.round((entry + cappedDist) * dp) / dp;
+    slDist = cappedDist;
+  }
 
   // TP1 — 1:1 RR
   let tp1 = direction === 'LONG'
     ? Math.round((entry + slDist) * dp) / dp
     : Math.round((entry - slDist) * dp) / dp;
 
+  // ── TP distance cap by asset class ────────────────────────────────────
+  const tpMaxPct = getTpMaxPct(sym);
+  const tpMaxDist = entry * tpMaxPct;
+
   // TP2 — structural swing target or 2.5R fallback
   let tp2;
   const swing1Valid = swing1 && !isNaN(swing1)
-    && (direction === 'LONG' ? swing1 > entry : swing1 < entry);
+    && (direction === 'LONG' ? swing1 > entry : swing1 < entry)
+    && Math.abs(swing1 - entry) <= tpMaxDist;
   if (swing1Valid) {
     tp2 = Math.round(swing1 * dp) / dp;
   } else {
@@ -127,7 +164,8 @@ function processAbcWebhook(data, deps) {
   // TP3 — second swing or 3.5R fallback
   let tp3;
   const swing2Valid = swing2 && !isNaN(swing2)
-    && (direction === 'LONG' ? swing2 > tp2 : swing2 < tp2);
+    && (direction === 'LONG' ? swing2 > tp2 : swing2 < tp2)
+    && Math.abs(swing2 - entry) <= tpMaxDist;
   if (swing2Valid) {
     tp3 = Math.round(swing2 * dp) / dp;
   } else {
@@ -138,7 +176,7 @@ function processAbcWebhook(data, deps) {
 
   let tp = tp2;  // main TP = structural target
 
-  // RR gate — after structural placement
+  // RR gate — after structural placement + caps
   let rr = slDist > 0
     ? Math.round((Math.abs(tp - entry) / slDist) * 10) / 10
     : 0;
