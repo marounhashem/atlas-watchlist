@@ -279,6 +279,51 @@ function initSchema() {
   try { db.run('ALTER TABLE abc_signals ADD COLUMN active_ts INTEGER'); } catch(e) {}
   try { db.run('ALTER TABLE abc_signals ADD COLUMN partial_closed INTEGER DEFAULT 0'); } catch(e) {}
   console.log('[DB] abc_signals table ready');
+  // Phase 1 ABC rebuild migrations
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN abc_version TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN ob_top REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN ob_bot REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN pre_bos_swing REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN rsi_at_entry REAL'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN trail_sl_sent INTEGER DEFAULT 0'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN breakdown TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE abc_signals ADD COLUMN crowd_gate TEXT'); } catch(e) {}
+
+  // Recommendation dedup persistence
+  db.run(`CREATE TABLE IF NOT EXISTS abc_rec_sent (
+    signal_id INTEGER NOT NULL,
+    rec_type  TEXT NOT NULL,
+    ts        INTEGER NOT NULL,
+    PRIMARY KEY (signal_id, rec_type)
+  )`);
+
+  // Daily bias store (replaces request.security)
+  db.run(`CREATE TABLE IF NOT EXISTS daily_bias (
+    symbol     TEXT PRIMARY KEY,
+    direction  TEXT NOT NULL,
+    close      REAL,
+    ema200     REAL,
+    above_cloud INTEGER DEFAULT 0,
+    ts         INTEGER NOT NULL
+  )`);
+
+  // Class C observation signals
+  db.run(`CREATE TABLE IF NOT EXISTS class_c_signals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT, direction TEXT, score INTEGER,
+    verdict TEXT, entry REAL, sl REAL,
+    tp1 REAL, tp2 REAL, tp3 REAL, rr REAL,
+    session TEXT, reasoning TEXT, breakdown TEXT,
+    outcome TEXT DEFAULT 'OPEN',
+    outcome_ts INTEGER, pnl_pct REAL, mfe_pct REAL,
+    mfe_price REAL, progress_pct REAL,
+    crowd_gate TEXT, abc_version TEXT,
+    ob_top REAL, ob_bot REAL, pre_bos_swing REAL,
+    active_ts INTEGER, partial_closed INTEGER DEFAULT 0,
+    trail_sl_sent INTEGER DEFAULT 0, rsi_at_entry REAL,
+    ts INTEGER, expires_at INTEGER, raw_payload TEXT
+  )`);
+  console.log('[DB] abc_rec_sent, daily_bias, class_c_signals tables ready');
 
   db.run(`CREATE TABLE IF NOT EXISTS weights (
     id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL, ts INTEGER NOT NULL,
@@ -1380,15 +1425,20 @@ function getFxssiHistoryStatus() {
 function insertAbcSignal(sig) {
   try {
     run(`INSERT INTO abc_signals
-      (symbol, direction, pine_class, score, verdict, entry, sl, tp, rr,
-       session, reasoning, outcome, ts, expires_at, fxssi_stale, fxssi_gate, raw_payload)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      (symbol, direction, pine_class, score, verdict, entry, sl, tp, tp1, tp2, tp3, rr,
+       session, reasoning, breakdown, outcome, ts, expires_at,
+       fxssi_stale, fxssi_gate, crowd_gate, abc_version,
+       ob_top, ob_bot, pre_bos_swing, raw_payload)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [sig.symbol, sig.direction, sig.pineClass, sig.score || 0, sig.verdict,
-       sig.entry, sig.sl, sig.tp, sig.rr, sig.session, sig.reasoning,
+       sig.entry, sig.sl, sig.tp, sig.tp1 || null, sig.tp2 || null, sig.tp3 || null, sig.rr,
+       sig.session, sig.reasoning, sig.breakdown || null,
        'OPEN', sig.ts || Date.now(), sig.expiresAt || (Date.now() + 8 * 3600000),
-       sig.fxssiStale ? 1 : 0, sig.fxssiGate || 'NO_DATA', sig.rawPayload || null]);
+       sig.fxssiStale ? 1 : 0, sig.fxssiGate || sig.crowdGate || 'NO_DATA',
+       sig.crowdGate || sig.fxssiGate || 'NO_DATA', sig.abcVersion || null,
+       sig.obTop || null, sig.obBot || null, sig.preBosSwing || null,
+       sig.rawPayload || null]);
     persist();
-    // Get last inserted id
     const row = get('SELECT last_insert_rowid() as id');
     return row?.id || null;
   } catch(e) {
@@ -1405,17 +1455,17 @@ function getOpenAbcSignals() {
   return all("SELECT * FROM abc_signals WHERE outcome IN ('OPEN','ACTIVE')");
 }
 
-function activateAbcSignal(signalId, tp1, tp2, tp3) {
+function activateAbcSignal(signalId, tp1, tp2, tp3, rsiAtEntry) {
   try {
-    run("UPDATE abc_signals SET outcome='ACTIVE', active_ts=?, tp1=?, tp2=?, tp3=? WHERE id=? AND outcome='OPEN'",
-      [Date.now(), tp1 || null, tp2 || null, tp3 || null, signalId]);
+    run("UPDATE abc_signals SET outcome='ACTIVE', active_ts=?, tp1=?, tp2=?, tp3=?, rsi_at_entry=? WHERE id=? AND outcome='OPEN'",
+      [Date.now(), tp1 || null, tp2 || null, tp3 || null, rsiAtEntry || null, signalId]);
     persist();
   } catch(e) { console.error('[DB] activateAbcSignal error:', e?.message); }
 }
 
 function updateAbcActive(id, fields) {
   try {
-    const allowed = ['mfe_pct','mfe_price','progress_pct','outcome','active_ts','partial_closed'];
+    const allowed = ['mfe_pct','mfe_price','progress_pct','outcome','active_ts','partial_closed','trail_sl_sent'];
     const keys = Object.keys(fields).filter(k => allowed.includes(k));
     if (!keys.length) return;
     const sets = keys.map(k => `${k}=?`).join(',');
@@ -1506,6 +1556,98 @@ function getAbcStats() {
   }
 }
 
+// ── Daily bias ──────────────────────────────────────────────────────────────
+function upsertDailyBias(symbol, data) {
+  try {
+    run(`INSERT OR REPLACE INTO daily_bias (symbol, direction, close, ema200, above_cloud, ts)
+      VALUES (?,?,?,?,?,?)`,
+      [symbol, data.direction, data.close || null, data.ema200 || null, data.aboveCloud ? 1 : 0, data.ts || Date.now()]);
+    persist();
+  } catch(e) { console.error('[DB] upsertDailyBias error:', e?.message); }
+}
+
+function getDailyBias(symbol) {
+  return get('SELECT * FROM daily_bias WHERE symbol=?', [symbol]);
+}
+
+// ── Class C signals ─────────────────────────────────────────────────────────
+function insertClassCSignal(sig) {
+  try {
+    run(`INSERT INTO class_c_signals
+      (symbol, direction, score, verdict, entry, sl, tp1, tp2, tp3, rr,
+       session, reasoning, breakdown, outcome, crowd_gate, abc_version,
+       ob_top, ob_bot, pre_bos_swing, ts, expires_at, raw_payload)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [sig.symbol, sig.direction, sig.score || 0, sig.verdict || 'OBSERVE',
+       sig.entry, sig.sl, sig.tp1, sig.tp2, sig.tp3, sig.rr,
+       sig.session, sig.reasoning, sig.breakdown || null,
+       'OPEN', sig.crowdGate || null, sig.abcVersion || null,
+       sig.obTop || null, sig.obBot || null, sig.preBosSwing || null,
+       sig.ts || Date.now(), sig.expiresAt || (Date.now() + 8 * 3600000),
+       sig.rawPayload || null]);
+    persist();
+    const row = get('SELECT last_insert_rowid() as id');
+    return row?.id || null;
+  } catch(e) {
+    console.error('[DB] insertClassCSignal error:', e?.message);
+    return null;
+  }
+}
+
+function getOpenClassCSignals() {
+  return all("SELECT * FROM class_c_signals WHERE outcome IN ('OPEN','ACTIVE')");
+}
+
+function getClassCSignals(limit = 100) {
+  return all('SELECT * FROM class_c_signals ORDER BY ts DESC LIMIT ?', [limit]);
+}
+
+function activateClassCSignal(id, tp1, tp2, tp3) {
+  try {
+    run("UPDATE class_c_signals SET outcome='ACTIVE', active_ts=? WHERE id=? AND outcome='OPEN'",
+      [Date.now(), id]);
+    persist();
+  } catch(e) { console.error('[DB] activateClassCSignal error:', e?.message); }
+}
+
+function updateClassCActive(id, fields) {
+  try {
+    const allowed = ['mfe_pct','mfe_price','progress_pct','outcome','active_ts','partial_closed','trail_sl_sent'];
+    const keys = Object.keys(fields).filter(k => allowed.includes(k));
+    if (!keys.length) return;
+    const sets = keys.map(k => `${k}=?`).join(',');
+    const vals = keys.map(k => fields[k]);
+    run(`UPDATE class_c_signals SET ${sets} WHERE id=?`, [...vals, id]);
+  } catch(e) { console.error('[DB] updateClassCActive error:', e?.message); }
+}
+
+function updateClassCOutcome(id, outcome, pnl, notes) {
+  try {
+    run('UPDATE class_c_signals SET outcome=?, outcome_ts=?, pnl_pct=? WHERE id=?',
+      [outcome, Date.now(), pnl || null, id]);
+    persist();
+  } catch(e) { console.error('[DB] updateClassCOutcome error:', e?.message); }
+}
+
+// ── ABC rec dedup ───────────────────────────────────────────────────────────
+function isAbcRecSent(signalId, recType) {
+  const row = get('SELECT 1 FROM abc_rec_sent WHERE signal_id=? AND rec_type=?', [signalId, recType]);
+  return !!row;
+}
+
+function markAbcRecSent(signalId, recType) {
+  try {
+    run('INSERT OR IGNORE INTO abc_rec_sent (signal_id, rec_type, ts) VALUES (?,?,?)',
+      [signalId, recType, Date.now()]);
+  } catch(e) {}
+}
+
+function isAbcInfoRecSentRecently(signalId) {
+  const row = get('SELECT 1 FROM abc_rec_sent WHERE signal_id=? AND rec_type=? AND ts>?',
+    [signalId, 'INFO', Date.now() - 7200000]);
+  return !!row;
+}
+
 module.exports = {
   init, isReady, persist, persistNow, run, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
   upsertMarketData, getLatestMarketData, insertAbcSignal, getAbcSignals, getOpenAbcSignals, activateAbcSignal, updateAbcActive, updateAbcOutcome, getAbcStats,
@@ -1526,5 +1668,8 @@ module.exports = {
   upsertCOTData, getCOTData, getAllCOTData,
   upsertRateData, getRateData, getAllRateData,
   upsertConsensus, getConsensus, getAllConsensus,
-  insertFxssiHistory, getFxssiHistorySnapshot, getFxssiHistoryStatus
+  insertFxssiHistory, getFxssiHistorySnapshot, getFxssiHistoryStatus,
+  upsertDailyBias, getDailyBias, insertClassCSignal, getOpenClassCSignals, getClassCSignals,
+  activateClassCSignal, updateClassCActive, updateClassCOutcome,
+  isAbcRecSent, markAbcRecSent, isAbcInfoRecSentRecently
 };
