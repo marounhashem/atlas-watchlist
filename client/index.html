@@ -385,26 +385,52 @@
   .dir-long{color:var(--proceed);}
   .dir-short{color:var(--short);}
   .card-lvl-grid{display:flex;flex-direction:column;gap:3px;}
+
+  /* Entry box — grey accent */
+  .card-lvl-entry{
+    background:var(--surface-inset,#131320);border:1px solid var(--border2,#1e1e2e);
+    border-left:3px solid var(--text2);border-radius:5px;padding:6px 10px;
+    display:flex;justify-content:space-between;align-items:center;transition:all .3s;
+  }
+  .card-lvl-entry .card-lvl-name{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);}
+  .card-lvl-entry .card-lvl-val{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--text);}
+
+  /* SL box — red accent */
+  .card-lvl-sl{
+    background:var(--surface-inset,#131320);border:1px solid var(--border2,#1e1e2e);
+    border-left:3px solid var(--short);border-radius:5px;padding:5px 10px;
+    display:flex;justify-content:space-between;align-items:center;transition:all .3s;
+  }
+  .card-lvl-sl .card-lvl-name{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--short);opacity:.7;}
+  .card-lvl-sl .card-lvl-val{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--short);}
+
+  /* TP group — green accent, stacked */
+  .card-lvl-tp-group{
+    background:var(--surface-inset,#131320);border:1px solid var(--border2,#1e1e2e);
+    border-left:3px solid var(--proceed);border-radius:5px;padding:4px 10px;
+    display:flex;flex-direction:column;gap:2px;transition:all .3s;
+  }
+  .card-lvl-tp-row{display:flex;justify-content:space-between;align-items:center;padding:2px 0;}
+  .card-lvl-tp-row+.card-lvl-tp-row{border-top:1px solid var(--border2,#1e1e2e);}
+  .card-lvl-tp-row .card-lvl-name{font-family:'JetBrains Mono',monospace;font-size:13px;letter-spacing:.06em;color:var(--muted);font-weight:400;}
+  .card-lvl-tp-row .card-lvl-val{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:400;color:var(--proceed);}
+  .tp-main .card-lvl-val{font-weight:700;}
+  .tp-main .card-lvl-name{font-weight:700;}
+
+  /* Light theme level box overrides */
+  [data-theme="light"] .card-lvl-entry,
+  [data-theme="light"] .card-lvl-sl,
+  [data-theme="light"] .card-lvl-tp-group{background:#e8eaee !important;border-color:#d0d3dc !important;}
+  [data-theme="light"] .card-lvl-tp-row+.card-lvl-tp-row{border-top-color:#d0d3dc !important;}
+
+  /* Legacy .card-lvl fallback for old cards */
   .card-lvl{
-    background:linear-gradient(145deg,#131320,#0f0f1c);
-    border:1px solid #1e1e2e;border-radius:4px;
-    padding:3px 7px;
-    display:grid;grid-template-columns:40px 1fr;align-items:center;gap:4px;
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.03),0 1px 3px rgba(0,0,0,.3);
+    background:var(--surface-inset,#131320);border:1px solid var(--border2,#1e1e2e);border-radius:4px;
+    padding:3px 7px;display:grid;grid-template-columns:40px 1fr;align-items:center;gap:4px;
   }
-  [data-theme="light"] .card-lvl {
-    background: #e8eaee !important;
-    border-color: #d0d3dc !important;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.5), 0 1px 2px rgba(0,0,0,.05) !important;
-  }
-  .card-lvl-name{
-    font-size:8px;font-weight:700;
-    letter-spacing:.14em;text-transform:uppercase;color:var(--text2);text-align:right;
-  }
-  .card-lvl-val{
-    font-family:'JetBrains Mono',monospace;
-    font-size:12px;font-weight:700;line-height:1.2;
-  }
+  [data-theme="light"] .card-lvl{background:#e8eaee !important;border-color:#d0d3dc !important;}
+  .card-lvl-name{font-size:8px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--text2);text-align:right;}
+  .card-lvl-val{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;line-height:1.2;}
   .lv-entry{color:var(--text2);}
   .lv-sl{color:var(--short);}
   .lv-tp{color:var(--proceed);}
@@ -1624,11 +1650,13 @@ function renderCard(sig, isPast) {
     + '<div class="card-levels">'
     + '<div class="card-direction dir-'+dir.toLowerCase()+'">'+dir+'</div>'
     + '<div class="card-lvl-grid">'
-    + '<div class="card-lvl"><span class="card-lvl-name">Entry</span><span class="card-lvl-val lv-entry">'+(sig.entry||'—')+'</span></div>'
-    + '<div class="card-lvl"><span class="card-lvl-name">Stop</span><span class="card-lvl-val lv-sl">'+(sig.sl||'—')+'</span></div>'
-    + '<div class="card-lvl"><span class="card-lvl-name">TP1</span><span class="card-lvl-val lv-tp1">'+(sig.tp1||'—')+'</span></div>'
-    + '<div class="card-lvl"><span class="card-lvl-name">TP2</span><span class="card-lvl-val lv-tp">'+(sig.tp2||sig.tp||'—')+'</span></div>'
-    + '<div class="card-lvl"><span class="card-lvl-name">TP3</span><span class="card-lvl-val lv-tp3">'+(sig.tp3||'—')+'</span></div>'
+    + '<div class="card-lvl-entry"><span class="card-lvl-name">Entry</span><span class="card-lvl-val">'+(sig.entry||'—')+'</span></div>'
+    + '<div class="card-lvl-sl"><span class="card-lvl-name">Stop</span><span class="card-lvl-val">'+(sig.sl||'—')+'</span></div>'
+    + '<div class="card-lvl-tp-group">'
+    + '<div class="card-lvl-tp-row tp-secondary"><span class="card-lvl-name">TP1</span><span class="card-lvl-val">'+(sig.tp1||'—')+'</span></div>'
+    + '<div class="card-lvl-tp-row tp-main"><span class="card-lvl-name">TP2</span><span class="card-lvl-val">'+(sig.tp2||sig.tp||'—')+'</span></div>'
+    + '<div class="card-lvl-tp-row tp-secondary"><span class="card-lvl-name">TP3</span><span class="card-lvl-val">'+(sig.tp3||'—')+'</span></div>'
+    + '</div>'
     + '</div>'
     + '<div class="card-pills">'
     + '<span class="card-pill">R:R '+(sig.rr||'—')+'</span>'
