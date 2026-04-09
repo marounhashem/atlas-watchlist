@@ -23,7 +23,7 @@ const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTe
 const { runCalendarCheck, runCalendarFetch, isPreEventRisk, isPostEventSuppressed, getUpcomingHighImpactEvents } = require('./forexCalendar');
 const { collectFullHistory, collectRecentHistory, querySnapshot, cancelCollection, isCollecting } = require('./fxssi-history-collector');
 const { runAbcGates } = require('./abcGates');
-const { processAbcWebhook: _processAbcWebhook, processDailyBiasWebhook: _processDailyBiasWebhook, ABC_VERSION } = require('./abcProcessor');
+const { processAbcWebhook: _processAbcWebhook, ABC_VERSION } = require('./abcProcessor');
 const { checkAbcOutcomes } = require('./abcManagement');
 const { SYMBOLS } = require('./config');
 
@@ -61,9 +61,6 @@ const server = http.createServer((req, res) => {
       } else if (req.url === '/webhook/pine-abc') {
         try { processAbcWebhook(parsed); }
         catch(e) { console.error('[Webhook] ABC error:', e.message); }
-      } else if (req.url === '/webhook/pine-daily-bias') {
-        try { _processDailyBiasWebhook(parsed, { db }); }
-        catch(e) { console.error('[Webhook] Daily bias error:', e.message); }
       } else if (req.url === '/webhook/fxssi') {
         try { processFxssiWebhook(parsed); }
         catch(e) { console.error('[Webhook] FXSSI error:', e.message); }

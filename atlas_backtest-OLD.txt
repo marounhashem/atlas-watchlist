@@ -1,0 +1,130 @@
+//@version=5
+strategy("ATLAS // BACKTEST", overlay=true, pyramiding=0,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=2,
+     initial_capital=10000, commission_value=0.02, slippage=1,
+     calc_on_every_tick=false)
+
+// ── INPUTS ──────────────────────────────────────────────────────────────────
+emaLen   = input.int(200, "EMA Length")
+rsiLen   = input.int(14, "RSI Length")
+atrLen   = input.int(14, "ATR Length")
+macdFast = input.int(12, "MACD Fast")
+macdSlow = input.int(26, "MACD Slow")
+macdSig  = input.int(9, "MACD Signal")
+minRR    = input.float(1.5, "Min R:R Filter")
+startDate = input.time(timestamp("2026-03-31"), "Start Date")
+
+// ── INDICATORS — CURRENT TF ────────────────────────────────────────────────
+ema200  = ta.ema(close, emaLen)
+rsi14   = ta.rsi(close, rsiLen)
+atr14   = ta.atr(atrLen)
+vwapVal = ta.vwap(hlc3)
+[macdLine, signalLine, macdHist] = ta.macd(close, macdFast, macdSlow, macdSig)
+
+// ── MULTI-TIMEFRAME EMA200 ─────────────────────────────────────────────────
+ema200_1d = request.security(syminfo.tickerid, "1D", ta.ema(close, emaLen), lookahead=barmerge.lookahead_off)
+ema200_4h = request.security(syminfo.tickerid, "240", ta.ema(close, emaLen), lookahead=barmerge.lookahead_off)
+ema200_1h = request.security(syminfo.tickerid, "60",  ta.ema(close, emaLen), lookahead=barmerge.lookahead_off)
+
+// ── MULTI-TIMEFRAME STRUCTURE ───────────────────────────────────────────────
+// Bullish: close > prior 5-bar high | Bearish: close < prior 5-bar low
+f_struct(_close, _high, _low) =>
+    bull = _close > ta.highest(_high, 5)[1]
+    bear = _close < ta.lowest(_low, 5)[1]
+    bull ? 1 : bear ? -1 : 0
+
+struct_1d  = request.security(syminfo.tickerid, "1D",  f_struct(close, high, low), lookahead=barmerge.lookahead_off)
+struct_4h  = request.security(syminfo.tickerid, "240", f_struct(close, high, low), lookahead=barmerge.lookahead_off)
+struct_1h  = request.security(syminfo.tickerid, "60",  f_struct(close, high, low), lookahead=barmerge.lookahead_off)
+struct_15m = request.security(syminfo.tickerid, "15",  f_struct(close, high, low), lookahead=barmerge.lookahead_off)
+
+// ── BIAS SCORE (-8 to +8) ──────────────────────────────────────────────────
+biasScore = 0.0
+biasScore += close > ema200_1d ? 3.0 : -3.0   // 1d EMA direction
+biasScore += close > ema200_4h ? 2.0 : -2.0   // 4h EMA direction
+biasScore += close > ema200_1h ? 1.5 : -1.5   // 1h EMA direction
+biasScore += rsi14 > 50 ? 1.0 : -1.0          // RSI bias (applied twice per scorer)
+biasScore += rsi14 > 50 ? 1.0 : -1.0
+biasScore += macdHist > 0 ? 1.0 : -1.0        // MACD histogram
+biasScore += close > vwapVal ? 0.5 : -0.5     // VWAP
+
+// ── DIRECTION ───────────────────────────────────────────────────────────────
+isLong  = biasScore >= 2.0
+isShort = biasScore <= -2.0
+
+// ── HARD GATES ──────────────────────────────────────────────────────────────
+longBlocked  = rsi14 < 40
+longBlocked := longBlocked or (struct_1d == -1)
+longBlocked := longBlocked or (struct_1h == -1 and struct_4h == -1)
+
+shortBlocked  = rsi14 > 75
+shortBlocked := shortBlocked or (struct_1d == 1)
+shortBlocked := shortBlocked or (struct_1h == 1 and struct_4h == 1)
+
+// ── WEIGHTED STRUCTURE SCORE ────────────────────────────────────────────────
+// Aligned = structure matches direction. Weight × 1 if aligned, 0 if not.
+longStructScore  = (struct_1d  == 1 ? 3.0 : 0.0) + (struct_4h == 1 ? 2.0 : 0.0) + (struct_1h == 1 ? 1.5 : 0.0) + (struct_15m == 1 ? 1.0 : 0.0)
+shortStructScore = (struct_1d  == -1 ? 3.0 : 0.0) + (struct_4h == -1 ? 2.0 : 0.0) + (struct_1h == -1 ? 1.5 : 0.0) + (struct_15m == -1 ? 1.0 : 0.0)
+weightedStruct   = isLong ? longStructScore : isShort ? shortStructScore : 0.0
+
+structGate = weightedStruct >= 1.0
+
+// ── ENTRY / SL / TP ────────────────────────────────────────────────────────
+longEntry  = close + atr14 * 0.35
+shortEntry = close - atr14 * 0.35
+
+longSL  = longEntry  - atr14 * 1.5
+shortSL = shortEntry + atr14 * 1.5
+
+longTP1  = longEntry  + math.abs(longEntry  - longSL)            // 1:1 RR
+longTP2  = longEntry  + atr14 * 3.0                              // main target
+longTP3  = longTP2    + math.abs(longEntry  - longSL) * 0.5      // stretch
+
+shortTP1 = shortEntry - math.abs(shortEntry - shortSL)
+shortTP2 = shortEntry - atr14 * 3.0
+shortTP3 = shortTP2   - math.abs(shortEntry - shortSL) * 0.5
+
+// ── RR GATE ─────────────────────────────────────────────────────────────────
+longRR  = math.abs(longTP2  - longEntry)  / math.abs(longSL  - longEntry)
+shortRR = math.abs(shortTP2 - shortEntry) / math.abs(shortSL - shortEntry)
+rrPass  = isLong ? longRR >= minRR : isShort ? shortRR >= minRR : false
+
+// ── FINAL SIGNAL ────────────────────────────────────────────────────────────
+afterStart = time >= startDate
+noPosition = strategy.position_size == 0
+
+goLong  = afterStart and noPosition and isLong  and not longBlocked  and structGate and rrPass
+goShort = afterStart and noPosition and isShort and not shortBlocked and structGate and rrPass
+
+// ── STRATEGY EXECUTION ─────────────────────────────────────────────────────
+if goLong
+    strategy.entry("LONG", strategy.long)
+    strategy.exit("LONG_EXIT", "LONG", stop=longSL, limit=longTP2)
+    alert('{"symbol":"' + syminfo.ticker + '","direction":"LONG","entry":' + str.tostring(longEntry) + ',"sl":' + str.tostring(longSL) + ',"tp1":' + str.tostring(longTP1) + ',"tp2":' + str.tostring(longTP2) + ',"tp3":' + str.tostring(longTP3) + ',"rr":' + str.tostring(math.round(longRR * 100) / 100) + ',"biasScore":' + str.tostring(biasScore) + ',"weightedStruct":' + str.tostring(weightedStruct) + ',"time":"' + str.tostring(timenow) + '"}', alert.freq_once_per_bar)
+
+if goShort
+    strategy.entry("SHORT", strategy.short)
+    strategy.exit("SHORT_EXIT", "SHORT", stop=shortSL, limit=shortTP2)
+    alert('{"symbol":"' + syminfo.ticker + '","direction":"SHORT","entry":' + str.tostring(shortEntry) + ',"sl":' + str.tostring(shortSL) + ',"tp1":' + str.tostring(shortTP1) + ',"tp2":' + str.tostring(shortTP2) + ',"tp3":' + str.tostring(shortTP3) + ',"rr":' + str.tostring(math.round(shortRR * 100) / 100) + ',"biasScore":' + str.tostring(biasScore) + ',"weightedStruct":' + str.tostring(weightedStruct) + ',"time":"' + str.tostring(timenow) + '"}', alert.freq_once_per_bar)
+
+// ── PLOTS — OVERLAY ─────────────────────────────────────────────────────────
+inLong  = strategy.position_size > 0
+inShort = strategy.position_size < 0
+
+plot(inLong ? longSL   : inShort ? shortSL   : na, "SL",  color=color.red,    style=plot.style_linebr, linewidth=1)
+plot(inLong ? longTP1  : inShort ? shortTP1  : na, "TP1", color=color.yellow,  style=plot.style_linebr, linewidth=1)
+plot(inLong ? longTP2  : inShort ? shortTP2  : na, "TP2", color=color.green,   style=plot.style_linebr, linewidth=2)
+plot(inLong ? longTP3  : inShort ? shortTP3  : na, "TP3", color=color.teal,    style=plot.style_linebr, linewidth=1)
+
+// Entry marker
+plotshape(goLong,  "Long Signal",  shape.triangleup,   location.belowbar, color.green, size=size.small)
+plotshape(goShort, "Short Signal", shape.triangledown,  location.abovebar, color.red,   size=size.small)
+
+// ── PLOTS — SEPARATE PANES ─────────────────────────────────────────────────
+plot(biasScore,     "Bias Score",      color=biasScore > 0 ? color.green : color.red, display=display.pane)
+hline(2,  "Long Threshold",  color=color.gray, linestyle=hline.style_dotted, display=display.all)
+hline(-2, "Short Threshold", color=color.gray, linestyle=hline.style_dotted, display=display.all)
+hline(0,  "Zero",            color=color.gray, linestyle=hline.style_dashed, display=display.all)
+
+plot(weightedStruct, "Weighted Structure", color=color.orange, display=display.pane)
+hline(1,  "Min Struct Gate",  color=color.gray, linestyle=hline.style_dotted, display=display.all)

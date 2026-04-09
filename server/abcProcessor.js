@@ -199,17 +199,11 @@ function processAbcWebhook(data, deps) {
     : ((direction === 'LONG'  && fxssiData.fxssi_trapped === 'SHORT') ||
        (direction === 'SHORT' && fxssiData.fxssi_trapped === 'LONG'))  ? 'ALIGNED' : 'MISALIGNED';
 
-  // Daily bias
-  let dailyAligned = false;
-  let dailyDirection = null;
-  try {
-    const bias = db.getDailyBias(sym);
-    if (bias) {
-      dailyDirection = bias.direction;
-      dailyAligned = (direction === 'LONG' && dailyDirection === 'BULL') ||
-                     (direction === 'SHORT' && dailyDirection === 'BEAR');
-    }
-  } catch(e) {}
+  // Daily bias — calculated from market_data on every ABC webhook
+  let dailyDirection = calculateDailyBias(sym, db);
+  let dailyAligned = (direction === 'LONG' && dailyDirection === 'BULL') ||
+                     (direction === 'SHORT' && dailyDirection === 'BEAR') ||
+                     dailyDirection === 'MIXED';
 
   // Session
   const session = getSessionNow ? getSessionNow() : 'unknown';
@@ -294,30 +288,34 @@ function processAbcWebhook(data, deps) {
   });
 }
 
-// ── Process daily bias webhook ──────────────────────────────────────────────
-function processDailyBiasWebhook(data, deps) {
-  const { db } = deps;
+// ── Calculate daily bias from existing market_data ──────────────────────────
+// No separate Pine script needed — reads ema200, bias, close from market_data
+function calculateDailyBias(symbol, db) {
+  try {
+    const md = db.getLatestMarketData(symbol);
+    if (!md || !md.close) return 'MIXED';
 
-  if (!data || !Object.keys(data).length) { console.log('[Daily Bias] Empty body — skipping'); return; }
+    const close = md.close;
+    const ema200 = md.ema200;
+    const bias = md.bias || 0;
 
-  const rawSym = data.symbol || data.ticker || null;
-  if (!rawSym) { console.log('[Daily Bias] No symbol'); return; }
-  const sym = normalizeSymbol(rawSym);
+    let direction = 'MIXED';
+    if (close > ema200 && bias >= 1) direction = 'BULL';
+    else if (close < ema200 && bias <= -1) direction = 'BEAR';
 
-  const direction = (data.direction || '').toUpperCase();
-  if (!['BULL','BEAR','MIXED'].includes(direction)) {
-    console.log(`[Daily Bias] ${sym} — invalid direction: ${direction}`); return;
+    // Store in daily_bias table for stats/debug
+    db.upsertDailyBias(symbol, {
+      direction,
+      close,
+      ema200: ema200 || null,
+      aboveCloud: 0,
+      ts: Date.now()
+    });
+
+    return direction;
+  } catch(e) {
+    return 'MIXED';
   }
-
-  db.upsertDailyBias(sym, {
-    direction,
-    close:      data.close || null,
-    ema200:     data.ema200 || null,
-    aboveCloud: !!data.aboveCloud,
-    ts:         data.ts || Date.now()
-  });
-
-  console.log(`[Daily Bias] ${sym} → ${direction}`);
 }
 
-module.exports = { processAbcWebhook, processDailyBiasWebhook, getAbcDp, ABC_VERSION };
+module.exports = { processAbcWebhook, calculateDailyBias, getAbcDp, ABC_VERSION };
