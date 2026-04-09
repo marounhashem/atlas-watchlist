@@ -1,0 +1,323 @@
+//@version=5
+indicator("ATLAS // ABC LIVE", overlay=true)
+
+// ── INPUTS ──────────────────────────────────────────────────────────────────
+swingLen     = input.int(10,    "Swing Lookback",        minval=5,  maxval=20,  step=5)
+obLookback   = input.int(5,     "Order Block Lookback",  minval=3,  maxval=10,  step=1)
+rsiLen       = input.int(14,    "RSI Length")
+atrLen       = input.int(14,    "ATR Length")
+volLen       = input.int(20,    "Volume MA Length")
+useCloud     = input.bool(true, "Ichimoku Cloud Filter")
+useVolume    = input.bool(true, "Volume Confirmation")
+useRsiDiv    = input.bool(true, "RSI Divergence Filter")
+
+// ── LAYER 1 — ICHIMOKU CLOUD ────────────────────────────────────────────────
+tenkan   = (ta.highest(high, 9)  + ta.lowest(low, 9))  / 2
+kijun    = (ta.highest(high, 26) + ta.lowest(low, 26)) / 2
+spanA    = (tenkan + kijun) / 2
+spanB    = (ta.highest(high, 52) + ta.lowest(low, 52)) / 2
+cloudTop    = math.max(spanA, spanB)
+cloudBot    = math.min(spanA, spanB)
+aboveCloud  = close > cloudTop
+belowCloud  = close < cloudBot
+
+// ── LAYER 2 — DAILY BIAS (from atlas_daily_bias.pine webhook, no HTF calls) ─
+// Daily bias is intentionally omitted from this script.
+// The server receives it via /webhook/pine-daily-bias and injects it into scoring.
+// Tier 1 below does NOT gate on daily bias — the server enforces it post-receipt.
+// This preserves all structural signals for the server to evaluate with fresh bias.
+
+// ── LAYER 3 — BREAK OF STRUCTURE ────────────────────────────────────────────
+swingHigh = ta.pivothigh(high, swingLen, swingLen)
+swingLow  = ta.pivotlow(low,   swingLen, swingLen)
+
+var float lastSwingHigh = na
+var float lastSwingLow  = na
+if not na(swingHigh)
+    lastSwingHigh := swingHigh
+if not na(swingLow)
+    lastSwingLow := swingLow
+
+bullBOS = not na(lastSwingHigh) and close > lastSwingHigh and close[1] <= lastSwingHigh
+bearBOS = not na(lastSwingLow)  and close < lastSwingLow  and close[1] >= lastSwingLow
+
+var int bosDir = 0
+if bullBOS
+    bosDir := 1
+if bearBOS
+    bosDir := -1
+
+// ── LAYER 3b — PRE-BOS SWING TRACKING ──────────────────────────────────────
+var float preBosLow  = na
+var float preBosHigh = na
+if bullBOS
+    preBosLow  := ta.lowest(low,  swingLen * 2)
+if bearBOS
+    preBosHigh := ta.highest(high, swingLen * 2)
+
+// ── LAYER 4 — ORDER BLOCK ──────────────────────────────────────────────────
+var float obBullTop = na
+var float obBullBot = na
+var float obBearTop = na
+var float obBearBot = na
+
+if bullBOS
+    for i = 1 to obLookback
+        if close[i] < open[i]
+            obBullTop := high[i]
+            obBullBot := low[i]
+            break
+
+if bearBOS
+    for i = 1 to obLookback
+        if close[i] > open[i]
+            obBearTop := high[i]
+            obBearBot := low[i]
+            break
+
+// ── LAYER 5 — PULLBACK CHECK (current-TF only, no request.security) ─────────
+atr14 = ta.atr(atrLen)
+
+// Pullback: price has retraced from recent swing — use local swing extremes
+recentHigh = ta.highest(high, swingLen)
+recentLow  = ta.lowest(low,   swingLen)
+
+pulledBackBull = close < recentHigh - atr14 * 0.3
+pulledBackBear = close > recentLow  + atr14 * 0.3
+
+inObBull = not na(obBullTop) and close <= obBullTop and close >= obBullBot
+inObBear = not na(obBearTop) and close >= obBearBot and close <= obBearTop
+
+// ── LAYER 6 — REJECTION CANDLE ──────────────────────────────────────────────
+candleRange = high - low
+lowerWick   = math.min(open, close) - low
+upperWick   = high - math.max(open, close)
+
+// Standard rejection (used for tier1 gate — same as combined)
+bullRej = candleRange > 0 and lowerWick > candleRange * 0.35 and close > (low + candleRange * 0.45)
+bearRej = candleRange > 0 and upperWick > candleRange * 0.35 and close < (high - candleRange * 0.45)
+
+// Strong rejection — payload flag (stricter thresholds per spec)
+// LONG: lower wick > 60% of range AND upper wick < 30% of range
+// SHORT: upper wick > 60% of range AND lower wick < 30% of range
+rejStrongLong  = candleRange > 0 and lowerWick > candleRange * 0.60 and upperWick < candleRange * 0.30
+rejStrongShort = candleRange > 0 and upperWick > candleRange * 0.60 and lowerWick < candleRange * 0.30
+
+// ── LAYER 7 — RSI DIVERGENCE ────────────────────────────────────────────────
+rsi14 = ta.rsi(close, rsiLen)
+rsiPrev = rsi14[1]
+
+rsiDivBull = false
+rsiDivBear = false
+if useRsiDiv
+    priceLow1  = ta.lowest(low,     5)
+    priceLow2  = ta.lowest(low[5],  5)
+    rsiLow1    = ta.lowest(rsi14,   5)
+    rsiLow2    = ta.lowest(rsi14[5],5)
+    priceHigh1 = ta.highest(high,     5)
+    priceHigh2 = ta.highest(high[5],  5)
+    rsiHigh1   = ta.highest(rsi14,    5)
+    rsiHigh2   = ta.highest(rsi14[5], 5)
+    rsiDivBull := priceLow1  < priceLow2  and rsiLow1  > rsiLow2
+    rsiDivBear := priceHigh1 > priceHigh2 and rsiHigh1 < rsiHigh2
+
+// ── LAYER 8 — VOLUME CONFIRMATION ──────────────────────────────────────────
+volMA   = ta.sma(volume, volLen)
+highVol = useVolume ? volume > volMA * 1.3 : true
+
+// ── LAYER 9 — THREE-CLASS ENTRY SYSTEM ──────────────────────────────────────
+// TIER 1: Hard requirements (mandatory — daily bias omitted; server enforces it)
+tier1Long  = bosDir == 1 and bullRej
+tier1Short = bosDir == -1 and bearRej
+
+// TIER 2: Strong filters (count 0-3)
+tier2Long  = (aboveCloud ? 1 : 0) + (inObBull ? 1 : 0) + (pulledBackBull ? 1 : 0)
+tier2Short = (belowCloud ? 1 : 0) + (inObBear ? 1 : 0) + (pulledBackBear ? 1 : 0)
+
+// BONUS: Confirmation (count 0-2)
+bonusLong  = (rsiDivBull ? 1 : 0) + (highVol ? 1 : 0)
+bonusShort = (rsiDivBear ? 1 : 0) + (highVol ? 1 : 0)
+
+// Class assignment
+classA_Long  = tier1Long  and tier2Long  == 3 and bonusLong  >= 1
+classB_Long  = tier1Long  and tier2Long  >= 2 and not classA_Long
+classC_Long  = tier1Long  and tier2Long  == 1
+
+classA_Short = tier1Short and tier2Short == 3 and bonusShort >= 1
+classB_Short = tier1Short and tier2Short >= 2 and not classA_Short
+classC_Short = tier1Short and tier2Short == 1
+
+// Score
+scoreLong  = classA_Long  ? 88 : classB_Long  ? 75 : classC_Long  ? 62 : 0
+scoreShort = classA_Short ? 88 : classB_Short ? 75 : classC_Short ? 62 : 0
+
+// Entry conditions (no position size gate — indicator only)
+goLong  = classA_Long  or classB_Long  or classC_Long
+goShort = classA_Short or classB_Short or classC_Short
+
+// ── SWING LEVEL TRACKING (nearest confirmed swings for payload) ──────────────
+var float swingHighA = na
+var float swingHighB = na
+var float swingLowA  = na
+var float swingLowB  = na
+
+if not na(swingHigh)
+    swingHighB := swingHighA
+    swingHighA := swingHigh
+if not na(swingLow)
+    swingLowB := swingLowA
+    swingLowA := swingLow
+
+// For LONG: swing1/swing2 = nearest swing highs above close (resistance targets)
+// For SHORT: swing1/swing2 = nearest swing lows below close (support targets)
+swing1Long  = not na(swingHighA) and swingHighA > close ? swingHighA : not na(swingHighB) and swingHighB > close ? swingHighB : lastSwingHigh
+swing2Long  = not na(swingHighA) and swingHighA > close and not na(swingHighB) and swingHighB > close ? swingHighB : na
+
+swing1Short = not na(swingLowA) and swingLowA < close ? swingLowA : not na(swingLowB) and swingLowB < close ? swingLowB : lastSwingLow
+swing2Short = not na(swingLowA) and swingLowA < close and not na(swingLowB) and swingLowB < close ? swingLowB : na
+
+// ── PAYLOAD HELPERS ──────────────────────────────────────────────────────────
+obTopL   = not na(obBullTop) ? obBullTop : float(na)
+obBotL   = not na(obBullBot) ? obBullBot : float(na)
+obMidL   = not na(obBullTop) and not na(obBullBot) ? (obBullTop + obBullBot) / 2 : float(na)
+obTopS   = not na(obBearTop) ? obBearTop : float(na)
+obBotS   = not na(obBearBot) ? obBearBot : float(na)
+obMidS   = not na(obBearTop) and not na(obBearBot) ? (obBearTop + obBearBot) / 2 : float(na)
+
+// ── PLOTS ───────────────────────────────────────────────────────────────────
+// Cloud
+p1 = plot(useCloud ? spanA : na, "Span A", color.new(color.green, 80))
+p2 = plot(useCloud ? spanB : na, "Span B", color.new(color.red,   80))
+fill(p1, p2, color=spanA > spanB ? color.new(color.green, 90) : color.new(color.red, 90))
+
+// BOS markers
+plotshape(bullBOS, "Bull BOS", shape.labelup,   location.belowbar, color.green, text="BOS", size=size.small)
+plotshape(bearBOS, "Bear BOS", shape.labeldown,  location.abovebar, color.red,   text="BOS", size=size.small)
+
+// Order blocks
+var box obBullBox = na
+var box obBearBox = na
+if bullBOS and not na(obBullTop)
+    obBullBox := box.new(bar_index - obLookback, obBullTop, bar_index + 30, obBullBot,
+                         border_color=color.green, bgcolor=color.new(color.green, 85))
+if bearBOS and not na(obBearTop)
+    obBearBox := box.new(bar_index - obLookback, obBearTop, bar_index + 30, obBearBot,
+                         border_color=color.red, bgcolor=color.new(color.red, 85))
+
+// Class A — large triangles
+plotshape(goLong  and classA_Long,  "A Long",  shape.triangleup,   location.belowbar, color.green,               size=size.large)
+plotshape(goShort and classA_Short, "A Short", shape.triangledown,  location.abovebar, color.red,                 size=size.large)
+// Class B — normal triangles
+plotshape(goLong  and classB_Long,  "B Long",  shape.triangleup,   location.belowbar, color.new(color.green, 30), size=size.normal)
+plotshape(goShort and classB_Short, "B Short", shape.triangledown,  location.abovebar, color.new(color.red,   30), size=size.normal)
+// Class C — small triangles
+plotshape(goLong  and classC_Long,  "C Long",  shape.triangleup,   location.belowbar, color.new(color.green, 50), size=size.small)
+plotshape(goShort and classC_Short, "C Short", shape.triangledown,  location.abovebar, color.new(color.red,   50), size=size.small)
+
+// Class labels
+if goLong
+    label.new(bar_index, low - atr14,
+              classA_Long ? "A" : classB_Long ? "B" : "C",
+              color=classA_Long ? color.green : classB_Long ? color.new(color.green, 30) : color.new(color.green, 50),
+              textcolor=color.white, size=size.small, style=label.style_label_up)
+if goShort
+    label.new(bar_index, high + atr14,
+              classA_Short ? "A" : classB_Short ? "B" : "C",
+              color=classA_Short ? color.red : classB_Short ? color.new(color.red, 30) : color.new(color.red, 50),
+              textcolor=color.white, size=size.small, style=label.style_label_down)
+
+// Rejection dots
+plotshape(bullRej and bosDir == 1,  "Bull Rej", shape.circle, location.belowbar, color.new(color.green, 50), size=size.tiny)
+plotshape(bearRej and bosDir == -1, "Bear Rej", shape.circle, location.abovebar, color.new(color.red,   50), size=size.tiny)
+
+// ── ALERT PAYLOADS ───────────────────────────────────────────────────────────
+if goLong
+    _class   = classA_Long ? "A" : classB_Long ? "B" : "C"
+    _score   = str.tostring(scoreLong)
+    _cloud   = aboveCloud ? "true" : "false"
+    _ob      = inObBull   ? "true" : "false"
+    _pb      = pulledBackBull ? "true" : "false"
+    _div     = rsiDivBull ? "true" : "false"
+    _vol     = highVol    ? "true" : "false"
+    _rej     = rejStrongLong ? "true" : "false"
+    _obTop   = not na(obTopL) ? str.tostring(obTopL)  : "null"
+    _obBot   = not na(obBotL) ? str.tostring(obBotL)  : "null"
+    _obMid   = not na(obMidL) ? str.tostring(obMidL)  : "null"
+    _pbs     = not na(preBosLow) ? str.tostring(preBosLow) : "null"
+    _sw1     = not na(swing1Long) ? str.tostring(swing1Long) : "null"
+    _sw2     = not na(swing2Long) ? str.tostring(swing2Long) : "null"
+    _atr     = str.tostring(atr14)
+    _rsi     = str.tostring(rsi14)
+    _rsiPrev = str.tostring(rsiPrev)
+    _time    = str.format_time(time, "yyyy-MM-dd'T'HH:mm:ss")
+    alert('{"symbol":"' + syminfo.ticker + '","direction":"LONG","class":"' + _class + '","score":' + _score + ',"cloudPass":' + _cloud + ',"obPresent":' + _ob + ',"pullbackIn":' + _pb + ',"rsiDiv":' + _div + ',"volConfirmed":' + _vol + ',"rejStrong":' + _rej + ',"obTop":' + _obTop + ',"obBot":' + _obBot + ',"obMid":' + _obMid + ',"preBosSwing":' + _pbs + ',"swing1":' + _sw1 + ',"swing2":' + _sw2 + ',"atr":' + _atr + ',"rsi":' + _rsi + ',"rsiPrev":' + _rsiPrev + ',"time":"' + _time + '"}', alert.freq_once_per_bar)
+
+if goShort
+    _class   = classA_Short ? "A" : classB_Short ? "B" : "C"
+    _score   = str.tostring(scoreShort)
+    _cloud   = belowCloud ? "true" : "false"
+    _ob      = inObBear   ? "true" : "false"
+    _pb      = pulledBackBear ? "true" : "false"
+    _div     = rsiDivBear ? "true" : "false"
+    _vol     = highVol    ? "true" : "false"
+    _rej     = rejStrongShort ? "true" : "false"
+    _obTop   = not na(obTopS) ? str.tostring(obTopS)  : "null"
+    _obBot   = not na(obBotS) ? str.tostring(obBotS)  : "null"
+    _obMid   = not na(obMidS) ? str.tostring(obMidS)  : "null"
+    _pbs     = not na(preBosHigh) ? str.tostring(preBosHigh) : "null"
+    _sw1     = not na(swing1Short) ? str.tostring(swing1Short) : "null"
+    _sw2     = not na(swing2Short) ? str.tostring(swing2Short) : "null"
+    _atr     = str.tostring(atr14)
+    _rsi     = str.tostring(rsi14)
+    _rsiPrev = str.tostring(rsiPrev)
+    _time    = str.format_time(time, "yyyy-MM-dd'T'HH:mm:ss")
+    alert('{"symbol":"' + syminfo.ticker + '","direction":"SHORT","class":"' + _class + '","score":' + _score + ',"cloudPass":' + _cloud + ',"obPresent":' + _ob + ',"pullbackIn":' + _pb + ',"rsiDiv":' + _div + ',"volConfirmed":' + _vol + ',"rejStrong":' + _rej + ',"obTop":' + _obTop + ',"obBot":' + _obBot + ',"obMid":' + _obMid + ',"preBosSwing":' + _pbs + ',"swing1":' + _sw1 + ',"swing2":' + _sw2 + ',"atr":' + _atr + ',"rsi":' + _rsi + ',"rsiPrev":' + _rsiPrev + ',"time":"' + _time + '"}', alert.freq_once_per_bar)
+
+// ── ALERT CONDITIONS ─────────────────────────────────────────────────────────
+alertcondition(goLong  and classA_Long,  "Class A Long",  "CLASS A LONG")
+alertcondition(goLong  and classB_Long,  "Class B Long",  "CLASS B LONG")
+alertcondition(goLong  and classC_Long,  "Class C Long",  "CLASS C LONG")
+alertcondition(goShort and classA_Short, "Class A Short", "CLASS A SHORT")
+alertcondition(goShort and classB_Short, "Class B Short", "CLASS B SHORT")
+alertcondition(goShort and classC_Short, "Class C Short", "CLASS C SHORT")
+
+// ── DEBUG TABLE ─────────────────────────────────────────────────────────────
+classLong  = classA_Long  ? "A" : classB_Long  ? "B" : classC_Long  ? "C" : "NONE"
+classShort = classA_Short ? "A" : classB_Short ? "B" : classC_Short ? "C" : "NONE"
+classStr   = classLong != "NONE" ? classLong : classShort != "NONE" ? classShort : "NONE"
+classClr   = classStr == "A" ? color.green : classStr == "B" ? color.yellow : classStr == "C" ? color.blue : color.gray
+
+var table dbg = table.new(position.top_right, 2, 11,
+                           bgcolor=color.new(color.black, 70), border_width=1)
+table.cell(dbg, 0, 0,  "Tier1",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 0,  tier1Long ? "LONG" : tier1Short ? "SHORT" : "no",
+           text_color=tier1Long ? color.green : tier1Short ? color.red : color.gray, text_size=size.small)
+table.cell(dbg, 0, 1,  "Tier2",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 1,  str.tostring(tier1Long ? tier2Long : tier2Short) + "/3",
+           text_color=(tier1Long ? tier2Long : tier2Short) == 3 ? color.green : (tier1Long ? tier2Long : tier2Short) >= 2 ? color.yellow : color.gray, text_size=size.small)
+table.cell(dbg, 0, 2,  "Bonus",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 2,  str.tostring(tier1Long ? bonusLong : bonusShort) + "/2",
+           text_color=(tier1Long ? bonusLong : bonusShort) >= 1 ? color.green : color.gray, text_size=size.small)
+table.cell(dbg, 0, 3,  "Class",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 3,  classStr,    text_color=classClr,    text_size=size.small)
+table.cell(dbg, 0, 4,  "Score",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 4,  str.tostring(math.max(scoreLong, scoreShort)),
+           text_color=classClr, text_size=size.small)
+table.cell(dbg, 0, 5,  "BOS Dir",   text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 5,  bosDir == 1 ? "BULL" : bosDir == -1 ? "BEAR" : "NONE",
+           text_color=bosDir == 1 ? color.green : bosDir == -1 ? color.red : color.gray, text_size=size.small)
+table.cell(dbg, 0, 6,  "Cloud",     text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 6,  aboveCloud ? "ABOVE" : belowCloud ? "BELOW" : "INSIDE",
+           text_color=aboveCloud ? color.green : belowCloud ? color.red : color.yellow, text_size=size.small)
+table.cell(dbg, 0, 7,  "RSI Div",   text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 7,  rsiDivBull ? "BULL" : rsiDivBear ? "BEAR" : "none",
+           text_color=rsiDivBull ? color.green : rsiDivBear ? color.red : color.gray, text_size=size.small)
+table.cell(dbg, 0, 8,  "RejStrong", text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 8,  rejStrongLong ? "LONG" : rejStrongShort ? "SHORT" : "no",
+           text_color=rejStrongLong ? color.green : rejStrongShort ? color.red : color.gray, text_size=size.small)
+table.cell(dbg, 0, 9,  "goLong",    text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 9,  goLong  ? "FIRE" : "-",
+           text_color=goLong  ? color.green : color.gray, text_size=size.small)
+table.cell(dbg, 0, 10, "goShort",   text_color=color.white, text_size=size.small)
+table.cell(dbg, 1, 10, goShort ? "FIRE" : "-",
+           text_color=goShort ? color.red : color.gray, text_size=size.small)
