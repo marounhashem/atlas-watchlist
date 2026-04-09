@@ -74,9 +74,6 @@ function processAbcWebhook(data, deps) {
 
   if (!SYMBOLS[sym]) { console.log('[ABC] Not in priority list:', sym); return; }
 
-  // Debug — raw payload values
-  console.log(`[ABC Raw] ${sym} dir=${data.direction} class=${data.class} preBosSwing=${data.preBosSwing} obTop=${data.obTop} obBot=${data.obBot} atr=${data.atr} close=${data.close} entry=${data.entry} sl=${data.sl} tp=${data.tp}`);
-
   const pineClass = data.class;
   if (!['A','B','C'].includes(pineClass)) {
     console.log(`[ABC] ${sym} — missing or invalid class field: ${pineClass}`); return;
@@ -91,36 +88,31 @@ function processAbcWebhook(data, deps) {
   const dp = getAbcDp(sym);
 
   // ── Structural entry/SL/TP calculation ────────────────────────────
-  const obTop = parseFloat(data.obTop) || null;
-  const obBot = parseFloat(data.obBot) || null;
-  const obMid = parseFloat(data.obMid) || (obTop && obBot ? (obTop + obBot) / 2 : null);
+  const obTop = parseFloat(data.obTop);
+  const obBot = parseFloat(data.obBot);
+  const obMid = (obTop > 0 && obBot > 0) ? (obTop + obBot) / 2 : NaN;
   const atr   = parseFloat(data.atr) || 0;
   const preBosSwing = parseFloat(data.preBosSwing) || null;
   const swing1 = parseFloat(data.swing1) || null;
   const swing2 = parseFloat(data.swing2) || null;
 
-  // Entry — order block midpoint, swing pullback, or ATR fallback
-  // OB must be on correct side: LONG OB below price, SHORT OB above price
-  let rawClose = parseFloat(data.close || data.entry || 0);
-  let obValid = obMid && !isNaN(obMid);
-  if (obValid && direction === 'LONG' && obMid > rawClose) obValid = false;
-  if (obValid && direction === 'SHORT' && obMid < rawClose) obValid = false;
+  // Entry — obMid IS the entry (OB levels are always present in new payload)
+  const obValid = obTop > 0 && obBot > 0 && !isNaN(obMid) && obMid > 0;
 
   let entry;
   if (obValid) {
     entry = Math.round(obMid * dp) / dp;
-  } else if (swing1 && !isNaN(swing1) && direction === 'LONG' && swing1 < rawClose) {
-    // LONG: use swing below price as pullback entry zone
-    entry = Math.round(swing1 * dp) / dp;
-  } else if (swing1 && !isNaN(swing1) && direction === 'SHORT' && swing1 > rawClose) {
-    // SHORT: use swing above price as pullback entry zone
-    entry = Math.round(swing1 * dp) / dp;
   } else {
-    // Fallback — ATR offset from close (pullback zone)
-    let rawEntry = parseFloat(data.entry || rawClose);
+    // Fallback — use any available price reference
+    const refPrice = parseFloat(data.obTop) || parseFloat(data.obBot) || parseFloat(data.preBosSwing) || parseFloat(data.entry) || parseFloat(data.close) || 0;
+    if (!refPrice || refPrice <= 0) {
+      console.log(`[ABC] ${sym} — no valid price reference (obTop=${data.obTop} obBot=${data.obBot}), skipping`);
+      return;
+    }
+    const atrVal = atr || refPrice * 0.003;
     entry = direction === 'LONG'
-      ? Math.round((rawEntry - (atr || rawEntry * 0.003) * 0.5) * dp) / dp
-      : Math.round((rawEntry + (atr || rawEntry * 0.003) * 0.5) * dp) / dp;
+      ? Math.round((refPrice - atrVal * 0.3) * dp) / dp
+      : Math.round((refPrice + atrVal * 0.3) * dp) / dp;
   }
 
   // SL — pre-BOS swing with ATR buffer, or OB edge fallback
@@ -198,9 +190,6 @@ function processAbcWebhook(data, deps) {
   }
 
   let tp = tp2;  // main TP = structural target
-
-  // Debug — calculated levels
-  console.log(`[ABC Debug] ${sym} ${direction} | entry=${entry} sl=${sl} tp1=${tp1} tp2=${tp2} tp3=${tp3} | slDist=${slDist.toFixed(5)} slPct=${(slDist/entry*100).toFixed(4)}% | preBosValid=${preBosValid} obValid=${obValid} atr=${atr} slAtr=${slAtr}`);
 
   // RR gate — after structural placement + caps
   let rr = slDist > 0
