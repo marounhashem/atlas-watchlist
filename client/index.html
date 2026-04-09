@@ -93,6 +93,19 @@
   [data-theme="light"] .fbtn { background: #eeede8 !important; border-color: #d8d6ce !important; color: #5a5850 !important; }
   [data-theme="light"] .fbtn.active { background: #1a1916 !important; color: #f5f4f0 !important; }
 
+  /* Nuke any remaining dark backgrounds inside cards — catch-all for inline styles */
+  [data-theme="light"] .card [style*="background:#0"],
+  [data-theme="light"] .card [style*="background: #0"],
+  [data-theme="light"] .card [style*="background:var(--surface)"],
+  [data-theme="light"] .card [style*="background:var(--bg)"] { background: #eeede8 !important; }
+  /* Preserve colored accent backgrounds (green/red/amber tints) */
+  [data-theme="light"] .card [style*="background:#00c"],
+  [data-theme="light"] .card [style*="background:#c0"],
+  [data-theme="light"] .card [style*="background:#ff"],
+  [data-theme="light"] .card [style*="background:var(--proceed)"],
+  [data-theme="light"] .card [style*="background:var(--watch)"],
+  [data-theme="light"] .card [style*="background:var(--short)"] { background: unset; }
+
   /* Inputs */
   [data-theme="light"] input, [data-theme="light"] select, [data-theme="light"] textarea { background: #eeede8 !important; color: #1a1916 !important; border-color: #d8d6ce !important; }
 
