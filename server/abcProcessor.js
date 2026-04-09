@@ -123,19 +123,27 @@ function processAbcWebhook(data, deps) {
   // SL — pre-BOS swing with ATR buffer, or OB edge fallback
   const slAtr = atr || (obTop && obBot ? Math.abs(obTop - obBot) : entry * 0.003);
   let sl;
-  if (preBosSwing && !isNaN(preBosSwing)) {
+
+  // Validate preBosSwing is on the correct side of entry
+  const preBosValid = preBosSwing && !isNaN(preBosSwing)
+    && (direction === 'LONG' ? preBosSwing < entry : preBosSwing > entry);
+
+  if (preBosValid) {
     sl = direction === 'LONG'
       ? Math.round((preBosSwing - slAtr * 0.25) * dp) / dp
       : Math.round((preBosSwing + slAtr * 0.25) * dp) / dp;
-  } else if (obBot && obTop) {
-    sl = direction === 'LONG'
-      ? Math.round((obBot - slAtr * 0.25) * dp) / dp
-      : Math.round((obTop + slAtr * 0.25) * dp) / dp;
   } else {
-    // Final fallback — Pine's SL or ATR-based
-    sl = parseFloat(data.sl) || (direction === 'LONG'
+    // Fallback to OB edge + buffer
+    sl = direction === 'LONG'
+      ? Math.round(((obBot || entry) - slAtr * 1.0) * dp) / dp
+      : Math.round(((obTop || entry) + slAtr * 1.0) * dp) / dp;
+  }
+
+  // Last resort SL fallback — ensures sl is always valid
+  if (!sl || isNaN(sl) || sl <= 0) {
+    sl = direction === 'LONG'
       ? Math.round((entry - slAtr * 1.5) * dp) / dp
-      : Math.round((entry + slAtr * 1.5) * dp) / dp);
+      : Math.round((entry + slAtr * 1.5) * dp) / dp;
   }
 
   // ── SL distance cap by asset class ──────────────────────────────────────
