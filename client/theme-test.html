@@ -89,8 +89,57 @@ h2 { color: var(--text); margin: 20px 0 12px; font-size: 14px; letter-spacing: .
 /* Card Body — 3 columns */
 .card-body { display: grid; grid-template-columns: 185px 130px 1fr; }
 
-/* Level boxes */
-.card-levels { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+/* Level boxes — grouped with left accent */
+.card-levels { padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; }
+
+/* Entry group — standalone */
+.card-lvl-entry {
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text2);
+  border-radius: 5px;
+  padding: 6px 10px;
+  display: flex; justify-content: space-between; align-items: center;
+  transition: all .3s;
+}
+.card-lvl-entry .card-lvl-name { font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.card-lvl-entry .card-lvl-val { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; color: var(--text); }
+
+/* SL box — red accent */
+.card-lvl-sl {
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--short);
+  border-radius: 5px;
+  padding: 5px 10px;
+  display: flex; justify-content: space-between; align-items: center;
+  transition: all .3s;
+}
+.card-lvl-sl .card-lvl-name { font-size: 8px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--short); opacity: .7; }
+.card-lvl-sl .card-lvl-val { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; color: var(--short); }
+
+/* TP group — stacked with green accent */
+.card-lvl-tp-group {
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--proceed);
+  border-radius: 5px;
+  padding: 4px 10px;
+  display: flex; flex-direction: column; gap: 2px;
+  transition: all .3s;
+}
+.card-lvl-tp-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 2px 0;
+}
+.card-lvl-tp-row + .card-lvl-tp-row { border-top: 1px solid var(--border); }
+.card-lvl-tp-row .card-lvl-name { font-size: 8px; font-weight: 600; letter-spacing: .08em; color: var(--muted); }
+.card-lvl-tp-row .card-lvl-val { font-family: 'JetBrains Mono', monospace; font-weight: 700; }
+.tp-main .card-lvl-val { font-size: 13px; color: var(--proceed); }
+.tp-secondary .card-lvl-name { color: var(--muted); opacity: .6; }
+.tp-secondary .card-lvl-val { font-size: 11px; color: var(--text2); opacity: .8; }
+
+/* Legacy class fallbacks */
 .card-lvl {
   background: var(--surface-inset);
   border: 1px solid var(--border);
@@ -188,11 +237,19 @@ h2 { color: var(--text); margin: 20px 0 12px; font-size: 14px; letter-spacing: .
   </div>
   <div class="card-body">
     <div class="card-levels">
-      <div class="card-lvl"><span class="card-lvl-name">ENTRY</span><span class="card-lvl-val lv-entry">1.08450</span></div>
-      <div class="card-lvl"><span class="card-lvl-name">STOP</span><span class="card-lvl-val lv-sl">1.08200</span></div>
-      <div class="card-lvl"><span class="card-lvl-name">TP1</span><span class="card-lvl-val lv-tp1">1.08700</span></div>
-      <div class="card-lvl"><span class="card-lvl-name">TP2</span><span class="card-lvl-val lv-tp">1.09200</span></div>
-      <div class="card-lvl"><span class="card-lvl-name">TP3</span><span class="card-lvl-val lv-tp3">1.09450</span></div>
+      <div class="card-lvl-entry">
+        <span class="card-lvl-name">ENTRY</span>
+        <span class="card-lvl-val">1.08450</span>
+      </div>
+      <div class="card-lvl-sl">
+        <span class="card-lvl-name">STOP</span>
+        <span class="card-lvl-val">1.08200</span>
+      </div>
+      <div class="card-lvl-tp-group">
+        <div class="card-lvl-tp-row tp-secondary"><span class="card-lvl-name">TP1</span><span class="card-lvl-val">1.08700</span></div>
+        <div class="card-lvl-tp-row tp-main"><span class="card-lvl-name">TP2</span><span class="card-lvl-val">1.09200</span></div>
+        <div class="card-lvl-tp-row tp-secondary"><span class="card-lvl-name">TP3</span><span class="card-lvl-val">1.09450</span></div>
+      </div>
     </div>
     <div class="card-bars">
       <div class="bar-row"><span class="bar-name">Technical</span><div class="bar-track"><div class="bar-fill bar-hi" style="width:82%"></div></div><span class="bar-pct">82%</span></div>
@@ -233,11 +290,19 @@ h2 { color: var(--text); margin: 20px 0 12px; font-size: 14px; letter-spacing: .
   </div>
   <div class="card-body">
     <div class="card-levels">
-      <div class="card-lvl"><span class="card-lvl-name">ENTRY</span><span class="card-lvl-val lv-entry">4650.50</span></div>
-      <div class="card-lvl"><span class="card-lvl-name">STOP</span><span class="card-lvl-val lv-sl">4680.00</span></div>
-      <div class="card-lvl"><span class="card-lvl-name">TP1</span><span class="card-lvl-val lv-tp1">4621.00</span></div>
-      <div class="card-lvl"><span class="card-lvl-name">TP2</span><span class="card-lvl-val lv-tp">4562.00</span></div>
-      <div class="card-lvl"><span class="card-lvl-name">TP3</span><span class="card-lvl-val lv-tp3">4532.75</span></div>
+      <div class="card-lvl-entry">
+        <span class="card-lvl-name">ENTRY</span>
+        <span class="card-lvl-val">4650.50</span>
+      </div>
+      <div class="card-lvl-sl">
+        <span class="card-lvl-name">STOP</span>
+        <span class="card-lvl-val">4680.00</span>
+      </div>
+      <div class="card-lvl-tp-group">
+        <div class="card-lvl-tp-row tp-secondary"><span class="card-lvl-name">TP1</span><span class="card-lvl-val">4621.00</span></div>
+        <div class="card-lvl-tp-row tp-main"><span class="card-lvl-name">TP2</span><span class="card-lvl-val">4562.00</span></div>
+        <div class="card-lvl-tp-row tp-secondary"><span class="card-lvl-name">TP3</span><span class="card-lvl-val">4532.75</span></div>
+      </div>
     </div>
     <div class="card-bars">
       <div class="bar-row"><span class="bar-name">Technical</span><div class="bar-track"><div class="bar-fill bar-mid" style="width:65%"></div></div><span class="bar-pct">65%</span></div>
@@ -270,11 +335,19 @@ h2 { color: var(--text); margin: 20px 0 12px; font-size: 14px; letter-spacing: .
   </div>
   <div class="card-body" style="grid-template-columns:185px 1fr;">
     <div class="card-levels">
-      <div class="card-lvl"><span class="card-lvl-name">ENTRY</span><span class="card-lvl-val lv-entry">18722.50</span></div>
-      <div class="card-lvl"><span class="card-lvl-name">STOP</span><span class="card-lvl-val lv-sl">18650.00</span></div>
-      <div class="card-lvl"><span class="card-lvl-name">TP1</span><span class="card-lvl-val lv-tp1">18795.00</span></div>
-      <div class="card-lvl"><span class="card-lvl-name">TP2</span><span class="card-lvl-val lv-tp">18940.00</span></div>
-      <div class="card-lvl"><span class="card-lvl-name">TP3</span><span class="card-lvl-val lv-tp3">19012.25</span></div>
+      <div class="card-lvl-entry">
+        <span class="card-lvl-name">ENTRY</span>
+        <span class="card-lvl-val">18722.50</span>
+      </div>
+      <div class="card-lvl-sl">
+        <span class="card-lvl-name">STOP</span>
+        <span class="card-lvl-val">18650.00</span>
+      </div>
+      <div class="card-lvl-tp-group">
+        <div class="card-lvl-tp-row tp-secondary"><span class="card-lvl-name">TP1</span><span class="card-lvl-val">18795.00</span></div>
+        <div class="card-lvl-tp-row tp-main"><span class="card-lvl-name">TP2</span><span class="card-lvl-val">18940.00</span></div>
+        <div class="card-lvl-tp-row tp-secondary"><span class="card-lvl-name">TP3</span><span class="card-lvl-val">19012.25</span></div>
+      </div>
     </div>
     <div class="card-reasoning">
       <span style="color:var(--proceed)">Class A PROCEED</span> ·
