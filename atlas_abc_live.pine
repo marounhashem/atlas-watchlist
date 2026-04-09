@@ -1,4 +1,4 @@
-//@version=5
+//@version=6
 indicator("ATLAS // ABC LIVE", overlay=true)
 
 // ── INPUTS ──────────────────────────────────────────────────────────────────
@@ -21,11 +21,10 @@ cloudBot    = math.min(spanA, spanB)
 aboveCloud  = close > cloudTop
 belowCloud  = close < cloudBot
 
-// ── LAYER 2 — DAILY BIAS (from atlas_daily_bias.pine webhook, no HTF calls) ─
-// Daily bias is intentionally omitted from this script.
-// The server receives it via /webhook/pine-daily-bias and injects it into scoring.
+// ── LAYER 2 — DAILY BIAS (server-side, no HTF calls) ────────────────────────
+// Daily bias is calculated server-side from market_data (ema200 + bias fields).
+// No separate Pine script needed. Server evaluates bias on every ABC webhook.
 // Tier 1 below does NOT gate on daily bias — the server enforces it post-receipt.
-// This preserves all structural signals for the server to evaluate with fresh bias.
 
 // ── LAYER 3 — BREAK OF STRUCTURE ────────────────────────────────────────────
 swingHigh = ta.pivothigh(high, swingLen, swingLen)
