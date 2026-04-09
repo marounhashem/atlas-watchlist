@@ -6,6 +6,7 @@
 // This layer adds: macro blocks, FXSSI gates, RR sanity, cooldown, verdict mapping.
 
 const { isBankHoliday } = require('./marketHours');
+const { SYMBOLS } = require('./config');
 const { isPreEventRisk, isPostEventSuppressed } = require('./forexCalendar');
 
 // ── Verdict mapping by class × FXSSI ─────────────────────────────────────────
@@ -153,6 +154,13 @@ function runAbcGates(symbol, payload, fxssiData, db) {
   const slPct = slDist / entry;
   if (slPct < minSlPct) {
     return { verdict: 'SKIP', blocked: true, reason: `SL too tight (${(slPct*100).toFixed(3)}% < min ${(minSlPct*100).toFixed(3)}%)` };
+  }
+
+  // 4c. Hard block — noOrderBook instruments have no FXSSI permanently,
+  // not temporarily. NO_DATA verdict on these is meaningless. SKIP all classes.
+  const symConfig = SYMBOLS[symbol];
+  if (symConfig?.noOrderBook) {
+    return { verdict: 'SKIP', blocked: true, reason: 'No order book data available for this instrument (noOrderBook)' };
   }
 
   // 5. Inject direction into fxssiData for gate checks
