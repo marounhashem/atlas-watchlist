@@ -63,6 +63,12 @@ function checkFxssi(symbol, fxssiData) {
 function checkGravity(direction, tp, fxssiData) {
   if (!fxssiData || !tp) return { passed: true, reason: 'No gravity data' };
 
+  // Skip gravity gate if FXSSI data is stale (>45min)
+  const fxssiAge = fxssiData.fetchedAt ? Date.now() - fxssiData.fetchedAt : Infinity;
+  if (fxssiAge > 45 * 60 * 1000) {
+    return { passed: true, reason: 'Gravity data stale — gate skipped' };
+  }
+
   const gravity = fxssiData.gravity_price || fxssiData.fxssi_gravity;
   if (!gravity) return { passed: true, reason: 'No gravity level' };
 
@@ -75,9 +81,9 @@ function checkGravity(direction, tp, fxssiData) {
     ? gravity > entry && gravity < tp
     : gravity < entry && gravity > tp;
 
-  // Block if gravity is within 70% of the path to TP
-  if (gravInPath && gravDist < tpDist * 0.70) {
-    return { passed: false, reason: `Gravity at ${gravity} blocks TP path` };
+  // Block only if gravity is in the first half of the TP path (within 50%)
+  if (gravInPath && gravDist < tpDist * 0.50) {
+    return { passed: false, reason: `Gravity at ${gravity} blocks TP path (${Math.round(gravDist/tpDist*100)}% of move)` };
   }
 
   return { passed: true, reason: 'Gravity clear of TP path' };
