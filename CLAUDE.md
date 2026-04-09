@@ -16,6 +16,7 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 `SCORER_VERSION = '20260407.3'`
 
 Changes since 20260401.15:
+- **20260409.1** — ABC REBUILD Phase 1: File restructuring — `abcProcessor.js` (processAbcWebhook + ABC_VERSION + getAbcDp), `abcReasoning.js` (buildAbcScore/Breakdown/Reasoning), `abcManagement.js` (checkAbcOutcomes + 7 recommendation types + rsiHistory + Class C tracking). New DB tables: `abc_rec_sent` (rec dedup), `daily_bias` (replaces request.security), `class_c_signals` (observation). New abc_signals columns: abc_version, ob_top, ob_bot, pre_bos_swing, rsi_at_entry, trail_sl_sent, breakdown, crowd_gate. Condition-based scoring (0-95 scale) replaces hardcoded 88/75/62. 4-category breakdown (structure/confluence/momentum/crowd). abcGates language cleanup (no FXSSI/trapped in user strings). Class C routes to separate table. Daily bias webhook `/webhook/pine-daily-bias`. DB-persisted rec dedup replaces in-memory sentRecs.
 - **20260408.1** — ABC ACTIVE tracking: `checkAbcOutcomes()` runs every minute — entry touch (OPEN→ACTIVE), SL/TP hit detection (→WIN/LOSS), MFE tracking, progress bar (% toward TP), PARTIAL_CLOSE recommendation at TP1 (1:1 RR). New columns: mfe_price, progress_pct, tp1/tp2/tp3, active_ts, partial_closed. `claudeLearner.onOutcome` removed (post-trade API calls disabled). 07:00 UTC macro cron removed — macro fetch now manual via `/api/macro-refresh` only. FXSSI cacheAge fix (Date.now() per symbol, not stale captured timestamp).
 - **20260407.3** — ABC parallel system: `abcGates.js` gate engine, `/webhook/pine-abc`, `abc_signals` table, three-state verdict mapping (pass/fail/noData), swing Telegram routing for A+B, ⭐ ABC dashboard tab with class filters, outcome tracking (WIN/LOSS/IGNORE), stats by class/FXSSI/session/symbol, level rounding by asset class, min SL distance gate.
 - **20260407.2** — SCORING SIMPLIFICATION: removed COT, carry rate, CB consensus, forecast bias, Nikkei-JPY, macro superseded decay, cluster proximity, DXY, long% crowd, absorption multipliers. Kept: macro conflict (×0.70/×0.78/×0.88), intel key levels, pre-event/post-event, FXSSI stale, bank holiday. Weights rebalanced: pine=0.50, fxssi=0.50, session=0.00 for forex (session kept for noOB indices). Multiplier floor raised from 0.65 to 0.70.
@@ -403,9 +404,18 @@ Bonus (0-2): RSI divergence + volume
 
 ## ABC parallel signal system
 
-- `server/abcGates.js` — gate engine for Pine ABC signals (separate from scorer)
-- Webhook: `/webhook/pine-abc` → `processAbcWebhook()` → `runAbcGates()` → `abc_signals` table
-- API: `GET /api/abc-signals` — returns saved ABC signals
+**File structure (Phase 1 rebuild):**
+- `server/abcProcessor.js` — processAbcWebhook, ABC_VERSION, getAbcDp, processDailyBiasWebhook
+- `server/abcReasoning.js` — buildAbcScore, buildAbcBreakdown, buildAbcReasoning
+- `server/abcManagement.js` — checkAbcOutcomes, rsiHistory, 7 recommendation types, Class C tracking
+- `server/abcGates.js` — runAbcGates, mapVerdict, checkFxssi (crowd sentiment language)
+
+**Flow:** `/webhook/pine-abc` → `abcProcessor.processAbcWebhook()` → Class C → `class_c_signals` | Class A/B → `abcGates.runAbcGates()` → `abc_signals`
+
+**Scoring:** `buildAbcScore()` (0-95 scale, condition-based) replaces hardcoded 88/75/62
+**Breakdown:** 4 categories — Structure (33), Confluence (30), Momentum (17), Crowd (17)
+
+**New tables:** `abc_rec_sent` (rec dedup), `daily_bias` (replaces request.security), `class_c_signals`
 - Telegram: Class A+B → swing channel via `sendAbcSignalAlert()`
 - Dashboard: ⭐ ABC tab with class filters (ALL/A/B/C)
 
