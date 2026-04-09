@@ -1649,7 +1649,7 @@ function isAbcInfoRecSentRecently(signalId) {
 }
 
 module.exports = {
-  init, isReady, persist, persistNow, run, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
+  init, isReady, persist, persistNow, run, all, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
   upsertMarketData, getLatestMarketData, insertAbcSignal, getAbcSignals, getOpenAbcSignals, activateAbcSignal, updateAbcActive, updateAbcOutcome, getAbcStats,
   insertSignal, refineSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,

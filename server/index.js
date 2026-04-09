@@ -23,6 +23,7 @@ const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTe
 const { runCalendarCheck, runCalendarFetch, isPreEventRisk, isPostEventSuppressed, getUpcomingHighImpactEvents } = require('./forexCalendar');
 const { collectFullHistory, collectRecentHistory, querySnapshot, cancelCollection, isCollecting } = require('./fxssi-history-collector');
 const { runAbcGates } = require('./abcGates');
+const { processAbcWebhook: _processAbcWebhook, processDailyBiasWebhook: _processDailyBiasWebhook, ABC_VERSION } = require('./abcProcessor');
 const { SYMBOLS } = require('./config');
 
 console.log('[Startup] 2 — modules loaded', Date.now());
@@ -59,6 +60,9 @@ const server = http.createServer((req, res) => {
       } else if (req.url === '/webhook/pine-abc') {
         try { processAbcWebhook(parsed); }
         catch(e) { console.error('[Webhook] ABC error:', e.message); }
+      } else if (req.url === '/webhook/pine-daily-bias') {
+        try { _processDailyBiasWebhook(parsed, { db }); }
+        catch(e) { console.error('[Webhook] Daily bias error:', e.message); }
       } else if (req.url === '/webhook/fxssi') {
         try { processFxssiWebhook(parsed); }
         catch(e) { console.error('[Webhook] FXSSI error:', e.message); }
@@ -276,144 +280,10 @@ function processPineWebhook(data) {
   broadcast({ type: 'MARKET_UPDATE', symbol: sym, close: price, ts: Date.now() });
 }
 
-// ── ABC decimal precision per symbol ─────────────────────────────────────────
-function getAbcDp(symbol) {
-  const JPY_PAIRS = ['USDJPY','EURJPY','GBPJPY','AUDJPY'];
-  const INDICES   = ['US30','US100','US500','DE40','UK100','J225','HK50','CN50'];
-  const CRYPTO    = ['BTCUSD','ETHUSD'];
-  if (JPY_PAIRS.includes(symbol))  return 1000;    // 3dp for JPY
-  if (INDICES.includes(symbol))    return 100;     // 2dp
-  if (CRYPTO.includes(symbol))     return 10;      // 1dp
-  if (symbol === 'GOLD')           return 100;     // 2dp
-  if (symbol === 'SILVER')         return 1000;    // 3dp
-  if (symbol === 'OILWTI')         return 100;     // 2dp
-  if (symbol === 'COPPER')         return 100;     // 2dp
-  if (symbol === 'PLATINUM')       return 100;     // 2dp
-  return 100000; // 5dp forex majors/minors
-}
-
-// ── Webhook: ABC Pine signals ────────────────────────────────────────────────
+// ── ABC webhook handler (moved to abcProcessor.js) ─────────────────────────
 function processAbcWebhook(data) {
-  if (!data || !Object.keys(data).length) { console.log('[ABC] Empty body — skipping'); return; }
   if (!dbReady) { console.log('[ABC] DB not ready — skipping'); return; }
-
-  const ws = process.env.WEBHOOK_SECRET;
-  if (ws && data.secret !== ws) { console.warn('[ABC] Auth failed'); return; }
-
-  const rawSym = data.symbol || data.ticker || null;
-  if (!rawSym) { console.log('[ABC] No symbol'); return; }
-  const sym = rawSym.toUpperCase()
-    .replace('XAUUSD','GOLD').replace('XAGUSD','SILVER')
-    .replace('USOIL','OILWTI').replace('WTI','OILWTI').replace('OIL_CRUDE','OILWTI')
-    .replace('SPX500USD','US500').replace('ETHUSDT','ETHUSD')
-    .replace('NAS100USD','US100').replace('DE30EUR','DE40')
-    .replace('UK100GBP','UK100').replace('JP225USD','J225')
-    .replace('HK50USD','HK50').replace('CN50USD','CN50');
-
-  if (!SYMBOLS[sym]) { console.log('[ABC] Not in priority list:', sym); return; }
-
-  const pineClass = data.class;
-  if (!['A','B','C'].includes(pineClass)) {
-    console.log(`[ABC] ${sym} — missing or invalid class field: ${pineClass}`); return;
-  }
-
-  const direction = (data.direction || '').toUpperCase();
-  if (!['LONG','SHORT'].includes(direction)) {
-    console.log(`[ABC] ${sym} — invalid direction: ${direction}`); return;
-  }
-
-  const cfg = SYMBOLS[sym];
-  const dp = getAbcDp(sym);
-  const entry = Math.round(parseFloat(data.entry) * dp) / dp;
-  const sl    = Math.round(parseFloat(data.sl)    * dp) / dp;
-  const tp    = Math.round(parseFloat(data.tp)    * dp) / dp;
-  const rr    = parseFloat(data.rr) || null;
-  const score = parseInt(data.score) || (pineClass === 'A' ? 88 : pineClass === 'B' ? 75 : 62);
-
-  if (!entry || !sl || !tp) { console.log(`[ABC] ${sym} — missing entry/sl/tp`); return; }
-
-  // Cooldown — 30min same symbol + direction
-  try {
-    const recent = db.getAbcSignals(20).find(s =>
-      s.symbol === sym && s.direction === direction && (Date.now() - s.ts) < 30 * 60 * 1000
-    );
-    if (recent) {
-      console.log(`[ABC] ${sym} ${direction} cooldown (${Math.round((Date.now() - recent.ts) / 60000)}m) — skipping`);
-      return;
-    }
-  } catch(e) {}
-
-  // Get FXSSI data
-  const fxssiData = (() => {
-    try {
-      const md = db.getLatestMarketData(sym);
-      if (!md) return null;
-      // Parse gravity from fxssi_analysis JSON (no gravity_price column on market_data)
-      let gravPrice = null;
-      try {
-        const fa = md.fxssi_analysis ? JSON.parse(md.fxssi_analysis) : null;
-        const fx = fa?.fxssiAnalysis ? (typeof fa.fxssiAnalysis === 'string' ? JSON.parse(fa.fxssiAnalysis) : fa.fxssiAnalysis) : (fa?.longPct != null ? fa : null);
-        gravPrice = fx?.gravity?.price || null;
-      } catch(e) {}
-      return {
-        fxssi_long_pct:  md.fxssi_long_pct,
-        fxssi_short_pct: md.fxssi_short_pct,
-        fxssi_trapped:   md.fxssi_trapped,
-        gravity_price:   gravPrice
-      };
-    } catch(e) { return null; }
-  })();
-
-  // Compute fxssi_gate for stats tracking
-  const hasAnyFxssiData = fxssiData &&
-    (fxssiData.fxssi_long_pct != null || fxssiData.fxssi_short_pct != null);
-  const fxssiGate = !hasAnyFxssiData ? 'NO_DATA'
-    : fxssiData.fxssi_trapped == null ? 'NO_TRAP'
-    : ((direction === 'LONG'  && fxssiData.fxssi_trapped === 'SHORT') ||
-       (direction === 'SHORT' && fxssiData.fxssi_trapped === 'LONG'))  ? 'ALIGNED' : 'MISALIGNED';
-
-  // Run gates
-  const payload = { pineClass, direction, entry, sl, tp, rr };
-  const gates   = runAbcGates(sym, payload, fxssiData, db);
-
-  console.log(`[ABC] ${sym} ${direction} Class${pineClass} → ${gates.verdict} | ${gates.reason}`);
-
-  if (gates.blocked || gates.verdict === 'SKIP') return;
-
-  // Expiry
-  const expiryHours = cfg?.type?.includes('forex') ? 4 : cfg?.type?.includes('crypto') ? 8 : 6;
-  const expiresAt = Date.now() + expiryHours * 3600000;
-
-  const { getSessionNow } = require('./config');
-  const session = getSessionNow ? getSessionNow() : 'unknown';
-
-  // Save
-  const signalId = db.insertAbcSignal({
-    symbol: sym, direction, pineClass, score,
-    verdict: gates.verdict, entry, sl, tp,
-    rr: gates.rr || rr, session,
-    reasoning: gates.reason, expiresAt,
-    fxssiStale: !fxssiData, fxssiGate, rawPayload: JSON.stringify(data)
-  });
-
-  if (!signalId) { console.log(`[ABC] ${sym} — failed to save`); return; }
-  console.log(`[ABC] Saved to abc_signals id:${signalId}`);
-
-  // Telegram — A+B to swing channel
-  if (pineClass === 'A' || pineClass === 'B') {
-    sendAbcSignalAlert({
-      symbol: sym, direction, pineClass, score,
-      verdict: gates.verdict, entry, sl, tp,
-      rr: gates.rr || rr, session, reasoning: gates.reason
-    }).catch(e => console.error('[Telegram] ABC alert error:', e.message));
-  }
-
-  // WebSocket
-  broadcast({
-    type: 'ABC_SIGNAL', signalId, symbol: sym, direction, pineClass,
-    verdict: gates.verdict, entry, sl, tp,
-    rr: gates.rr || rr, score, session, reasoning: gates.reason, ts: Date.now()
-  });
+  _processAbcWebhook(data, { db, broadcast, SYMBOLS });
 }
 
 // ── Webhook: FXSSI manual paste ──────────────────────────────────────────────
@@ -689,6 +559,18 @@ app.post('/api/abc-ignore', (req, res) => {
   db.updateAbcOutcome(id, 'IGNORED', null, 'Not taken by trader' + (reason ? ' — ' + reason : ''));
   if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, outcome: 'IGNORED', ts: Date.now() });
   res.json({ ok: true });
+});
+
+app.get('/api/daily-bias', (req, res) => {
+  try {
+    const rows = require('./db').all ? require('./db').all('SELECT * FROM daily_bias ORDER BY symbol') : [];
+    res.json(rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/class-c-signals', (req, res) => {
+  try { res.json(db.getClassCSignals(100)); }
+  catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 // Manual retirement trigger
