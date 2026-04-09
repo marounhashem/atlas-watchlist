@@ -24,6 +24,7 @@ const { runCalendarCheck, runCalendarFetch, isPreEventRisk, isPostEventSuppresse
 const { collectFullHistory, collectRecentHistory, querySnapshot, cancelCollection, isCollecting } = require('./fxssi-history-collector');
 const { runAbcGates } = require('./abcGates');
 const { processAbcWebhook: _processAbcWebhook, processDailyBiasWebhook: _processDailyBiasWebhook, ABC_VERSION } = require('./abcProcessor');
+const { checkAbcOutcomes } = require('./abcManagement');
 const { SYMBOLS } = require('./config');
 
 console.log('[Startup] 2 — modules loaded', Date.now());
@@ -2594,98 +2595,6 @@ app.post('/api/paper-outcome', (req, res) => {
   broadcast({ type: 'PAPER_OUTCOME', signalId, paperOutcome, ts: Date.now() });
   res.json({ ok: true });
 });
-
-// ── ABC Outcome Tracking ────────────────────────────────────────────────────
-function checkAbcOutcomes(broadcast) {
-  const signals = db.getOpenAbcSignals(); // returns OPEN + ACTIVE
-  if (!signals.length) return;
-
-  for (const sig of signals) {
-    const md = db.getLatestMarketData(sig.symbol);
-    if (!md || !md.close) continue;
-
-    const price = md.close;
-    const barHigh = md.high || price;
-    const barLow = md.low || price;
-    const { direction, entry, sl, tp, id } = sig;
-    if (!entry || !sl || !tp) continue;
-
-    const slDist = Math.abs(sl - entry);
-    const tpDist = Math.abs(tp - entry);
-    const tolerance = entry * 0.0015;
-    const dir = direction === 'LONG' ? 1 : -1;
-
-    // TP levels — rounded per symbol
-    const dp = getAbcDp(sig.symbol);
-    const tp1 = Math.round((entry + dir * slDist) * dp) / dp;
-    const tp2 = Math.round(tp * dp) / dp;
-    const tp3 = Math.round((tp + dir * slDist * 0.5) * dp) / dp;
-
-    // ── OPEN → ACTIVE (entry touch) ─────────────────────────────────
-    if (sig.outcome === 'OPEN') {
-      const touched = direction === 'LONG'
-        ? barLow <= entry + tolerance
-        : barHigh >= entry - tolerance;
-      if (touched) {
-        db.activateAbcSignal(id, tp1, tp2, tp3);
-        console.log(`[ABC Outcome] ${sig.symbol} ${direction} id:${id} → ACTIVE`);
-        if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, outcome: 'ACTIVE', ts: Date.now() });
-      }
-      continue;
-    }
-
-    // Only process ACTIVE from here
-    if (sig.outcome !== 'ACTIVE') continue;
-
-    // ── SL hit ──────────────────────────────────────────────────────
-    const slHit = direction === 'LONG' ? barLow <= sl : barHigh >= sl;
-    if (slHit) {
-      const pnl = -Math.round((slDist / entry) * 10000) / 100;
-      db.updateAbcOutcome(id, 'LOSS', pnl, 'SL hit');
-      console.log(`[ABC Outcome] ${sig.symbol} ${direction} → LOSS ${pnl}%`);
-      if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, symbol: sig.symbol, outcome: 'LOSS', pnl_pct: pnl, ts: Date.now() });
-      continue;
-    }
-
-    // ── TP hit ──────────────────────────────────────────────────────
-    const tpHit = direction === 'LONG' ? barHigh >= tp : barLow <= tp;
-    if (tpHit) {
-      const pnl = Math.round((tpDist / entry) * 10000) / 100;
-      db.updateAbcOutcome(id, 'WIN', pnl, 'TP hit');
-      console.log(`[ABC Outcome] ${sig.symbol} ${direction} → WIN +${pnl}%`);
-      if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, symbol: sig.symbol, outcome: 'WIN', pnl_pct: pnl, ts: Date.now() });
-      continue;
-    }
-
-    // ── MFE tracking ────────────────────────────────────────────────
-    const favorablePrice = direction === 'LONG' ? barHigh : barLow;
-    const currentMfe = direction === 'LONG'
-      ? (favorablePrice - entry) / entry * 100
-      : (entry - favorablePrice) / entry * 100;
-    const newMfe = Math.max(sig.mfe_pct || 0, Math.round(currentMfe * 100) / 100);
-    const mfePrice = newMfe > (sig.mfe_pct || 0) ? favorablePrice : (sig.mfe_price || favorablePrice);
-
-    // ── Progress toward TP ──────────────────────────────────────────
-    const priceDist = direction === 'LONG' ? price - entry : entry - price;
-    const progressPct = tpDist > 0 ? Math.round((priceDist / tpDist) * 100) : 0;
-
-    db.updateAbcActive(id, { mfe_pct: newMfe, mfe_price: mfePrice, progress_pct: progressPct });
-
-    // ── PARTIAL_CLOSE at 1:1 RR ─────────────────────────────────────
-    if (progressPct >= 30 && !sig.partial_closed) {
-      const tp1Hit = direction === 'LONG' ? barHigh >= tp1 : barLow <= tp1;
-      if (tp1Hit) {
-        db.updateAbcActive(id, { partial_closed: 1 });
-        console.log(`[ABC Outcome] ${sig.symbol} ${direction} — TP1 hit, PARTIAL_CLOSE recommended`);
-        if (broadcast) broadcast({
-          type: 'ABC_RECOMMENDATION', signalId: id, symbol: sig.symbol,
-          rec: { type: 'PARTIAL_CLOSE', reason: `1:1 R:R achieved — close 50%, move SL to breakeven (${entry})`, urgency: 'MEDIUM' },
-          ts: Date.now()
-        });
-      }
-    }
-  }
-}
 
 // ── Cron jobs ─────────────────────────────────────────────────────────────────
 // Score all priority symbols every 5 minutes
