@@ -1744,6 +1744,12 @@ function scoreSymbol(symbol) {
     }
   } catch(e) {}
 
+  // noTrap penalty — missing squeeze validation on OB-capable symbols
+  if (!noOB && data.fxssi_trapped == null) {
+    macroAdjustedScore = Math.round(macroAdjustedScore * 0.88);
+    macroNote += ' · ⚠ No trapped data — penalty applied';
+  }
+
   // Ranging daily: reduced floor for spot (was +4, now +2)
   const macroRangingPenalty = data._dailyBias === 0 ? 2 : 0;
   const macroEffectiveMin = adjustedMinScore + macroRangingPenalty;
