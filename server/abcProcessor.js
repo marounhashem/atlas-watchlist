@@ -87,6 +87,26 @@ function processAbcWebhook(data, deps) {
   const cfg = SYMBOLS[sym];
   const dp = getAbcDp(sym);
 
+  // noOrderBook early exit — route to class_c_signals, skip all level calculation
+  if (cfg?.noOrderBook) {
+    const obT = parseFloat(data.obTop) || 0;
+    const obB = parseFloat(data.obBot) || 0;
+    const refEntry = (obT > 0 && obB > 0) ? Math.round(((obT + obB) / 2) * dp) / dp : 0;
+    if (refEntry <= 0) { console.log(`[ABC] ${sym} — noOrderBook + no valid price, skipping`); return; }
+    const { getSessionNow: gsn } = require('./config');
+    const cId = db.insertClassCSignal({
+      symbol: sym, direction, score: pineClass === 'A' ? 88 : pineClass === 'B' ? 75 : 62,
+      verdict: 'OBSERVE', entry: refEntry, sl: 0, tp1: 0, tp2: 0, tp3: 0, rr: 0,
+      session: gsn ? gsn() : 'unknown', reasoning: 'noOrderBook instrument — observation only',
+      crowdGate: 'NO_DATA', abcVersion: ABC_VERSION,
+      obTop: obT || null, obBot: obB || null,
+      rawPayload: JSON.stringify(data), ts: Date.now(), expiresAt: Date.now() + 8 * 3600000
+    });
+    console.log(`[ABC] ${sym} Class${pineClass} — noOrderBook → class_c_signals id:${cId}`);
+    if (broadcast) broadcast({ type: 'CLASS_C_SIGNAL', signalId: cId, symbol: sym, direction, score: 62, ts: Date.now() });
+    return;
+  }
+
   // ── Structural entry/SL/TP calculation ────────────────────────────
   const obTop = parseFloat(data.obTop);
   const obBot = parseFloat(data.obBot);
@@ -145,6 +165,7 @@ function processAbcWebhook(data, deps) {
   const slMaxPct = getSlMaxPct(sym);
   let slDist = Math.abs(entry - sl);
   const slPct = entry > 0 ? slDist / entry : 0;
+  let slCapped = false;
   if (slPct > slMaxPct && entry > 0) {
     const cappedDist = entry * slMaxPct;
     console.log(`[ABC] ${sym} SL capped at ${(slMaxPct*100).toFixed(1)}% (structural SL was ${(slPct*100).toFixed(2)}% away)`);
@@ -152,6 +173,7 @@ function processAbcWebhook(data, deps) {
       ? Math.round((entry - cappedDist) * dp) / dp
       : Math.round((entry + cappedDist) * dp) / dp;
     slDist = cappedDist;
+    slCapped = true;
   }
 
   // TP1 — 1:1 RR
@@ -187,6 +209,23 @@ function processAbcWebhook(data, deps) {
     tp3 = direction === 'LONG'
       ? Math.round((entry + slDist * 3.5) * dp) / dp
       : Math.round((entry - slDist * 3.5) * dp) / dp;
+  }
+
+  // Recalculate TPs when SL was capped to maintain minimum 2.0R
+  if (slCapped) {
+    const cappedSlDist = Math.abs(entry - sl);
+    const minTp2 = direction === 'LONG'
+      ? Math.round((entry + cappedSlDist * 2.0) * dp) / dp
+      : Math.round((entry - cappedSlDist * 2.0) * dp) / dp;
+    if (direction === 'LONG'  && tp2 < minTp2) tp2 = minTp2;
+    if (direction === 'SHORT' && tp2 > minTp2) tp2 = minTp2;
+    tp1 = direction === 'LONG'
+      ? Math.round((entry + cappedSlDist) * dp) / dp
+      : Math.round((entry - cappedSlDist) * dp) / dp;
+    // Recalculate tp3 from new slDist
+    tp3 = direction === 'LONG'
+      ? Math.round((entry + cappedSlDist * 3.0) * dp) / dp
+      : Math.round((entry - cappedSlDist * 3.0) * dp) / dp;
   }
 
   let tp = tp2;  // main TP = structural target
