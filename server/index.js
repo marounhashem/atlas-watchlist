@@ -536,8 +536,18 @@ app.get('/api/past-signals', (req, res) => {
 });
 
 app.get('/api/abc-signals', (req, res) => {
-  try { res.json(db.getAbcSignals(200)); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try {
+    let signals = db.getAbcSignals(200);
+    const ver = req.query.version;
+    if (ver && ver !== 'all') {
+      signals = signals.filter(s => s.abc_version === ver);
+    } else if (!ver) {
+      // Default: current version only
+      const { ABC_VERSION } = require('./abcProcessor');
+      signals = signals.filter(s => s.abc_version === ABC_VERSION || !s.abc_version);
+    }
+    res.json(signals);
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/abc-outcome', (req, res) => {
@@ -550,8 +560,25 @@ app.post('/api/abc-outcome', (req, res) => {
 });
 
 app.get('/api/abc-stats', (req, res) => {
-  try { res.json(db.getAbcStats()); }
-  catch(e) { res.status(500).json({ error: e.message }); }
+  try {
+    const stats = db.getAbcStats();
+    // Rename fxssi → crowd in response
+    if (stats.byFxssi) {
+      stats.byCrowd = stats.byFxssi;
+      delete stats.byFxssi;
+    }
+    if (stats.classComparison) {
+      if (stats.classComparison.fxssi_aligned_vs_nodata_diff != null) {
+        stats.classComparison.crowd_aligned_vs_nodata_diff = stats.classComparison.fxssi_aligned_vs_nodata_diff;
+        delete stats.classComparison.fxssi_aligned_vs_nodata_diff;
+      }
+      if (stats.classComparison.fxssi_worth_waiting_for != null) {
+        stats.classComparison.crowd_worth_waiting_for = stats.classComparison.fxssi_worth_waiting_for;
+        delete stats.classComparison.fxssi_worth_waiting_for;
+      }
+    }
+    res.json(stats);
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/abc-ignore', (req, res) => {
