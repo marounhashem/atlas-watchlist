@@ -982,6 +982,7 @@
           <button class="filter-btn" onclick="setAbcClass('A')" style="font-size:10px;padding:3px 8px;">⭐ A</button>
           <button class="filter-btn" onclick="setAbcClass('B')" style="font-size:10px;padding:3px 8px;">🔷 B</button>
           <button class="filter-btn" onclick="setAbcClass('C')" style="font-size:10px;padding:3px 8px;">🔹 C</button>
+          <button class="filter-btn" onclick="setAbcClass('OBS')" style="font-size:10px;padding:3px 8px;">🔍 Observations</button>
         </div>
       </div>
       <div id="abc-stats-panel" style="margin-bottom:12px;padding:10px;background:var(--bg);border:1px solid var(--border2);border-radius:6px;"></div>
@@ -1525,12 +1526,29 @@ function renderCard(sig, isPast) {
   const obPct = Math.round((bd.ob||0)*100);
   const sessPct = Math.round((bd.session||0)*100);
 
-  const barsHTML = (noOB || sig._isAbc)
-    ? '<div class="no-ob-note">' + (sig._isAbc ? 'ABC<br>Signal' : 'No Retail<br>Order Book') + '</div>'
-    : `<div class="bar-row"><span class="bar-name">Technical</span><div class="bar-track"><div class="bar-fill ${barClass(biasPct)}" style="width:${biasPct}%"></div></div><span class="bar-pct">${biasPct}%</span></div>
-       <div class="bar-row"><span class="bar-name">Sentiment</span><div class="bar-track"><div class="bar-fill ${barClass(fxssiPct)}" style="width:${fxssiPct}%"></div></div><span class="bar-pct">${fxssiPct}%</span></div>
-       <div class="bar-row"><span class="bar-name">OB Levels</span><div class="bar-track"><div class="bar-fill ${barClass(obPct)}" style="width:${obPct}%"></div></div><span class="bar-pct">${obPct}%</span></div>
-       <div class="bar-row"><span class="bar-name">Session</span><div class="bar-track"><div class="bar-fill ${barClass(sessPct)}" style="width:${sessPct}%"></div></div><span class="bar-pct">${sessPct}%</span></div>`;
+  let barsHTML;
+  if (noOB && !sig._isAbc) {
+    barsHTML = '<div class="no-ob-note">No Retail<br>Order Book</div>';
+  } else if (sig._isAbc) {
+    // Try to render ABC breakdown bars
+    let abcBd = null;
+    try { if (sig.breakdown) abcBd = typeof sig.breakdown === 'string' ? JSON.parse(sig.breakdown) : sig.breakdown; } catch(e) {}
+    if (abcBd && abcBd.structure) {
+      barsHTML = ['structure','confluence','momentum','crowd'].map(function(k) {
+        const b = abcBd[k];
+        if (!b) return '';
+        const pct = b.max > 0 ? Math.round(b.score / b.max * 100) : 0;
+        return '<div class="bar-row"><span class="bar-name">' + esc(b.label || k) + '</span><div class="bar-track"><div class="bar-fill ' + barClass(pct) + '" style="width:' + pct + '%"></div></div><span class="bar-pct">' + pct + '%</span></div>';
+      }).join('');
+    } else {
+      barsHTML = '<div class="no-ob-note">ABC<br>Signal</div>';
+    }
+  } else {
+    barsHTML = '<div class="bar-row"><span class="bar-name">Technical</span><div class="bar-track"><div class="bar-fill ' + barClass(biasPct) + '" style="width:' + biasPct + '%"></div></div><span class="bar-pct">' + biasPct + '%</span></div>'
+     + '<div class="bar-row"><span class="bar-name">Sentiment</span><div class="bar-track"><div class="bar-fill ' + barClass(fxssiPct) + '" style="width:' + fxssiPct + '%"></div></div><span class="bar-pct">' + fxssiPct + '%</span></div>'
+     + '<div class="bar-row"><span class="bar-name">OB Levels</span><div class="bar-track"><div class="bar-fill ' + barClass(obPct) + '" style="width:' + obPct + '%"></div></div><span class="bar-pct">' + obPct + '%</span></div>'
+     + '<div class="bar-row"><span class="bar-name">Session</span><div class="bar-track"><div class="bar-fill ' + barClass(sessPct) + '" style="width:' + sessPct + '%"></div></div><span class="bar-pct">' + sessPct + '%</span></div>';
+  }
 
   // Format reasoning
   function formatReasoning(raw) {
@@ -2956,7 +2974,34 @@ function setAbcClass(cls) {
   document.querySelectorAll('#abc-class-filters .filter-btn').forEach(b => {
     b.classList.toggle('active', b.textContent.includes(cls) || (cls === 'ALL' && b.textContent === 'ALL'));
   });
-  renderAbcSignals();
+  if (cls === 'OBS') {
+    renderClassCSignals();
+  } else {
+    renderAbcSignals();
+  }
+}
+
+function renderClassCSignals() {
+  const container = document.getElementById('abc-container');
+  if (!container) return;
+  fetch('/api/class-c-signals').then(r=>r.json()).then(data => {
+    if (!Array.isArray(data) || !data.length) {
+      container.innerHTML = '<div class="empty">No Class C observations yet<br><span style="font-size:10px;color:var(--muted);">Class C — monitoring only, not traded</span></div>';
+      return;
+    }
+    const mapped = data.filter(s => !['IGNORED','EXPIRED'].includes(s.outcome)).map(s => ({
+      ...s,
+      is_swing: false, weighted_struct_score: null, macro_context_available: false,
+      event_risk_tag: null, score_trace: null,
+      tp1: s.tp1, tp2: s.tp2, tp3: s.tp3, tp: s.tp2,
+      breakdown: s.breakdown, verdict: s.verdict || 'OBSERVE',
+      _isAbc: true, _abcClass: 'C', _isClassC: true
+    }));
+    container.innerHTML = '<div style="font-size:9px;color:var(--muted);padding:4px 0 8px;">Class C — monitoring only, not traded</div>'
+      + mapped.map(s => renderCard(s, false)).join('');
+  }).catch(()=>{
+    container.innerHTML = '<div class="empty">Failed to load Class C signals</div>';
+  });
 }
 
 function renderAbcSignals() {
@@ -3041,7 +3086,7 @@ function fetchAbcStats() {
           <div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--text);">${data.classComparison.A_vs_B_wr_diff!=null?(data.classComparison.A_vs_B_wr_diff>0?'+':'')+data.classComparison.A_vs_B_wr_diff+'pp':'—'}</div>
         </div>
         <div style="background:var(--bg);border:1px solid var(--border2);border-radius:5px;padding:8px;text-align:center;">
-          <div style="font-size:8px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">FXSSI EDGE</div>
+          <div style="font-size:8px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">CROWD EDGE</div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:${data.classComparison.fxssi_worth_waiting_for?'var(--proceed)':'var(--short)'};">${data.classComparison.fxssi_aligned_vs_nodata_diff!=null?(data.classComparison.fxssi_aligned_vs_nodata_diff>0?'+':'')+data.classComparison.fxssi_aligned_vs_nodata_diff+'pp':'—'}</div>
         </div>
       </div>
@@ -3051,8 +3096,8 @@ function fetchAbcStats() {
           ${['A','B','C'].map(cls=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border2);"><span style="font-size:11px;color:var(--text2);">${cls==='A'?'⭐':cls==='B'?'🔷':'🔹'} Class ${cls}</span><span>${wr(data.byClass[cls])}</span></div>`).join('')}
         </div>
         <div>
-          <div style="font-size:9px;color:var(--dim);letter-spacing:.08em;margin-bottom:6px;">BY FXSSI GATE</div>
-          ${Object.entries(data.byFxssi).map(([gate,d])=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border2);"><span style="font-size:11px;color:var(--text2);">${gate}</span><span>${wr(d)}</span></div>`).join('')}
+          <div style="font-size:9px;color:var(--dim);letter-spacing:.08em;margin-bottom:6px;">BY CROWD GATE</div>
+          ${Object.entries(data.byFxssi).map(([gate,d])=>{const gateLabel=gate==='ALIGNED'?'Contrarian ✓':gate==='MISALIGNED'?'With-crowd ✗':gate==='NO_TRAP'?'Crowd split':gate==='NO_DATA'?'No sentiment':gate;return`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--border2);"><span style="font-size:11px;color:var(--text2);">${gateLabel}</span><span>${wr(d)}</span></div>`;}).join('')}
         </div>
       </div>`;
   }).catch(()=>{});
