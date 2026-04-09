@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>ATLAS Theme Test</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #0a0a0f;
+  --surface: #0c0c17;
+  --surface-inset: #131320;
+  --border: #1e1e2e;
+  --text: #e8e8f0;
+  --text2: #8888b0;
+  --muted: #555570;
+  --proceed: #00c896;
+  --watch: #f5a623;
+  --short: #ff4466;
+  --active: #4d9eff;
+}
+
+[data-theme="light"] {
+  --bg: #eef0f4;
+  --surface: #f8f9fb;
+  --surface-inset: #e4e6ec;
+  --border: #d0d3dc;
+  --text: #141520;
+  --text2: #4a4d60;
+  --muted: #8a8da0;
+  --proceed: #0d7a4e;
+  --watch: #b86800;
+  --short: #aa2030;
+  --active: #1850a0;
+}
+
+body {
+  font-family: 'Space Grotesk', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  padding: 20px;
+  transition: background .3s, color .3s;
+}
+
+/* Toggle */
+.toggle {
+  position: fixed; top: 16px; right: 16px; z-index: 100;
+  display: flex; border-radius: 6px; overflow: hidden; border: 1px solid var(--border);
+}
+.toggle button {
+  padding: 8px 16px; border: none; cursor: pointer; font-size: 14px;
+  background: var(--surface); color: var(--text2); transition: all .2s;
+}
+.toggle button.active { background: var(--active); color: #fff; }
+
+h2 { color: var(--text); margin: 20px 0 12px; font-size: 14px; letter-spacing: .1em; text-transform: uppercase; }
+
+/* Card */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,.15);
+  transition: all .3s;
+}
+.card.proceed { border-left-color: var(--proceed); }
+.card.watch   { border-left-color: var(--watch); }
+
+/* Card Header */
+.card-hd {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.card-sym { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 700; color: var(--text); }
+.card-dir { font-size: 12px; font-weight: 600; }
+.card-dir.long { color: var(--proceed); }
+.card-dir.short { color: var(--short); }
+.card-verdict { font-size: 11px; font-weight: 600; letter-spacing: .06em; margin-left: auto; }
+.card-verdict.proceed { color: var(--proceed); }
+.card-verdict.watch { color: var(--watch); }
+.card-score { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700; color: var(--text); margin-left: 8px; }
+
+/* Card Body — 3 columns */
+.card-body { display: grid; grid-template-columns: 185px 130px 1fr; }
+
+/* Level boxes */
+.card-levels { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+.card-lvl {
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  display: grid; grid-template-columns: 40px 1fr; align-items: center;
+  transition: background .3s, border-color .3s;
+}
+.card-lvl-name { font-size: 8px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); text-align: right; }
+.card-lvl-val { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700; }
+.lv-entry { color: var(--text2); }
+.lv-sl    { color: var(--short); }
+.lv-tp    { color: var(--proceed); }
+.lv-tp1   { color: var(--watch); }
+.lv-tp3   { color: #00d4d4; }
+[data-theme="light"] .lv-tp3 { color: #006666; }
+
+/* Bars */
+.card-bars { padding: 10px; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+.bar-row { display: grid; grid-template-columns: 60px 1fr 30px; align-items: center; gap: 6px; }
+.bar-name { font-size: 9px; color: var(--muted); text-align: right; }
+.bar-track { height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 2px; transition: width .3s; }
+.bar-hi  { background: var(--proceed); }
+.bar-mid { background: var(--active); }
+.bar-lo  { background: var(--watch); }
+.bar-pct { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--text2); }
+
+/* Reasoning */
+.card-reasoning { padding: 10px 14px; font-size: 10px; color: var(--text2); line-height: 1.6; border-left: 1px solid var(--border); }
+
+/* Footer */
+.card-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--bg);
+  border-top: 1px solid var(--border);
+}
+.card-footer span { font-size: 10px; color: var(--muted); }
+.card-pill {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px;
+  padding: 2px 8px; border-radius: 3px;
+  background: var(--surface-inset); border: 1px solid var(--border); color: var(--text2);
+}
+.btn-action {
+  font-size: 10px; font-weight: 600; padding: 4px 12px;
+  border: 1px solid var(--border); border-radius: 4px;
+  background: transparent; color: var(--text2); cursor: pointer;
+  transition: all .2s;
+}
+.btn-action:hover { border-color: var(--active); color: var(--active); }
+
+/* ABC badge */
+.abc-badge {
+  font-size: 10px; font-weight: 700; padding: 1px 6px;
+  border-radius: 4px; margin-left: 6px;
+}
+.abc-a { background: rgba(13,122,78,.12); color: var(--proceed); border: 1px solid rgba(13,122,78,.3); }
+.abc-b { background: rgba(24,80,160,.12); color: var(--active); border: 1px solid rgba(24,80,160,.3); }
+
+/* Progress bar */
+.progress-wrap { padding: 0 14px 8px; }
+.progress-track { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--proceed); border-radius: 3px; transition: width .3s; }
+.progress-label { font-size: 9px; color: var(--muted); margin-top: 2px; }
+
+/* Recommendation bar */
+.rec-bar {
+  padding: 6px 14px; font-size: 10px;
+  background: rgba(184,104,0,.08); border-top: 1px solid rgba(184,104,0,.2);
+  color: var(--watch);
+}
+
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+</style>
+</head>
+<body>
+
+<div class="toggle">
+  <button id="btn-d" class="active" onclick="setTheme('dark')">🌙 Dark</button>
+  <button id="btn-l" onclick="setTheme('light')">☀️ Light</button>
+</div>
+
+<h2>PROCEED — Class A — ACTIVE</h2>
+<div class="grid-2">
+
+<!-- Card 1: PROCEED ACTIVE -->
+<div class="card proceed">
+  <div class="card-hd">
+    <span class="card-sym">EURUSD</span>
+    <span class="card-dir long">LONG</span>
+    <span class="abc-badge abc-a">A</span>
+    <span class="card-verdict proceed">PROCEED</span>
+    <span class="card-score">88</span>
+  </div>
+  <div class="card-body">
+    <div class="card-levels">
+      <div class="card-lvl"><span class="card-lvl-name">ENTRY</span><span class="card-lvl-val lv-entry">1.08450</span></div>
+      <div class="card-lvl"><span class="card-lvl-name">STOP</span><span class="card-lvl-val lv-sl">1.08200</span></div>
+      <div class="card-lvl"><span class="card-lvl-name">TP1</span><span class="card-lvl-val lv-tp1">1.08700</span></div>
+      <div class="card-lvl"><span class="card-lvl-name">TP2</span><span class="card-lvl-val lv-tp">1.09200</span></div>
+      <div class="card-lvl"><span class="card-lvl-name">TP3</span><span class="card-lvl-val lv-tp3">1.09450</span></div>
+    </div>
+    <div class="card-bars">
+      <div class="bar-row"><span class="bar-name">Technical</span><div class="bar-track"><div class="bar-fill bar-hi" style="width:82%"></div></div><span class="bar-pct">82%</span></div>
+      <div class="bar-row"><span class="bar-name">Sentiment</span><div class="bar-track"><div class="bar-fill bar-hi" style="width:78%"></div></div><span class="bar-pct">78%</span></div>
+      <div class="bar-row"><span class="bar-name">OB Levels</span><div class="bar-track"><div class="bar-fill bar-hi" style="width:85%"></div></div><span class="bar-pct">85%</span></div>
+      <div class="bar-row"><span class="bar-name">Session</span><div class="bar-track"><div class="bar-fill bar-mid" style="width:65%"></div></div><span class="bar-pct">65%</span></div>
+    </div>
+    <div class="card-reasoning">
+      <span style="color:var(--proceed)">Trapped SHORT aligned</span> ·
+      <span style="color:var(--proceed)">Macro bullish 8/10</span> ·
+      <span style="color:var(--watch)">Pre-event NFP in 4h</span> ·
+      <span style="color:var(--text2)">London session peak</span>
+    </div>
+  </div>
+  <div class="progress-wrap">
+    <div class="progress-track"><div class="progress-fill" style="width:62%"></div></div>
+    <span class="progress-label">62% toward TP — MFE +0.18%</span>
+  </div>
+  <div class="card-footer">
+    <div><span class="card-pill">R:R 3.0</span> <span class="card-pill">+0.18% MFE</span></div>
+    <div style="display:flex;gap:6px;">
+      <button class="btn-action" style="color:var(--proceed);border-color:var(--proceed);">WIN</button>
+      <button class="btn-action" style="color:var(--short);border-color:var(--short);">LOSS</button>
+      <button class="btn-action">Close</button>
+    </div>
+  </div>
+  <div class="rec-bar">PARTIAL_CLOSE — 1:1 R:R achieved, close 50%, move SL to breakeven</div>
+</div>
+
+<!-- Card 2: WATCH Class B -->
+<div class="card watch">
+  <div class="card-hd">
+    <span class="card-sym">GOLD</span>
+    <span class="card-dir short">SHORT</span>
+    <span class="abc-badge abc-b">B</span>
+    <span class="card-verdict watch">WATCH</span>
+    <span class="card-score">75</span>
+  </div>
+  <div class="card-body">
+    <div class="card-levels">
+      <div class="card-lvl"><span class="card-lvl-name">ENTRY</span><span class="card-lvl-val lv-entry">4650.50</span></div>
+      <div class="card-lvl"><span class="card-lvl-name">STOP</span><span class="card-lvl-val lv-sl">4680.00</span></div>
+      <div class="card-lvl"><span class="card-lvl-name">TP1</span><span class="card-lvl-val lv-tp1">4621.00</span></div>
+      <div class="card-lvl"><span class="card-lvl-name">TP2</span><span class="card-lvl-val lv-tp">4562.00</span></div>
+      <div class="card-lvl"><span class="card-lvl-name">TP3</span><span class="card-lvl-val lv-tp3">4532.75</span></div>
+    </div>
+    <div class="card-bars">
+      <div class="bar-row"><span class="bar-name">Technical</span><div class="bar-track"><div class="bar-fill bar-mid" style="width:65%"></div></div><span class="bar-pct">65%</span></div>
+      <div class="bar-row"><span class="bar-name">Sentiment</span><div class="bar-track"><div class="bar-fill bar-hi" style="width:72%"></div></div><span class="bar-pct">72%</span></div>
+      <div class="bar-row"><span class="bar-name">OB Levels</span><div class="bar-track"><div class="bar-fill bar-lo" style="width:48%"></div></div><span class="bar-pct">48%</span></div>
+      <div class="bar-row"><span class="bar-name">Session</span><div class="bar-track"><div class="bar-fill bar-hi" style="width:80%"></div></div><span class="bar-pct">80%</span></div>
+    </div>
+    <div class="card-reasoning">
+      <span style="color:var(--watch)">No trapped crowd</span> ·
+      <span style="color:var(--proceed)">Macro bearish 6/10</span> ·
+      <span style="color:var(--text2)">New York session</span>
+    </div>
+  </div>
+  <div class="card-footer">
+    <div><span class="card-pill">R:R 3.0</span></div>
+    <button class="btn-action">Ignore</button>
+  </div>
+</div>
+
+</div>
+
+<h2>ABC Signal — No Breakdown Bars</h2>
+<div class="card proceed">
+  <div class="card-hd">
+    <span class="card-sym">US100</span>
+    <span class="card-dir long">LONG</span>
+    <span class="abc-badge abc-a">A</span>
+    <span class="card-verdict proceed">PROCEED</span>
+    <span class="card-score">88</span>
+  </div>
+  <div class="card-body" style="grid-template-columns:185px 1fr;">
+    <div class="card-levels">
+      <div class="card-lvl"><span class="card-lvl-name">ENTRY</span><span class="card-lvl-val lv-entry">18722.50</span></div>
+      <div class="card-lvl"><span class="card-lvl-name">STOP</span><span class="card-lvl-val lv-sl">18650.00</span></div>
+      <div class="card-lvl"><span class="card-lvl-name">TP1</span><span class="card-lvl-val lv-tp1">18795.00</span></div>
+      <div class="card-lvl"><span class="card-lvl-name">TP2</span><span class="card-lvl-val lv-tp">18940.00</span></div>
+      <div class="card-lvl"><span class="card-lvl-name">TP3</span><span class="card-lvl-val lv-tp3">19012.25</span></div>
+    </div>
+    <div class="card-reasoning">
+      <span style="color:var(--proceed)">Class A PROCEED</span> ·
+      <span style="color:var(--proceed)">Trapped SHORT aligned with LONG</span> ·
+      <span style="color:var(--text2)">ABC Signal</span>
+    </div>
+  </div>
+  <div class="card-footer">
+    <div><span class="card-pill">R:R 3.0</span></div>
+    <div style="display:flex;gap:6px;">
+      <button class="btn-action" style="color:var(--proceed);border-color:var(--proceed);">WIN</button>
+      <button class="btn-action" style="color:var(--short);border-color:var(--short);">LOSS</button>
+      <button class="btn-action">Ignore</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function setTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  document.getElementById('btn-d').className = t === 'dark' ? 'active' : '';
+  document.getElementById('btn-l').className = t === 'light' ? 'active' : '';
+}
+</script>
+</body>
+</html>
