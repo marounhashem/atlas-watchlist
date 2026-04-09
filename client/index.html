@@ -975,8 +975,11 @@
   <!-- Intel pane -->
   <div class="main-pane" id="pane-abc">
     <div style="padding:12px 0;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <div class="sec" style="margin:0;color:var(--teal);">⭐ ABC SIGNALS</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <div class="sec" style="margin:0;color:var(--teal);">⭐ ABC SIGNALS</div>
+          <button onclick="archiveOldAbcSignals()" style="font-size:9px;padding:2px 8px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;" title="Archive signals from older versions">📦 Archive old</button>
+        </div>
         <div id="abc-class-filters" style="display:flex;gap:4px;">
           <button class="filter-btn active" onclick="setAbcClass('ALL')" style="font-size:10px;padding:3px 8px;">ALL</button>
           <button class="filter-btn" onclick="setAbcClass('A')" style="font-size:10px;padding:3px 8px;">⭐ A</button>
@@ -984,6 +987,12 @@
           <button class="filter-btn" onclick="setAbcClass('C')" style="font-size:10px;padding:3px 8px;">🔹 C</button>
           <button class="filter-btn" onclick="setAbcClass('OBS')" style="font-size:10px;padding:3px 8px;">🔍 Observations</button>
         </div>
+      </div>
+      <div id="abc-outcome-filters" style="display:flex;gap:4px;margin-bottom:10px;">
+        <span style="font-size:9px;color:var(--muted);align-self:center;margin-right:4px;">Show:</span>
+        <button class="filter-btn active" id="abc-of-open" onclick="toggleAbcOutcome('open')" style="font-size:9px;padding:2px 7px;">OPEN</button>
+        <button class="filter-btn active" id="abc-of-active" onclick="toggleAbcOutcome('active')" style="font-size:9px;padding:2px 7px;">ACTIVE</button>
+        <button class="filter-btn" id="abc-of-past" onclick="toggleAbcOutcome('past')" style="font-size:9px;padding:2px 7px;">CLOSED</button>
       </div>
       <div id="abc-stats-panel" style="margin-bottom:12px;padding:10px;background:var(--bg);border:1px solid var(--border2);border-radius:6px;"></div>
       <div id="abc-container"><div class="empty">No ABC signals yet — waiting for Pine alerts on /webhook/pine-abc</div></div>
@@ -1138,6 +1147,7 @@ function setTheme(theme) {
 const WS_URL = `${location.protocol==='https:'?'wss':'ws'}://${location.host}`;
 let allSignals=[], pastSignals=[], activeFilter='ALL', ws;
 let abcSignals=[], abcClassFilter='ALL';
+let abcOutcomeFilter = { open: true, active: true, past: false };
 
 
 const agentCache = {};
@@ -2981,6 +2991,26 @@ function setAbcClass(cls) {
   }
 }
 
+function toggleAbcOutcome(key) {
+  const next = { ...abcOutcomeFilter, [key]: !abcOutcomeFilter[key] };
+  // At least one must stay checked
+  if (!next.open && !next.active && !next.past) return;
+  abcOutcomeFilter = next;
+  document.getElementById('abc-of-open').classList.toggle('active', next.open);
+  document.getElementById('abc-of-active').classList.toggle('active', next.active);
+  document.getElementById('abc-of-past').classList.toggle('active', next.past);
+  renderAbcSignals();
+}
+
+async function archiveOldAbcSignals() {
+  try {
+    await fetch('/api/abc-archive-old', { method: 'POST' });
+    abcSignals = [];
+    renderAbcSignals();
+    showToast('📦 Old signals archived');
+  } catch(e) { showToast('Archive failed'); }
+}
+
 function renderClassCSignals() {
   const container = document.getElementById('abc-container');
   if (!container) return;
@@ -3014,8 +3044,13 @@ function renderAbcSignals() {
     return;
   }
   let filtered = abcSignals.filter(s => {
-    if (['IGNORED','EXPIRED'].includes(s.outcome)) return false;
+    if (['IGNORED','EXPIRED','ARCHIVED'].includes(s.outcome)) return false;
     if (abcClassFilter !== 'ALL' && (s.pine_class || s.pineClass) !== abcClassFilter) return false;
+    // Outcome filter
+    const oc = s.outcome;
+    if (oc === 'OPEN' && !abcOutcomeFilter.open) return false;
+    if (oc === 'ACTIVE' && !abcOutcomeFilter.active) return false;
+    if (['WIN','LOSS'].includes(oc) && !abcOutcomeFilter.past) return false;
     return true;
   });
   if (!filtered.length) {

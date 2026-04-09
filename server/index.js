@@ -586,6 +586,17 @@ app.post('/api/abc-ignore', (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/abc-archive-old', (req, res) => {
+  try {
+    const ver = ABC_VERSION;
+    db.run("UPDATE abc_signals SET outcome='ARCHIVED' WHERE abc_version != ? OR abc_version IS NULL", [ver]);
+    db.run("UPDATE class_c_signals SET outcome='ARCHIVED' WHERE abc_version != ? OR abc_version IS NULL", [ver]);
+    db.persist();
+    console.log(`[ABC] Archived signals older than ${ver}`);
+    res.json({ ok: true, version: ver });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/daily-bias', (req, res) => {
   try {
     const rows = require('./db').all ? require('./db').all('SELECT * FROM daily_bias ORDER BY symbol') : [];
