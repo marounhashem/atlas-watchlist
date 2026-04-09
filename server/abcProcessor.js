@@ -74,6 +74,9 @@ function processAbcWebhook(data, deps) {
 
   if (!SYMBOLS[sym]) { console.log('[ABC] Not in priority list:', sym); return; }
 
+  // Debug — raw payload values
+  console.log(`[ABC Raw] ${sym} dir=${data.direction} class=${data.class} preBosSwing=${data.preBosSwing} obTop=${data.obTop} obBot=${data.obBot} atr=${data.atr} close=${data.close} entry=${data.entry} sl=${data.sl} tp=${data.tp}`);
+
   const pineClass = data.class;
   if (!['A','B','C'].includes(pineClass)) {
     console.log(`[ABC] ${sym} — missing or invalid class field: ${pineClass}`); return;
@@ -195,6 +198,9 @@ function processAbcWebhook(data, deps) {
   }
 
   let tp = tp2;  // main TP = structural target
+
+  // Debug — calculated levels
+  console.log(`[ABC Debug] ${sym} ${direction} | entry=${entry} sl=${sl} tp1=${tp1} tp2=${tp2} tp3=${tp3} | slDist=${slDist.toFixed(5)} slPct=${(slDist/entry*100).toFixed(4)}% | preBosValid=${preBosValid} obValid=${obValid} atr=${atr} slAtr=${slAtr}`);
 
   // RR gate — after structural placement + caps
   let rr = slDist > 0
