@@ -217,11 +217,15 @@ async function sendAbcSignalAlert(sig) {
   const cls     = sig.pineClass === 'A' ? '⭐ Class A' : sig.pineClass === 'B' ? '🔷 Class B' : '🔹 Class C';
 
   const msg = [
-    `${dir} ${sig.symbol} — ${cls}`,
-    `${verdict} | Score: ${sig.score} | RR: ${sig.rr}R`,
-    `Entry: ${sig.entry} | SL: ${sig.sl} | TP: ${sig.tp}`,
-    `Session: ${sig.session}`,
-    sig.reasoning ? `${sig.reasoning}` : ''
+    `${cls} ${verdict} — ${sig.symbol} ${dir}`,
+    `Entry: ${sig.entry} | SL: ${sig.sl} | Score: ${sig.score}/95`,
+    '',
+    sig.tp1 ? `TP1 🎯 ${sig.tp1}  (partial close)` : '',
+    sig.tp2 ? `TP2 🎯 ${sig.tp2}  (main target)` : (sig.tp ? `TP 🎯 ${sig.tp}` : ''),
+    sig.tp3 ? `TP3 🚀 ${sig.tp3}  (runner)` : '',
+    '',
+    `RR: ${sig.rr}R | Session: ${sig.session}`,
+    sig.reasoning ? sig.reasoning.split('. ').slice(0, 2).join('. ') : ''
   ].filter(Boolean).join('\n');
 
   return sendSwingMessage(msg);
