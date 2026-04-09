@@ -65,26 +65,98 @@ function processAbcWebhook(data, deps) {
 
   const cfg = SYMBOLS[sym];
   const dp = getAbcDp(sym);
-  const entry = Math.round(parseFloat(data.entry) * dp) / dp;
-  const sl    = Math.round(parseFloat(data.sl)    * dp) / dp;
-  const tp    = Math.round(parseFloat(data.tp)    * dp) / dp;
-  const rr    = parseFloat(data.rr) || null;
+
+  // ── Structural entry/SL/TP calculation ────────────────────────────
+  const obTop = parseFloat(data.obTop) || null;
+  const obBot = parseFloat(data.obBot) || null;
+  const obMid = parseFloat(data.obMid) || (obTop && obBot ? (obTop + obBot) / 2 : null);
+  const atr   = parseFloat(data.atr) || 0;
+  const preBosSwing = parseFloat(data.preBosSwing) || null;
+  const swing1 = parseFloat(data.swing1) || null;
+  const swing2 = parseFloat(data.swing2) || null;
+
+  // Entry — order block midpoint or fallback to Pine's entry
+  let entry;
+  if (obMid && !isNaN(obMid)) {
+    entry = Math.round(obMid * dp) / dp;
+  } else {
+    // Fallback for old Pine payloads
+    let rawEntry = parseFloat(data.entry || data.close || 0);
+    entry = direction === 'LONG'
+      ? Math.round((rawEntry - atr * 0.3) * dp) / dp
+      : Math.round((rawEntry + atr * 0.3) * dp) / dp;
+  }
+
+  // SL — pre-BOS swing with ATR buffer, or OB edge fallback
+  const slAtr = atr || (obTop && obBot ? Math.abs(obTop - obBot) : entry * 0.003);
+  let sl;
+  if (preBosSwing && !isNaN(preBosSwing)) {
+    sl = direction === 'LONG'
+      ? Math.round((preBosSwing - slAtr * 0.25) * dp) / dp
+      : Math.round((preBosSwing + slAtr * 0.25) * dp) / dp;
+  } else if (obBot && obTop) {
+    sl = direction === 'LONG'
+      ? Math.round((obBot - slAtr * 0.25) * dp) / dp
+      : Math.round((obTop + slAtr * 0.25) * dp) / dp;
+  } else {
+    // Final fallback — Pine's SL or ATR-based
+    sl = parseFloat(data.sl) || (direction === 'LONG'
+      ? Math.round((entry - slAtr * 1.5) * dp) / dp
+      : Math.round((entry + slAtr * 1.5) * dp) / dp);
+  }
+
+  const slDist = Math.abs(entry - sl);
+
+  // TP1 — 1:1 RR
+  let tp1 = direction === 'LONG'
+    ? Math.round((entry + slDist) * dp) / dp
+    : Math.round((entry - slDist) * dp) / dp;
+
+  // TP2 — structural swing target or 2.5R fallback
+  let tp2;
+  const swing1Valid = swing1 && !isNaN(swing1)
+    && (direction === 'LONG' ? swing1 > entry : swing1 < entry);
+  if (swing1Valid) {
+    tp2 = Math.round(swing1 * dp) / dp;
+  } else {
+    tp2 = direction === 'LONG'
+      ? Math.round((entry + slDist * 2.5) * dp) / dp
+      : Math.round((entry - slDist * 2.5) * dp) / dp;
+  }
+
+  // TP3 — second swing or 3.5R fallback
+  let tp3;
+  const swing2Valid = swing2 && !isNaN(swing2)
+    && (direction === 'LONG' ? swing2 > tp2 : swing2 < tp2);
+  if (swing2Valid) {
+    tp3 = Math.round(swing2 * dp) / dp;
+  } else {
+    tp3 = direction === 'LONG'
+      ? Math.round((entry + slDist * 3.5) * dp) / dp
+      : Math.round((entry - slDist * 3.5) * dp) / dp;
+  }
+
+  let tp = tp2;  // main TP = structural target
+
+  // RR gate — after structural placement
+  let rr = slDist > 0
+    ? Math.round((Math.abs(tp - entry) / slDist) * 10) / 10
+    : 0;
+  if (rr < 1.5) {
+    console.log(`[ABC] ${sym} — RR ${rr} below 1.5 after structural placement — SKIP`);
+    return;
+  }
 
   if (!entry || !sl || !tp) { console.log(`[ABC] ${sym} — missing entry/sl/tp`); return; }
 
-  // Parse OB / swing levels from Pine payload — old payloads won't have these
-  const obTop       = data.obTop != null ? Math.round(parseFloat(data.obTop) * dp) / dp : null;
-  const obBot       = data.obBot != null ? Math.round(parseFloat(data.obBot) * dp) / dp : null;
-  const preBosSwing = data.preBosSwing != null ? Math.round(parseFloat(data.preBosSwing) * dp) / dp : null;
-
   // Parse condition flags — default false for old payloads
   const conditions = {
-    cloudPass:    !!data.cloudPass,
-    obPresent:    !!data.obPresent,
-    pullbackIn:   !!data.pullbackIn,
-    rsiDiv:       !!data.rsiDiv,
-    volConfirmed: !!data.volConfirmed,
-    rejStrong:    !!data.rejStrong
+    cloudPass:    data.cloudPass === true || data.cloudPass === 1 || data.cloudPass === '1' || data.cloudPass === 'true',
+    obPresent:    data.obPresent === true || data.obPresent === 1 || data.obPresent === '1' || data.obPresent === 'true',
+    pullbackIn:   data.pullbackIn === true || data.pullbackIn === 1 || data.pullbackIn === '1' || data.pullbackIn === 'true',
+    rsiDiv:       data.rsiDiv === true || data.rsiDiv === 1 || data.rsiDiv === '1' || data.rsiDiv === 'true',
+    volConfirmed: data.volConfirmed === true || data.volConfirmed === 1 || data.volConfirmed === '1' || data.volConfirmed === 'true',
+    rejStrong:    data.rejStrong === true || data.rejStrong === 1 || data.rejStrong === '1' || data.rejStrong === 'true'
   };
 
   // Cooldown — 30min same symbol + direction
@@ -153,7 +225,7 @@ function processAbcWebhook(data, deps) {
 
     const signalId = db.insertClassCSignal({
       symbol: sym, direction, score, verdict: 'OBSERVE',
-      entry, sl, tp1: tp, tp2: tp, tp3: tp, rr,
+      entry, sl, tp1, tp2, tp3, rr,
       session, reasoning,
       breakdown: JSON.stringify(breakdown),
       crowdGate, abcVersion: ABC_VERSION,
