@@ -16,6 +16,7 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 `SCORER_VERSION = '20260407.3'`
 
 Changes since 20260401.15:
+- **20260409.2** — ABC REBUILD Phase 2: `atlas_daily_bias.pine` (daily EMA200+Ichimoku bias indicator, webhook to `/webhook/pine-daily-bias`). `atlas_abc_live.pine` (live indicator — structural payload: obTop/obBot/preBosSwing/swing1/swing2/atr/rsi + condition flags, no strategy calls, no request.security). Structural entry/SL/TP in abcProcessor (entry=OB midpoint, SL=preBosSwing-ATR*0.25, TP2=swing1, TP3=swing2, with old payload fallbacks). Telegram TP1/TP2/TP3 layout. Dashboard: 4-category breakdown bars (Structure/Confluence/Momentum/Crowd), Observations tab for Class C, crowd sentiment language throughout. API version filtering (`?version=` on /api/abc-signals), stats crowd_gate rename.
 - **20260409.1** — ABC REBUILD Phase 1: File restructuring — `abcProcessor.js` (processAbcWebhook + ABC_VERSION + getAbcDp), `abcReasoning.js` (buildAbcScore/Breakdown/Reasoning), `abcManagement.js` (checkAbcOutcomes + 7 recommendation types + rsiHistory + Class C tracking). New DB tables: `abc_rec_sent` (rec dedup), `daily_bias` (replaces request.security), `class_c_signals` (observation). New abc_signals columns: abc_version, ob_top, ob_bot, pre_bos_swing, rsi_at_entry, trail_sl_sent, breakdown, crowd_gate. Condition-based scoring (0-95 scale) replaces hardcoded 88/75/62. 4-category breakdown (structure/confluence/momentum/crowd). abcGates language cleanup (no FXSSI/trapped in user strings). Class C routes to separate table. Daily bias webhook `/webhook/pine-daily-bias`. DB-persisted rec dedup replaces in-memory sentRecs.
 - **20260408.1** — ABC ACTIVE tracking: `checkAbcOutcomes()` runs every minute — entry touch (OPEN→ACTIVE), SL/TP hit detection (→WIN/LOSS), MFE tracking, progress bar (% toward TP), PARTIAL_CLOSE recommendation at TP1 (1:1 RR). New columns: mfe_price, progress_pct, tp1/tp2/tp3, active_ts, partial_closed. `claudeLearner.onOutcome` removed (post-trade API calls disabled). 07:00 UTC macro cron removed — macro fetch now manual via `/api/macro-refresh` only. FXSSI cacheAge fix (Date.now() per symbol, not stale captured timestamp).
 - **20260407.3** — ABC parallel system: `abcGates.js` gate engine, `/webhook/pine-abc`, `abc_signals` table, three-state verdict mapping (pass/fail/noData), swing Telegram routing for A+B, ⭐ ABC dashboard tab with class filters, outcome tracking (WIN/LOSS/IGNORE), stats by class/FXSSI/session/symbol, level rounding by asset class, min SL distance gate.
@@ -389,6 +390,8 @@ Auto-categorised on every WIN/LOSS:
 | `atlas_smc_backtest.pine` | Smart Money Concepts | Any | BOS + Order Blocks + Ichimoku cloud filter, swing pivots |
 | `atlas_mtf_backtest.pine` | MTF confluence (daily/4h/1h) | 10m | Pullback from 4H extreme + rejection candle, no indicators except ATR |
 | `atlas_combined_backtest.pine` | Combined SMC + MTF + RSI div + volume | 1m | Three-class system (A/B/C), 10-layer confluence, request.security for daily/4H |
+| `atlas_daily_bias.pine` | Daily EMA200 + Ichimoku cloud | Daily | Fires bias (BULL/BEAR/MIXED) to `/webhook/pine-daily-bias` on bar close |
+| `atlas_abc_live.pine` | Live SMC indicator | Any | Structural payload (obTop/obBot/preBosSwing/swing1/swing2), no strategy, no request.security |
 
 ### Combined strategy class system
 
