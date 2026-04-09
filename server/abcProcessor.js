@@ -96,16 +96,28 @@ function processAbcWebhook(data, deps) {
   const swing1 = parseFloat(data.swing1) || null;
   const swing2 = parseFloat(data.swing2) || null;
 
-  // Entry — order block midpoint or fallback to Pine's entry
+  // Entry — order block midpoint, swing pullback, or ATR fallback
+  // OB must be on correct side: LONG OB below price, SHORT OB above price
+  let rawClose = parseFloat(data.close || data.entry || 0);
+  let obValid = obMid && !isNaN(obMid);
+  if (obValid && direction === 'LONG' && obMid > rawClose) obValid = false;
+  if (obValid && direction === 'SHORT' && obMid < rawClose) obValid = false;
+
   let entry;
-  if (obMid && !isNaN(obMid)) {
+  if (obValid) {
     entry = Math.round(obMid * dp) / dp;
+  } else if (swing1 && !isNaN(swing1) && direction === 'LONG' && swing1 < rawClose) {
+    // LONG: use swing below price as pullback entry zone
+    entry = Math.round(swing1 * dp) / dp;
+  } else if (swing1 && !isNaN(swing1) && direction === 'SHORT' && swing1 > rawClose) {
+    // SHORT: use swing above price as pullback entry zone
+    entry = Math.round(swing1 * dp) / dp;
   } else {
-    // Fallback for old Pine payloads
-    let rawEntry = parseFloat(data.entry || data.close || 0);
+    // Fallback — ATR offset from close (pullback zone)
+    let rawEntry = parseFloat(data.entry || rawClose);
     entry = direction === 'LONG'
-      ? Math.round((rawEntry - atr * 0.3) * dp) / dp
-      : Math.round((rawEntry + atr * 0.3) * dp) / dp;
+      ? Math.round((rawEntry - (atr || rawEntry * 0.003) * 0.5) * dp) / dp
+      : Math.round((rawEntry + (atr || rawEntry * 0.003) * 0.5) * dp) / dp;
   }
 
   // SL — pre-BOS swing with ATR buffer, or OB edge fallback

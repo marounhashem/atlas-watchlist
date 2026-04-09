@@ -74,6 +74,16 @@ if bearBOS
             obBearBot := low[i]
             break
 
+// OB side validation — pullback zone must be on correct side of price
+// LONG OB must be BELOW price (price pulls back down into it)
+// SHORT OB must be ABOVE price (price pulls back up into it)
+if not na(obBullBot) and obBullBot > close
+    obBullTop := na
+    obBullBot := na
+if not na(obBearTop) and obBearTop < close
+    obBearTop := na
+    obBearBot := na
+
 // ── LAYER 5 — PULLBACK CHECK (current-TF only, no request.security) ─────────
 atr14 = ta.atr(atrLen)
 
