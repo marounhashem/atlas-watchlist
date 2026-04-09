@@ -160,7 +160,7 @@ function runAbcGates(symbol, payload, fxssiData, db) {
   // not temporarily. NO_DATA verdict on these is meaningless. SKIP all classes.
   const symConfig = SYMBOLS[symbol];
   if (symConfig?.noOrderBook) {
-    return { verdict: 'SKIP', blocked: true, reason: 'No order book data available for this instrument (noOrderBook)' };
+    return { verdict: 'SKIP', blocked: true, reason: 'No contrarian data available for this class of symbols' };
   }
 
   // 5. Inject direction into fxssiData for gate checks

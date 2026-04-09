@@ -97,7 +97,7 @@ function processAbcWebhook(data, deps) {
     const cId = db.insertClassCSignal({
       symbol: sym, direction, score: pineClass === 'A' ? 88 : pineClass === 'B' ? 75 : 62,
       verdict: 'OBSERVE', entry: refEntry, sl: 0, tp1: 0, tp2: 0, tp3: 0, rr: 0,
-      session: gsn ? gsn() : 'unknown', reasoning: 'noOrderBook instrument — observation only',
+      session: gsn ? gsn() : 'unknown', reasoning: 'No contrarian data available for this class of symbols — observation only',
       crowdGate: 'NO_DATA', abcVersion: ABC_VERSION,
       obTop: obT || null, obBot: obB || null,
       rawPayload: JSON.stringify(data), ts: Date.now(), expiresAt: Date.now() + 8 * 3600000
