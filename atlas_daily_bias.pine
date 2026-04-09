@@ -1,0 +1,36 @@
+//@version=5
+indicator("ATLAS Daily Bias", overlay=true)
+
+ema200     = ta.ema(close, 200)
+tenkan     = (ta.highest(high, 9)  + ta.lowest(low, 9))  / 2
+kijun      = (ta.highest(high, 26) + ta.lowest(low, 26)) / 2
+spanA      = (tenkan + kijun) / 2
+spanB      = (ta.highest(high, 52) + ta.lowest(low, 52)) / 2
+cloudTop   = math.max(spanA, spanB)
+cloudBot   = math.min(spanA, spanB)
+aboveCloud = close > cloudTop ? 1 : 0
+aboveEma   = close > ema200   ? 1 : 0
+direction  = (aboveCloud == 1 and aboveEma == 1) ? "BULL"
+           : (aboveCloud == 0 and aboveEma == 0) ? "BEAR"
+           : "MIXED"
+
+// Alert fires on every bar close — webhook sends to /webhook/pine-daily-bias
+// Message format: {"type":"daily_bias","symbol":"EURUSD","direction":"BULL","close":1.0845,"ema200":1.0720,"aboveCloud":1}
+if barstate.isconfirmed
+    alert('{"type":"daily_bias","symbol":"' + syminfo.ticker + '","direction":"' + direction + '","close":' + str.tostring(close) + ',"ema200":' + str.tostring(ema200) + ',"aboveCloud":' + str.tostring(aboveCloud) + '}', alert.freq_once_per_bar)
+
+plot(ema200, "EMA200", color.orange, 1)
+plot(spanA, "Span A", color.new(color.green, 80))
+plot(spanB, "Span B", color.new(color.red, 80))
+
+// Visual bias indicator
+bgcolor(direction == "BULL" ? color.new(color.green, 95) : direction == "BEAR" ? color.new(color.red, 95) : color.new(color.gray, 97))
+
+// Debug table
+var table t = table.new(position.top_right, 2, 3, bgcolor=color.new(color.black, 70), border_width=1)
+table.cell(t, 0, 0, "Bias", text_color=color.white, text_size=size.small)
+table.cell(t, 1, 0, direction, text_color=direction == "BULL" ? color.green : direction == "BEAR" ? color.red : color.gray, text_size=size.small)
+table.cell(t, 0, 1, "EMA200", text_color=color.white, text_size=size.small)
+table.cell(t, 1, 1, aboveEma == 1 ? "Above" : "Below", text_color=aboveEma == 1 ? color.green : color.red, text_size=size.small)
+table.cell(t, 0, 2, "Cloud", text_color=color.white, text_size=size.small)
+table.cell(t, 1, 2, aboveCloud == 1 ? "Above" : "Below", text_color=aboveCloud == 1 ? color.green : color.red, text_size=size.small)
