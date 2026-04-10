@@ -886,10 +886,6 @@
     <div class="mtab" id="mtab-backtest" onclick="switchMainTab('backtest')">🔬 BACKTEST</div>
     <div class="mtab" id="mtab-intel" onclick="switchMainTab('intel')" style="color:var(--amber,var(--watch))">📡 INTEL</div>
     <div class="mtab" id="mtab-abc" onclick="switchMainTab('abc')" style="color:var(--teal)">⭐ ABC</div>
-    <span id="mercato-badge"
-      style="display:none;font-family:'JetBrains Mono',monospace;font-size:10px;
-             padding:3px 8px;margin-left:8px;border:1px solid;border-radius:3px;
-             letter-spacing:.1em;align-self:center;"></span>
   </div>
 
   <!-- Signals pane -->
@@ -1206,24 +1202,7 @@ function connect() {
   };
 }
 
-function updateMercatoBadge(bias, regime) {
-  const badge = document.getElementById('mercato-badge');
-  if (!badge) return;
-  if (!bias) { badge.style.display = 'none'; return; }
-  const color = bias === 'BEAR' ? '#ff3d5a'
-              : bias === 'BULL' ? '#00ff88'
-              : '#ffb300';
-  badge.style.display     = 'inline-block';
-  badge.style.color       = color;
-  badge.style.borderColor = color;
-  badge.textContent       = `⬡ MERCATO ${bias}${regime ? ' — ' + regime : ''}`;
-}
-
 function handleMessage(msg) {
-  if (msg.type === 'MERCATO_UPDATE') {
-    updateMercatoBadge(msg.bias, msg.regime);
-    return;
-  }
   if (msg.type==='ABC_SIGNAL') {
     abcSignals.unshift(msg);
     if (activeMainTab === 'abc') renderAbcSignals();
@@ -2608,12 +2587,6 @@ updateClock();
   const c = document.getElementById('signals-container');
   if (c) c.innerHTML = Array(3).fill(`<div style="background:var(--surface,#0f0f18);border:1px solid var(--border,#2a2a3a);border-radius:10px;padding:20px;margin-bottom:10px;height:160px;position:relative;overflow:hidden;"><div style="position:absolute;top:0;left:-100%;width:100%;height:100%;background:linear-gradient(90deg,transparent,#ffffff08,transparent);animation:shimmer 1.5s infinite;"></div></div>`).join('');
   connect();
-
-  // Mercato context badge — fetch on load (WS MERCATO_UPDATE takes over after)
-  fetch('/api/mercato?symbol=US500')
-    .then(r => r.json())
-    .then(d => { if (d && d.context) updateMercatoBadge(d.context.bias, d.context.regime); })
-    .catch(() => {});
 
   // Step 2: HTTP fetch — fallback if WS INIT hasn't arrived yet (e.g. slow WS handshake)
   // Wait briefly for WS INIT to arrive first, then fetch only if needed
