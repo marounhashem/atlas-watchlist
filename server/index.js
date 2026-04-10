@@ -2261,7 +2261,39 @@ app.get('/api/market-intel', (req, res) => {
 });
 
 app.post('/api/market-intel', async (req, res) => {
-  const { content, symbol, expiresInHours } = req.body;
+  const body = req.body || {};
+
+  // ── Pre-analyzed intel from local macro tool — skip Haiku call ────────────
+  if (body.pre_analyzed === true && body.summary) {
+    try {
+      const parsedLevels = (() => {
+        if (Array.isArray(body.levels)) return body.levels;
+        if (typeof body.levels === 'string') { try { return JSON.parse(body.levels); } catch(e) { return []; } }
+        return [];
+      })();
+
+      const analysis = {
+        summary:          body.summary,
+        bias:             body.direction || 'NEUTRAL',
+        affected_symbols: body.symbol ? [body.symbol] : [],
+        key_levels:       parsedLevels,
+        time_horizon:     body.urgency === 'HIGH' ? 'INTRADAY' : body.urgency === 'LOW' ? 'SWING' : null
+      };
+
+      const expiryHours = body.ttl ? Math.max(1, Math.round(body.ttl / 3600000)) : 24;
+      const id = db.insertMarketIntel(body.text || body.summary, body.symbol || null, analysis, expiryHours);
+      if (!id) return res.status(500).json({ ok: false, error: 'DB write failed' });
+
+      broadcast({ type: 'INTEL_UPDATE', symbol: body.symbol || 'ALL', summary: body.summary });
+      console.log(`[Intel] Pre-analyzed: ${body.symbol || 'ALL'} ${body.direction || ''} — ${String(body.summary).slice(0, 80)}`);
+      return res.json({ ok: true, id, symbol: body.symbol || 'ALL', source: 'pre_analyzed' });
+    } catch(e) {
+      console.error('[Intel] Pre-analyzed error:', e.message);
+      return res.status(500).json({ ok: false, error: e.message });
+    }
+  }
+
+  const { content, symbol, expiresInHours } = body;
   if (!content) return res.status(400).json({ error: 'Need content' });
 
   // Clean input before processing
