@@ -323,7 +323,21 @@ function initSchema() {
     trail_sl_sent INTEGER DEFAULT 0, rsi_at_entry REAL,
     ts INTEGER, expires_at INTEGER, raw_payload TEXT
   )`);
-  console.log('[DB] abc_rec_sent, daily_bias, class_c_signals tables ready');
+  // ABC skip log — every early-return is recorded for gate analysis
+  db.run(`CREATE TABLE IF NOT EXISTS abc_skips (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol TEXT, direction TEXT, pine_class TEXT,
+    skip_reason TEXT,
+    gate TEXT,
+    detail TEXT,
+    abc_version TEXT,
+    session TEXT,
+    ts INTEGER
+  )`);
+  db.run('CREATE INDEX IF NOT EXISTS idx_abc_skips_gate_ts ON abc_skips(gate, ts)');
+  db.run('CREATE INDEX IF NOT EXISTS idx_abc_skips_symbol ON abc_skips(symbol)');
+
+  console.log('[DB] abc_rec_sent, daily_bias, class_c_signals, abc_skips tables ready');
 
   db.run(`CREATE TABLE IF NOT EXISTS weights (
     id INTEGER PRIMARY KEY AUTOINCREMENT, symbol TEXT NOT NULL, ts INTEGER NOT NULL,
@@ -1629,6 +1643,45 @@ function updateClassCOutcome(id, outcome, pnl, notes) {
   } catch(e) { console.error('[DB] updateClassCOutcome error:', e?.message); }
 }
 
+// ── ABC skip log ────────────────────────────────────────────────────────────
+function insertAbcSkip(s) {
+  try {
+    run(`INSERT INTO abc_skips
+      (symbol, direction, pine_class, skip_reason, gate, detail, abc_version, session, ts)
+      VALUES (?,?,?,?,?,?,?,?,?)`,
+      [s.symbol || null, s.direction || null, s.pineClass || null,
+       s.skipReason || null, s.gate || null, s.detail || null,
+       s.abcVersion || null, s.session || null, s.ts || Date.now()]);
+  } catch(e) { console.error('[DB] insertAbcSkip error:', e?.message); }
+}
+
+function countSkips(gate, sinceTs) {
+  try {
+    if (sinceTs) {
+      const row = get('SELECT COUNT(*) as c FROM abc_skips WHERE gate=? AND ts>=?', [gate, sinceTs]);
+      return row?.c || 0;
+    }
+    const row = get('SELECT COUNT(*) as c FROM abc_skips WHERE gate=?', [gate]);
+    return row?.c || 0;
+  } catch(e) { return 0; }
+}
+
+function topSkipSymbols(gate, limit = 5) {
+  try {
+    return all(
+      'SELECT symbol, COUNT(*) as count FROM abc_skips WHERE gate=? GROUP BY symbol ORDER BY count DESC LIMIT ?',
+      [gate, limit]
+    );
+  } catch(e) { return []; }
+}
+
+function getAbcSkips(gate, limit = 50) {
+  try {
+    if (gate) return all('SELECT * FROM abc_skips WHERE gate=? ORDER BY ts DESC LIMIT ?', [gate, limit]);
+    return all('SELECT * FROM abc_skips ORDER BY ts DESC LIMIT ?', [limit]);
+  } catch(e) { return []; }
+}
+
 // ── ABC rec dedup ───────────────────────────────────────────────────────────
 function isAbcRecSent(signalId, recType) {
   const row = get('SELECT 1 FROM abc_rec_sent WHERE signal_id=? AND rec_type=?', [signalId, recType]);
@@ -1671,5 +1724,6 @@ module.exports = {
   insertFxssiHistory, getFxssiHistorySnapshot, getFxssiHistoryStatus,
   upsertDailyBias, getDailyBias, insertClassCSignal, getOpenClassCSignals, getClassCSignals,
   activateClassCSignal, updateClassCActive, updateClassCOutcome,
-  isAbcRecSent, markAbcRecSent, isAbcInfoRecSentRecently
+  isAbcRecSent, markAbcRecSent, isAbcInfoRecSentRecently,
+  insertAbcSkip, countSkips, topSkipSymbols, getAbcSkips
 };

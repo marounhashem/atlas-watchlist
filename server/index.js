@@ -609,6 +609,203 @@ app.get('/api/class-c-signals', (req, res) => {
   catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ABC skip log — raw inspection by gate
+app.get('/api/abc-skips', (req, res) => {
+  try {
+    const gate  = req.query.gate || null;
+    const limit = parseInt(req.query.limit) || 50;
+    res.json(db.getAbcSkips(gate, limit));
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ABC extract — structured JSON for Claude analysis (mirror of /api/extract)
+app.get('/api/abc-extract', (req, res) => {
+  try {
+    const ver = ABC_VERSION;
+    const allSignals = db.getAbcSignals(500).filter(s => s.abc_version === ver || !s.abc_version);
+
+    const closed = allSignals.filter(s => s.outcome === 'WIN' || s.outcome === 'LOSS');
+    const open   = allSignals.filter(s => s.outcome === 'OPEN');
+    const active = allSignals.filter(s => s.outcome === 'ACTIVE');
+
+    const wins   = closed.filter(s => s.outcome === 'WIN').length;
+    const losses = closed.filter(s => s.outcome === 'LOSS').length;
+    const winRate = closed.length > 0 ? Math.round(wins / closed.length * 100) : 0;
+
+    const classCSignals = db.getClassCSignals(200).filter(s => s.abc_version === ver || !s.abc_version);
+
+    // ── by_class ─────────────────────────────────────────────────────────
+    const byClass = { A: {wins:0,losses:0}, B: {wins:0,losses:0}, C: {wins:0,losses:0} };
+    for (const s of closed) {
+      const cls = s.pine_class;
+      if (!byClass[cls]) continue;
+      s.outcome === 'WIN' ? byClass[cls].wins++ : byClass[cls].losses++;
+    }
+    for (const cls of ['A','B','C']) {
+      const t = byClass[cls].wins + byClass[cls].losses;
+      byClass[cls].total = t;
+      byClass[cls].winRate = t > 0 ? Math.round(byClass[cls].wins / t * 100) : null;
+    }
+
+    // ── by_crowd_gate ────────────────────────────────────────────────────
+    const byCrowdGate = {
+      ALIGNED:    {wins:0,losses:0},
+      NO_TRAP:    {wins:0,losses:0},
+      MISALIGNED: {wins:0,losses:0},
+      NO_DATA:    {wins:0,losses:0}
+    };
+    for (const s of closed) {
+      const gate = s.crowd_gate || s.fxssi_gate || 'NO_DATA';
+      if (!byCrowdGate[gate]) byCrowdGate[gate] = {wins:0,losses:0};
+      s.outcome === 'WIN' ? byCrowdGate[gate].wins++ : byCrowdGate[gate].losses++;
+    }
+    for (const gate of Object.keys(byCrowdGate)) {
+      const t = byCrowdGate[gate].wins + byCrowdGate[gate].losses;
+      byCrowdGate[gate].total = t;
+      byCrowdGate[gate].winRate = t > 0 ? Math.round(byCrowdGate[gate].wins / t * 100) : null;
+    }
+
+    // ── by_session ───────────────────────────────────────────────────────
+    const bySession = {};
+    for (const s of closed) {
+      const sess = s.session || 'unknown';
+      if (!bySession[sess]) bySession[sess] = {wins:0,losses:0};
+      s.outcome === 'WIN' ? bySession[sess].wins++ : bySession[sess].losses++;
+    }
+    for (const sess of Object.keys(bySession)) {
+      const t = bySession[sess].wins + bySession[sess].losses;
+      bySession[sess].total = t;
+      bySession[sess].winRate = t > 0 ? Math.round(bySession[sess].wins / t * 100) : null;
+    }
+
+    // ── by_symbol ────────────────────────────────────────────────────────
+    const bySymbol = {};
+    for (const s of closed) {
+      if (!bySymbol[s.symbol]) bySymbol[s.symbol] = {wins:0,losses:0};
+      s.outcome === 'WIN' ? bySymbol[s.symbol].wins++ : bySymbol[s.symbol].losses++;
+    }
+    for (const sym of Object.keys(bySymbol)) {
+      const t = bySymbol[sym].wins + bySymbol[sym].losses;
+      bySymbol[sym].total = t;
+      bySymbol[sym].winRate = t > 0 ? Math.round(bySymbol[sym].wins / t * 100) : null;
+    }
+
+    // ── gate_stats (from abc_skips table) ────────────────────────────────
+    const gateStats = {
+      RR:           db.countSkips('RR'),
+      GRAVITY:      db.countSkips('GRAVITY'),
+      CROWD:        db.countSkips('CROWD'),
+      NOORDERBOOK:  db.countSkips('NOORDERBOOK'),
+      MINSL:        db.countSkips('MINSL'),
+      BANKHOLIDAY:  db.countSkips('BANKHOLIDAY'),
+      PREEVENT:     db.countSkips('PREEVENT'),
+      COOLDOWN:     db.countSkips('COOLDOWN'),
+      top_gravity_symbols: db.topSkipSymbols('GRAVITY', 5),
+      top_crowd_symbols:   db.topSkipSymbols('CROWD', 5),
+      top_rr_symbols:      db.topSkipSymbols('RR', 5)
+    };
+
+    // ── recent_closed (last 20 WIN/LOSS) ─────────────────────────────────
+    const recentClosed = closed.slice(0, 20).map(s => ({
+      id:            s.id,
+      symbol:        s.symbol,
+      direction:     s.direction,
+      pine_class:    s.pine_class,
+      score:         s.score,
+      verdict:       s.verdict,
+      crowd_gate:    s.crowd_gate || s.fxssi_gate || null,
+      entry:         s.entry,
+      sl:            s.sl,
+      tp:            s.tp,
+      rr:            s.rr,
+      pnl_pct:       s.pnl_pct,
+      mfe_pct:       s.mfe_pct,
+      session:       s.session,
+      reasoning:     s.reasoning,
+      ob_top:        s.ob_top,
+      ob_bot:        s.ob_bot,
+      pre_bos_swing: s.pre_bos_swing,
+      outcome:       s.outcome,
+      ts:            s.ts,
+      outcome_ts:    s.outcome_ts
+    }));
+
+    // ── open_signals (OPEN + ACTIVE) ─────────────────────────────────────
+    const openSignals = [...open, ...active].map(s => ({
+      id:            s.id,
+      symbol:        s.symbol,
+      direction:     s.direction,
+      pine_class:    s.pine_class,
+      score:         s.score,
+      verdict:       s.verdict,
+      crowd_gate:    s.crowd_gate || s.fxssi_gate || null,
+      entry:         s.entry,
+      sl:            s.sl,
+      tp:            s.tp,
+      tp1:           s.tp1,
+      tp2:           s.tp2,
+      tp3:           s.tp3,
+      rr:            s.rr,
+      mfe_pct:       s.mfe_pct,
+      progress_pct:  s.progress_pct,
+      session:       s.session,
+      reasoning:     s.reasoning,
+      ob_top:        s.ob_top,
+      ob_bot:        s.ob_bot,
+      pre_bos_swing: s.pre_bos_swing,
+      outcome:       s.outcome,
+      ts:            s.ts
+    }));
+
+    // ── class_c_sample (last 10) ─────────────────────────────────────────
+    const classCSample = classCSignals.slice(0, 10).map(s => ({
+      id:         s.id,
+      symbol:     s.symbol,
+      direction:  s.direction,
+      score:      s.score,
+      crowd_gate: s.crowd_gate || null,
+      entry:      s.entry,
+      sl:         s.sl,
+      tp:         s.tp2,
+      rr:         s.rr,
+      session:    s.session,
+      reasoning:  s.reasoning,
+      outcome:    s.outcome,
+      pnl_pct:    s.pnl_pct,
+      ts:         s.ts
+    }));
+
+    const extract = {
+      generated_at: new Date().toISOString(),
+      abc_version:  ver,
+      summary: {
+        total_closed:  closed.length,
+        wins,
+        losses,
+        win_rate_pct:  winRate,
+        total_open:    open.length,
+        total_active:  active.length,
+        total_class_c: classCSignals.length
+      },
+      by_class:       byClass,
+      by_crowd_gate:  byCrowdGate,
+      by_session:     bySession,
+      by_symbol:      bySymbol,
+      gate_stats:     gateStats,
+      recent_closed:  recentClosed,
+      open_signals:   openSignals,
+      class_c_sample: classCSample,
+      instructions:   'Paste into Claude and ask: analyse my ABC signal performance, identify which gates are over-filtering, and suggest threshold adjustments'
+    };
+
+    res.setHeader('Content-Type', 'application/json');
+    res.send(JSON.stringify(extract, null, 2));
+  } catch(e) {
+    console.error('[ABC] /api/abc-extract error:', e?.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Manual retirement trigger
 app.post('/api/retire-now', async (req, res) => {
   await runRetirementCycle(broadcast);

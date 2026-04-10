@@ -130,28 +130,28 @@ function runAbcGates(symbol, payload, fxssiData, db) {
 
   // 1. Bank holiday
   if (isBankHoliday(symbol)) {
-    return { verdict: 'SKIP', blocked: true, reason: 'Bank holiday' };
+    return { verdict: 'SKIP', blocked: true, gate: 'BANKHOLIDAY', reason: 'Bank holiday' };
   }
 
   // 2. Pre-event suppression (<30min to high-impact event)
   if (isPreEventRisk && isPreEventRisk(symbol)) {
-    return { verdict: 'SKIP', blocked: true, reason: 'Pre-event suppression' };
+    return { verdict: 'SKIP', blocked: true, gate: 'PREEVENT', reason: 'Pre-event suppression' };
   }
 
   // 3. Post-event volatility window (<5min after event)
   if (isPostEventSuppressed && isPostEventSuppressed(symbol)) {
-    return { verdict: 'SKIP', blocked: true, reason: 'Post-event volatility block' };
+    return { verdict: 'SKIP', blocked: true, gate: 'PREEVENT', reason: 'Post-event volatility block' };
   }
 
   // 4. RR sanity check
   if (!entry || !sl || !tp) {
-    return { verdict: 'SKIP', blocked: true, reason: 'Missing entry/sl/tp from Pine' };
+    return { verdict: 'SKIP', blocked: true, gate: 'RR', reason: 'Missing entry/sl/tp from Pine' };
   }
   const slDist = Math.abs(entry - sl);
   const tpDist = Math.abs(tp   - entry);
   const rr     = slDist > 0 ? Math.round((tpDist / slDist) * 10) / 10 : 0;
   if (rr < 1.5) {
-    return { verdict: 'SKIP', blocked: true, reason: `RR ${rr} below 1.5` };
+    return { verdict: 'SKIP', blocked: true, gate: 'RR', reason: `RR ${rr} below 1.5` };
   }
 
   // 4b. Minimum SL distance — reject suspiciously tight stops
@@ -159,14 +159,14 @@ function runAbcGates(symbol, payload, fxssiData, db) {
   const minSlPct = isForex ? 0.0005 : 0.001;
   const slPct = slDist / entry;
   if (slPct < minSlPct) {
-    return { verdict: 'SKIP', blocked: true, reason: `SL too tight (${(slPct*100).toFixed(3)}% < min ${(minSlPct*100).toFixed(3)}%)` };
+    return { verdict: 'SKIP', blocked: true, gate: 'MINSL', reason: `SL too tight (${(slPct*100).toFixed(3)}% < min ${(minSlPct*100).toFixed(3)}%)` };
   }
 
   // 4c. Hard block — noOrderBook instruments have no FXSSI permanently,
   // not temporarily. NO_DATA verdict on these is meaningless. SKIP all classes.
   const symConfig = SYMBOLS[symbol];
   if (symConfig?.noOrderBook) {
-    return { verdict: 'SKIP', blocked: true, reason: 'No contrarian data available for this class of symbols' };
+    return { verdict: 'SKIP', blocked: true, gate: 'NOORDERBOOK', reason: 'No contrarian data available for this class of symbols' };
   }
 
   // 5. Inject direction into fxssiData for gate checks
@@ -179,13 +179,13 @@ function runAbcGates(symbol, payload, fxssiData, db) {
   // 7. Gravity proximity gate
   const gravityCheck = checkGravity(direction, tp, fxssiData);
   if (!gravityCheck.passed) {
-    return { verdict: 'SKIP', blocked: true, reason: gravityCheck.reason };
+    return { verdict: 'SKIP', blocked: true, gate: 'GRAVITY', reason: gravityCheck.reason };
   }
 
   // 8. Class × crowd sentiment verdict mapping
   const verdict = mapVerdict(pineClass, fxssiCheck.passed, fxssiCheck.noData);
   if (verdict === 'SKIP') {
-    return { verdict: 'SKIP', blocked: true, reason: `Class ${pineClass} + crowd sentiment fail → SKIP. ${fxssiCheck.reason}` };
+    return { verdict: 'SKIP', blocked: true, gate: 'CROWD', reason: `Class ${pineClass} + crowd sentiment fail → SKIP. ${fxssiCheck.reason}` };
   }
 
   // 9. Intel key levels context (annotation only)

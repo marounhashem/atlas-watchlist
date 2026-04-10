@@ -92,6 +92,10 @@ function processAbcWebhook(data, deps) {
     const obT = parseFloat(data.obTop) || 0;
     const obB = parseFloat(data.obBot) || 0;
     const refEntry = (obT > 0 && obB > 0) ? Math.round(((obT + obB) / 2) * dp) / dp : 0;
+    try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'NOORDERBOOK',
+      skipReason: 'noOrderBook symbol routed to class_c_signals',
+      detail: `obTop=${obT} obBot=${obB}`, abcVersion: ABC_VERSION,
+      session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
     if (refEntry <= 0) { console.log(`[ABC] ${sym} — noOrderBook + no valid price, skipping`); return; }
     const { getSessionNow: gsn } = require('./config');
     const cId = db.insertClassCSignal({
@@ -236,10 +240,20 @@ function processAbcWebhook(data, deps) {
     : 0;
   if (rr < 1.5) {
     console.log(`[ABC] ${sym} — RR ${rr} below 1.5 after structural placement — SKIP`);
+    try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'RR',
+      skipReason: `RR ${rr} below 1.5 after structural placement`,
+      detail: `entry=${entry} sl=${sl} tp=${tp} rr=${rr}`,
+      abcVersion: ABC_VERSION, session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
     return;
   }
 
-  if (!entry || !sl || !tp) { console.log(`[ABC] ${sym} — missing entry/sl/tp`); return; }
+  if (!entry || !sl || !tp) {
+    console.log(`[ABC] ${sym} — missing entry/sl/tp`);
+    try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'RR',
+      skipReason: 'missing entry/sl/tp', detail: `entry=${entry} sl=${sl} tp=${tp}`,
+      abcVersion: ABC_VERSION, session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
+    return;
+  }
 
   // Parse condition flags — default false for old payloads
   const conditions = {
@@ -257,7 +271,11 @@ function processAbcWebhook(data, deps) {
       s.symbol === sym && s.direction === direction && (Date.now() - s.ts) < 30 * 60 * 1000
     );
     if (recent) {
-      console.log(`[ABC] ${sym} ${direction} cooldown (${Math.round((Date.now() - recent.ts) / 60000)}m) — skipping`);
+      const ageMin = Math.round((Date.now() - recent.ts) / 60000);
+      console.log(`[ABC] ${sym} ${direction} cooldown (${ageMin}m) — skipping`);
+      try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'COOLDOWN',
+        skipReason: `cooldown ${ageMin}m`, detail: `recent_id=${recent.id}`,
+        abcVersion: ABC_VERSION, session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
       return;
     }
   } catch(e) {}
@@ -335,7 +353,18 @@ function processAbcWebhook(data, deps) {
 
   console.log(`[ABC] ${sym} ${direction} Class${pineClass} → ${gates.verdict} | ${gates.reason}`);
 
-  if (gates.blocked || gates.verdict === 'SKIP') return;
+  if (gates.blocked || gates.verdict === 'SKIP') {
+    try {
+      const gravPrice = fxssiData?.gravity_price || null;
+      const detail = gates.gate === 'GRAVITY' ? `gravity=${gravPrice} entry=${entry} tp=${tp}`
+                   : gates.gate === 'CROWD'   ? `crowdGate=${crowdGate} dir=${direction}`
+                   : `entry=${entry} sl=${sl} tp=${tp}`;
+      db.insertAbcSkip({ symbol: sym, direction, pineClass,
+        gate: gates.gate || 'CROWD', skipReason: gates.reason, detail,
+        abcVersion: ABC_VERSION, session, ts: Date.now() });
+    } catch(e) {}
+    return;
+  }
 
   // Score, breakdown, reasoning
   const score     = buildAbcScore(pineClass, conditions, crowdGate, dailyAligned);
