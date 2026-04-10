@@ -13,9 +13,10 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260407.3'`
+`SCORER_VERSION = '20260410.1'`
 
 Changes since 20260401.15:
+- **20260410.1** — Lower TF only hard gate: signals with `absWeightedStruct < 1.5` (1m/5m/15m alignment only, no 1H+) are forced to WATCH even if score meets PROCEED threshold. Filters 8/11 recent losses while preserving all wins. ABC fixes: cooldown widened from 20→200 signal scan with ARCHIVED/IGNORED exclusion, new ACTIVE guard blocks duplicate signals when one is already ACTIVE for same symbol+direction, noOrderBook routing moved below level calculation so Class C noOrderBook signals save real entry/sl/tp1/tp2/tp3 instead of zeros. New `POST /api/reset-abc` endpoint clears `abc_signals`, `class_c_signals`, `abc_skips`, `abc_rec_sent`.
 - **20260409.2** — ABC REBUILD Phase 2: `atlas_daily_bias.pine` (daily EMA200+Ichimoku bias indicator, webhook to `/webhook/pine-daily-bias`). `atlas_abc_live.pine` (live indicator — structural payload: obTop/obBot/preBosSwing/swing1/swing2/atr/rsi + condition flags, no strategy calls, no request.security). Structural entry/SL/TP in abcProcessor (entry=OB midpoint, SL=preBosSwing-ATR*0.25, TP2=swing1, TP3=swing2, with old payload fallbacks). Telegram TP1/TP2/TP3 layout. Dashboard: 4-category breakdown bars (Structure/Confluence/Momentum/Crowd), Observations tab for Class C, crowd sentiment language throughout. API version filtering (`?version=` on /api/abc-signals), stats crowd_gate rename.
 - **20260409.1** — ABC REBUILD Phase 1: File restructuring — `abcProcessor.js` (processAbcWebhook + ABC_VERSION + getAbcDp), `abcReasoning.js` (buildAbcScore/Breakdown/Reasoning), `abcManagement.js` (checkAbcOutcomes + 7 recommendation types + rsiHistory + Class C tracking). New DB tables: `abc_rec_sent` (rec dedup), `daily_bias` (replaces request.security), `class_c_signals` (observation). New abc_signals columns: abc_version, ob_top, ob_bot, pre_bos_swing, rsi_at_entry, trail_sl_sent, breakdown, crowd_gate. Condition-based scoring (0-95 scale) replaces hardcoded 88/75/62. 4-category breakdown (structure/confluence/momentum/crowd). abcGates language cleanup (no FXSSI/trapped in user strings). Class C routes to separate table. Daily bias webhook `/webhook/pine-daily-bias`. DB-persisted rec dedup replaces in-memory sentRecs.
 - **20260408.1** — ABC ACTIVE tracking: `checkAbcOutcomes()` runs every minute — entry touch (OPEN→ACTIVE), SL/TP hit detection (→WIN/LOSS), MFE tracking, progress bar (% toward TP), PARTIAL_CLOSE recommendation at TP1 (1:1 RR). New columns: mfe_price, progress_pct, tp1/tp2/tp3, active_ts, partial_closed. `claudeLearner.onOutcome` removed (post-trade API calls disabled). 07:00 UTC macro cron removed — macro fetch now manual via `/api/macro-refresh` only. FXSSI cacheAge fix (Date.now() per symbol, not stale captured timestamp).
@@ -140,6 +141,7 @@ Dynamic minScore floor:
 | Bank holiday | Symbol affected by bank holiday | session ×0.5 + force WATCH |
 | Momentum <15% | momScore critically weak | ×0.88 + force WATCH |
 | Momentum <25% | momScore weak | force WATCH |
+| Lower TF only | absWeightedStruct < 1.5 | force WATCH |
 | Multiplier floor | All penalties combined | min 0.70 |
 
 ### Hard gates (return null — no signal)
@@ -441,9 +443,11 @@ Bonus (0-2): RSI divergence + volume
 7. Class × FXSSI verdict mapping
 8. Intel key levels (annotation only, no block)
 
-### Cooldown
+### Cooldown + ACTIVE guard
 
-30-minute cooldown per symbol + direction — prevents duplicate signals.
+- **ACTIVE guard:** if an ACTIVE signal exists for the same symbol+direction, new signals are rejected immediately (before cooldown check). Prevents duplicate entries while a trade is live.
+- **Cooldown:** 30-minute window per symbol+direction. Scans last 200 signals from `abc_signals` and ignores `ARCHIVED`/`IGNORED` outcomes so archived rows don't poison the check.
+- Both guards run after level calculation and RR gate, before FXSSI fetch, so noOrderBook symbols are also subject to them.
 
 ### ACTIVE tracking (`checkAbcOutcomes`, every minute)
 
@@ -463,6 +467,7 @@ Bonus (0-2): RSI divergence + volume
 | POST | /api/abc-outcome | Log WIN/LOSS on ABC signal |
 | POST | /api/abc-ignore | Mark signal as not taken |
 | GET | /api/abc-stats | Analytics by class, FXSSI gate, session, symbol |
+| POST | /api/reset-abc | Clear abc_signals, class_c_signals, abc_skips, abc_rec_sent |
 
 ## FXSSI history collector
 
