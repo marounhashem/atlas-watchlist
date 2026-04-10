@@ -9,6 +9,7 @@ const { runAbcGates } = require('./abcGates');
 const { buildAbcScore, buildAbcBreakdown, buildAbcReasoning } = require('./abcReasoning');
 const { sendAbcSignalAlert } = require('./telegram');
 const { getSessionNow, SYMBOLS: _SYMBOLS } = require('./config');
+const { checkMercato, applyMercatoToScore } = require('./mercato');
 
 // ── Symbol alias normalization ──────────────────────────────────────────────
 function normalizeSymbol(raw) {
@@ -394,10 +395,23 @@ function processAbcWebhook(data, deps) {
   }
 
   // Score, breakdown, reasoning
-  const score     = buildAbcScore(pineClass, conditions, crowdGate, dailyAligned);
-  const breakdown = buildAbcBreakdown(conditions, crowdGate, dailyAligned);
-  const reasoning = buildAbcReasoning(pineClass, direction, sym, crowdGate,
+  let score        = buildAbcScore(pineClass, conditions, crowdGate, dailyAligned);
+  const breakdown  = buildAbcBreakdown(conditions, crowdGate, dailyAligned);
+  let reasoning    = buildAbcReasoning(pineClass, direction, sym, crowdGate,
                                        conditions, dailyDirection, fxssiData, score);
+
+  // ── Mercato check (US500 only) ───────────────────────────────────────────
+  try {
+    const mercatoResult = checkMercato(sym, entry, direction, db);
+    if (mercatoResult) {
+      const prevScore = score;
+      score     = applyMercatoToScore(score, mercatoResult);
+      reasoning = reasoning ? reasoning + ' · ' + mercatoResult.note : mercatoResult.note;
+      console.log(`[ABC] ${sym} mercato=${mercatoResult.tag} mult=${mercatoResult.multiplier} ${prevScore}→${score}`);
+    }
+  } catch(e) {
+    console.error(`[ABC] ${sym} mercato error:`, e.message);
+  }
 
   // Expiry
   const expiryHours = cfg?.type?.includes('forex') ? 4 : cfg?.type?.includes('crypto') ? 8 : 6;

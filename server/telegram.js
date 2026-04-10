@@ -32,6 +32,23 @@ async function sendMessage(text, parseMode = 'HTML', retries = 2) {
 // Signal alert — fires when a new PROCEED signal is saved
 async function sendSignalAlert(signal) {
   const dir = signal.direction === 'LONG' ? '🟢 LONG' : '🔴 SHORT';
+
+  // Mercato generated signal — special format (Flow 3)
+  if (signal.session === 'MERCATO') {
+    const text = [
+      `📡 <b>MERCATO GENERATED SIGNAL</b>`,
+      `━━━━━━━━━━━━━━━━━`,
+      `<b>${dir} ${signal.symbol}</b> — Score: ${signal.score} | RR: ${signal.rr}R`,
+      ``,
+      `Entry: <b>${signal.entry}</b>`,
+      `SL: ${signal.sl}`,
+      `TP1: ${signal.tp1} | TP2: ${signal.tp2} | TP3: ${signal.tp3}`,
+      `━━━━━━━━━━━━━━━━━`,
+      signal.reasoning || ''
+    ].join('\n');
+    return sendMessage(text);
+  }
+
   const tag = signal.eventRiskTag;
   const verdict = tag === 'SUPPRESSED' ? '🔕 WATCH/SUPPRESSED'
     : tag === 'PRE_EVENT' ? `⚠️ ${signal.verdict}/EVENT-RISK`

@@ -1,7 +1,9 @@
 const { SYMBOLS, getSessionNow, sessionMultiplier } = require('./config');
+const db = require('./db');
 const { getLatestMarketData, getWeights, insertSignal, getOpenSignals, getLatestOpenSignal,
-        refineSignal, insertWatchSignal, getAllSignals, getSetting } = require('./db');
+        refineSignal, insertWatchSignal, getAllSignals, getSetting } = db;
 const { isMarketOpen } = require('./marketHours');
+const { checkMercato, applyMercatoToScore } = require('./mercato');
 
 // Lazy-loaded modules (avoid circular deps at startup)
 let _claudeLearner, _cbCalendar;
@@ -151,7 +153,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260410.1'; // Lower TF only hard gate — require weightedStruct >= 1.5 for PROCEED
+const SCORER_VERSION = '20260410.2'; // Mercato context system — US500 only, multiplier + generated signals
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -1901,6 +1903,22 @@ function scoreSymbol(symbol) {
   // buildReasoning was called with macroNote at line ~1359, but macroNote was modified after
   const lateNotes = macroNote.slice(_macroNoteSnapshot.length).trim();
   if (lateNotes) finalReasoning += ' · ' + lateNotes;
+
+  // ── Mercato context check (US500 only) ─────────────────────────────────────
+  // Silvia Vianello daily analysis — APPROVED ×1.12 / CONFLICT ×0.85 / PARTIAL ×1.0
+  // Respects structureCap — mercato never pushes score above structural limit.
+  try {
+    const mercatoResult = checkMercato(symbol, entry, direction, db);
+    if (mercatoResult) {
+      const prevScore = macroAdjustedScore;
+      macroAdjustedScore = applyMercatoToScore(macroAdjustedScore, mercatoResult);
+      macroAdjustedScore = Math.min(structureCap, Math.min(95, macroAdjustedScore));
+      finalReasoning += ' · ' + mercatoResult.note;
+      console.log(`[Scorer] ${symbol} mercato=${mercatoResult.tag} mult=${mercatoResult.multiplier} ${prevScore}→${macroAdjustedScore}`);
+    }
+  } catch(e) {
+    console.error(`[Scorer] ${symbol} mercato error:`, e.message);
+  }
 
   // ── Round prices for display ────────────────────────────────────────────────
   // Forex needs more decimals (5dp) to preserve SL distance on low-value pairs

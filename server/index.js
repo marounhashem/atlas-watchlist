@@ -12,6 +12,7 @@ const db = require('./db');
 const { upsertMarketData, getAllSignals, getWeights, getLearningLog, updateOutcome, updatePaperOutcome, getPaperTradeStats, retireActiveCycle, getCurrentCycleSignals, getPastCycleSignals } = db;
 const { isMarketOpen, getMarketStatus } = require('./marketHours');
 const { scoreAllPriority, saveSignal } = require('./scorer');
+const { checkAndFireMercatoSignal } = require('./mercato');
 const { checkOutcomes } = require('./outcome');
 const { runLearningCycle } = require('./learner');
 const claudeLearner = require('./claudeLearner');
@@ -1262,6 +1263,55 @@ app.get('/api/watch-signals', (req, res) => {
     res.json({ ok: true, signals: watches });
   } catch(e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Mercato context — receive daily levels from local macro tool ──────────────
+app.post('/api/mercato', (req, res) => {
+  try {
+    const body = req.body || {};
+    if (!body.bias) {
+      return res.status(400).json({ ok: false, error: 'Missing bias field' });
+    }
+    const expiresAt = body.expires
+      ? new Date(body.expires).getTime()
+      : Date.now() + 24 * 60 * 60 * 1000;
+    const ctx = {
+      symbol:       body.symbol || 'US500',
+      bias:         body.bias,
+      regime:       body.regime || null,
+      resistances:  body.resistances || [],
+      supports:     body.supports    || [],
+      invalidation: body.invalidation || {},
+      catalyst:     body.catalyst    || null,
+      notes:        body.notes       || null,
+      expires_at:   expiresAt
+    };
+    const ok = db.upsertMercatoContext(ctx);
+    if (!ok) return res.status(500).json({ ok: false, error: 'DB write failed' });
+    broadcast({ type: 'MERCATO_UPDATE', symbol: ctx.symbol, bias: ctx.bias, regime: ctx.regime });
+    console.log(`[Mercato] Context updated: ${ctx.symbol} ${ctx.bias} ${ctx.regime || ''} expires ${new Date(expiresAt).toISOString()}`);
+    res.json({
+      ok:      true,
+      symbol:  ctx.symbol,
+      bias:    ctx.bias,
+      regime:  ctx.regime,
+      levels:  (ctx.resistances.length + ctx.supports.length),
+      expires: new Date(expiresAt).toISOString()
+    });
+  } catch(e) {
+    console.error('[Mercato] POST error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+app.get('/api/mercato', (req, res) => {
+  try {
+    const symbol = req.query.symbol || 'US500';
+    const ctx    = db.getMercatoContext(symbol);
+    res.json({ ok: true, context: ctx });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
   }
 });
 
@@ -2871,6 +2921,21 @@ cron.schedule('* * * * *', async () => {
       for (const r of proceeds) {
         if (r.id) sendSignalAlert(r).catch(e => console.error('[Telegram] Signal alert error:', e.message));
       }
+    }
+
+    // ── Mercato generated signal (Flow 3) — US500 only, runs at end of cycle ─
+    try {
+      const us500Data = db.getLatestMarketData('US500');
+      if (us500Data && us500Data.close) {
+        await checkAndFireMercatoSignal(
+          us500Data.close,
+          db,
+          db.insertSignal,
+          sendSignalAlert
+        );
+      }
+    } catch(e) {
+      console.error('[Mercato] Cron hook error:', e.message);
     }
   } catch(e) {
     console.error('[Cron] Scoring error:', e.message);

@@ -337,6 +337,25 @@ function initSchema() {
   db.run('CREATE INDEX IF NOT EXISTS idx_abc_skips_gate_ts ON abc_skips(gate, ts)');
   db.run('CREATE INDEX IF NOT EXISTS idx_abc_skips_symbol ON abc_skips(symbol)');
 
+  // ── Mercato context table ─────────────────────────────────────────────────────
+  // Daily macro context (currently US500 only) from Silvia Vianello analysis.
+  db.run(`CREATE TABLE IF NOT EXISTS mercato_context (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol        TEXT    NOT NULL DEFAULT 'US500',
+    bias          TEXT    NOT NULL,
+    regime        TEXT,
+    levels_res    TEXT    DEFAULT '[]',
+    levels_sup    TEXT    DEFAULT '[]',
+    bull_inv      REAL,
+    bear_inv      REAL,
+    catalyst      REAL,
+    catalyst_note TEXT,
+    notes         TEXT,
+    expires_at    INTEGER NOT NULL,
+    created_at    INTEGER NOT NULL
+  )`);
+  console.log('[DB] mercato_context table ready');
+
   console.log('[DB] abc_rec_sent, daily_bias, class_c_signals, abc_skips tables ready');
 
   db.run(`CREATE TABLE IF NOT EXISTS weights (
@@ -1701,8 +1720,68 @@ function isAbcInfoRecSentRecently(signalId) {
   return !!row;
 }
 
+// ── Mercato context ───────────────────────────────────────────────────────────
+function upsertMercatoContext(ctx) {
+  try {
+    const symbol = ctx.symbol || 'US500';
+    run('DELETE FROM mercato_context WHERE symbol = ?', [symbol]);
+    run(
+      `INSERT INTO mercato_context
+        (symbol, bias, regime, levels_res, levels_sup,
+         bull_inv, bear_inv, catalyst, catalyst_note,
+         notes, expires_at, created_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        symbol,
+        ctx.bias || 'NEUTRAL',
+        ctx.regime || null,
+        JSON.stringify(ctx.resistances || []),
+        JSON.stringify(ctx.supports || []),
+        ctx.invalidation?.bull ?? null,
+        ctx.invalidation?.bear ?? null,
+        ctx.catalyst?.level ?? (typeof ctx.catalyst === 'number' ? ctx.catalyst : null),
+        ctx.catalyst?.note ?? null,
+        ctx.notes || null,
+        ctx.expires_at || (Date.now() + 24 * 60 * 60 * 1000),
+        Date.now()
+      ]
+    );
+    persist();
+    return true;
+  } catch(e) {
+    console.error('[DB] upsertMercatoContext error:', e?.message);
+    return false;
+  }
+}
+
+function getMercatoContext(symbol) {
+  try {
+    const row = get(
+      'SELECT * FROM mercato_context WHERE symbol = ? AND expires_at > ? ORDER BY created_at DESC LIMIT 1',
+      [symbol || 'US500', Date.now()]
+    );
+    if (!row) return null;
+    return {
+      ...row,
+      levels_res: JSON.parse(row.levels_res || '[]'),
+      levels_sup: JSON.parse(row.levels_sup || '[]')
+    };
+  } catch(e) {
+    console.error('[DB] getMercatoContext error:', e?.message);
+    return null;
+  }
+}
+
+function getRecentMarketHistory(symbol, limit = 12) {
+  return all(
+    'SELECT symbol, high, low, close, snapshot_ts, ts FROM market_data_history WHERE symbol = ? ORDER BY snapshot_ts DESC LIMIT ?',
+    [symbol, limit]
+  );
+}
+
 module.exports = {
   init, isReady, persist, persistNow, run, all, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
+  upsertMercatoContext, getMercatoContext, getRecentMarketHistory,
   upsertMarketData, getLatestMarketData, insertAbcSignal, getAbcSignals, getOpenAbcSignals, activateAbcSignal, updateAbcActive, updateAbcOutcome, getAbcStats,
   insertSignal, refineSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,
