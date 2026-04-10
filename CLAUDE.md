@@ -80,7 +80,7 @@ Changes since 20260401.7:
 | trade_journal | Auto-generated signal snapshots on every WIN/LOSS/EXPIRED |
 | market_data_history | Snapshots of market_data per symbol per scoring run (14-day retention) |
 | fxssi_history | Historical FXSSI order book snapshots for backtesting (UNIQUE symbol+snapshot_time) |
-| mercato_context | Daily macro context (US500 only) — bias, regime, levels, invalidation, catalyst |
+| mercato_context | Daily macro context (all 30 symbols, one active row per symbol) — bias, regime, levels, invalidation, catalyst |
 
 ### Key columns on signals table
 
@@ -145,8 +145,8 @@ Dynamic minScore floor:
 | Momentum <15% | momScore critically weak | ×0.88 + force WATCH |
 | Momentum <25% | momScore weak | force WATCH |
 | Lower TF only | absWeightedStruct < 1.5 | force WATCH |
-| Mercato APPROVED | US500, ±3pt level match + bias aligned | ×1.12 |
-| Mercato CONFLICT | US500, direction opposes daily bias | ×0.85 |
+| Mercato APPROVED | Any symbol w/ active context, ±3pt level match + bias aligned | ×1.12 |
+| Mercato CONFLICT | Any symbol w/ active context, direction opposes daily bias | ×0.85 |
 | Multiplier floor | All penalties combined | min 0.70 |
 
 ### Hard gates (return null — no signal)
@@ -473,8 +473,8 @@ Bonus (0-2): RSI divergence + volume
 | POST | /api/abc-ignore | Mark signal as not taken |
 | GET | /api/abc-stats | Analytics by class, FXSSI gate, session, symbol |
 | POST | /api/reset-abc | Clear abc_signals, class_c_signals, abc_skips, abc_rec_sent |
-| POST | /api/mercato | Upsert daily Mercato context (US500) — bias, levels, invalidation, catalyst |
-| GET | /api/mercato | Current Mercato context (`?symbol=US500`) |
+| POST | /api/mercato | Upsert daily Mercato context (any of 30 symbols) — bias, levels, invalidation, catalyst |
+| GET | /api/mercato | Current Mercato context — `?symbol=US500` (any supported symbol) |
 
 ## FXSSI history collector
 
