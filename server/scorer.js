@@ -4,6 +4,7 @@ const { getLatestMarketData, getWeights, insertSignal, getOpenSignals, getLatest
         refineSignal, insertWatchSignal, getAllSignals, getSetting } = db;
 const { isMarketOpen } = require('./marketHours');
 const { checkMercato, applyMercatoToScore } = require('./mercato');
+const { sendSignalAlert } = require('./telegram');
 
 // Lazy-loaded modules (avoid circular deps at startup)
 let _claudeLearner, _cbCalendar;
@@ -2166,7 +2167,7 @@ function buildReasoning(symbol, direction, { biasSc, fxssiSc, obSc, sessionSc, d
   return parts.join(' · ');
 }
 
-function scoreAllPriority() {
+async function scoreAllPriority() {
   // SYMBOLS and isMarketOpen hoisted to module top
   const results = [];
   for (const symbol of Object.keys(SYMBOLS)) {
@@ -2201,6 +2202,29 @@ function scoreAllPriority() {
       });
     }
   }
+
+  // ── Mercato generated signal check ───────────────────────────
+  try {
+    const { checkAndFireMercatoSignal } = require('./mercato');
+    const activeContexts = db.getAllActiveMercatoContexts();
+    for (const ctx of activeContexts) {
+      const symData = db.getLatestMarketData
+        ? db.getLatestMarketData(ctx.symbol)
+        : db.prepare('SELECT * FROM market_data WHERE symbol=?').get(ctx.symbol);
+      if (symData && symData.close) {
+        await checkAndFireMercatoSignal(
+          ctx.symbol,
+          symData.close,
+          db,
+          (sig) => db.insertSignal ? db.insertSignal(sig) : null,
+          sendSignalAlert
+        );
+      }
+    }
+  } catch(e) {
+    console.error('[Mercato] Generated signal check error:', e.message);
+  }
+
   return results.sort((a, b) => {
     if (a.verdict === 'CLOSED' && b.verdict !== 'CLOSED') return 1;
     if (b.verdict === 'CLOSED' && a.verdict !== 'CLOSED') return -1;

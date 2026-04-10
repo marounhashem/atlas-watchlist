@@ -1655,7 +1655,7 @@ app.get('/api/data/:symbol', (req, res) => {
 app.get('/api/score-now', async (req, res) => {
   if (!dbReady) return res.json({ error: 'DB not ready' });
   let results;
-  try { results = scoreAllPriority(); }
+  try { results = await scoreAllPriority(); }
   catch(e) { console.error('[Score-now] error:', e); return res.json({ error: 'Scoring failed' }); }
   const proceeds = results.filter(r => r.verdict === 'PROCEED');
   const watches  = results.filter(r => r.verdict === 'WATCH');
@@ -2939,7 +2939,7 @@ app.post('/api/paper-outcome', (req, res) => {
 cron.schedule('* * * * *', async () => {
   if (!dbReady) return;
   try {
-    const results = scoreAllPriority();
+    const results = await scoreAllPriority();
     _lastScoringResults = results; // cache for instant HTTP response
     // Snapshot market data every 5 minutes — offset to :03/:08/:13/… to avoid
     // colliding with the FXSSI 20-min scrape at :01/:21/:41
