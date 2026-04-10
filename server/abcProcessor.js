@@ -87,30 +87,6 @@ function processAbcWebhook(data, deps) {
   const cfg = SYMBOLS[sym];
   const dp = getAbcDp(sym);
 
-  // noOrderBook early exit — route to class_c_signals, skip all level calculation
-  if (cfg?.noOrderBook) {
-    const obT = parseFloat(data.obTop) || 0;
-    const obB = parseFloat(data.obBot) || 0;
-    const refEntry = (obT > 0 && obB > 0) ? Math.round(((obT + obB) / 2) * dp) / dp : 0;
-    try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'NOORDERBOOK',
-      skipReason: 'noOrderBook symbol routed to class_c_signals',
-      detail: `obTop=${obT} obBot=${obB}`, abcVersion: ABC_VERSION,
-      session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
-    if (refEntry <= 0) { console.log(`[ABC] ${sym} — noOrderBook + no valid price, skipping`); return; }
-    const { getSessionNow: gsn } = require('./config');
-    const cId = db.insertClassCSignal({
-      symbol: sym, direction, score: pineClass === 'A' ? 88 : pineClass === 'B' ? 75 : 62,
-      verdict: 'OBSERVE', entry: refEntry, sl: 0, tp1: 0, tp2: 0, tp3: 0, rr: 0,
-      session: gsn ? gsn() : 'unknown', reasoning: 'No contrarian data available for this class of symbols — observation only',
-      crowdGate: 'NO_DATA', abcVersion: ABC_VERSION,
-      obTop: obT || null, obBot: obB || null,
-      rawPayload: JSON.stringify(data), ts: Date.now(), expiresAt: Date.now() + 8 * 3600000
-    });
-    console.log(`[ABC] ${sym} Class${pineClass} — noOrderBook → class_c_signals id:${cId}`);
-    if (broadcast) broadcast({ type: 'CLASS_C_SIGNAL', signalId: cId, symbol: sym, direction, score: 62, ts: Date.now() });
-    return;
-  }
-
   // ── Structural entry/SL/TP calculation ────────────────────────────
   const obTop = parseFloat(data.obTop);
   const obBot = parseFloat(data.obBot);
@@ -265,10 +241,28 @@ function processAbcWebhook(data, deps) {
     rejStrong:    data.rejStrong === true || data.rejStrong === 1 || data.rejStrong === '1' || data.rejStrong === 'true'
   };
 
-  // Cooldown — 30min same symbol + direction
+  // ACTIVE guard — never save a new signal if one is already ACTIVE for this symbol+direction
   try {
-    const recent = db.getAbcSignals(20).find(s =>
-      s.symbol === sym && s.direction === direction && (Date.now() - s.ts) < 30 * 60 * 1000
+    const alreadyActive = db.getOpenAbcSignals().find(s =>
+      s.symbol === sym && s.direction === direction && s.outcome === 'ACTIVE'
+    );
+    if (alreadyActive) {
+      console.log(`[ABC] ${sym} ${direction} — already ACTIVE id:${alreadyActive.id} — skipping`);
+      try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'ACTIVE_EXISTS',
+        skipReason: `already ACTIVE id:${alreadyActive.id}`, detail: `active_ts=${alreadyActive.active_ts}`,
+        abcVersion: ABC_VERSION, session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
+      return;
+    }
+  } catch(e) {}
+
+  // Cooldown — 30min same symbol + direction (widen scan + exclude archived/ignored)
+  try {
+    const recent = db.getAbcSignals(200).find(s =>
+      s.symbol === sym &&
+      s.direction === direction &&
+      s.outcome !== 'ARCHIVED' &&
+      s.outcome !== 'IGNORED' &&
+      (Date.now() - s.ts) < 30 * 60 * 1000
     );
     if (recent) {
       const ageMin = Math.round((Date.now() - recent.ts) / 60000);
@@ -317,6 +311,39 @@ function processAbcWebhook(data, deps) {
 
   // Session
   const session = getSessionNow ? getSessionNow() : 'unknown';
+
+  // ── noOrderBook ROUTING — route to class_c_signals with real levels ────────
+  if (cfg?.noOrderBook) {
+    const score = buildAbcScore(pineClass, conditions, 'NO_DATA', dailyAligned);
+    const breakdown = buildAbcBreakdown(conditions, 'NO_DATA', dailyAligned);
+    const reasoning = 'No contrarian data available for this class of symbols — observation only';
+    const expiryHours = cfg?.type?.includes('forex') ? 4 : cfg?.type?.includes('crypto') ? 8 : 6;
+    const expiresAt = Date.now() + expiryHours * 3600000;
+
+    const cId = db.insertClassCSignal({
+      symbol: sym, direction, score, verdict: 'OBSERVE',
+      entry, sl, tp1, tp2, tp3, rr,
+      session, reasoning,
+      breakdown: JSON.stringify(breakdown),
+      crowdGate: 'NO_DATA', abcVersion: ABC_VERSION,
+      obTop: obTop || null, obBot: obBot || null, preBosSwing,
+      expiresAt,
+      rawPayload: JSON.stringify(data)
+    });
+
+    try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'NOORDERBOOK',
+      skipReason: 'noOrderBook symbol routed to class_c_signals',
+      detail: `entry=${entry} sl=${sl} tp=${tp2}`, abcVersion: ABC_VERSION,
+      session, ts: Date.now() }); } catch(e) {}
+
+    console.log(`[ABC] ${sym} Class${pineClass} — noOrderBook → class_c_signals id:${cId}`);
+    if (broadcast) broadcast({
+      type: 'CLASS_C_SIGNAL', signalId: cId, symbol: sym, direction,
+      verdict: 'OBSERVE', entry, sl, tp: tp2,
+      rr, score, session, reasoning, ts: Date.now()
+    });
+    return;
+  }
 
   // ── CLASS C ROUTING ─────────────────────────────────────────────────────────
   if (pineClass === 'C') {

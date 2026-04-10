@@ -1265,6 +1265,21 @@ app.get('/api/watch-signals', (req, res) => {
   }
 });
 
+app.post('/api/reset-abc', (req, res) => {
+  try {
+    const db = require('./db');
+    db.run('DELETE FROM abc_signals');
+    db.run('DELETE FROM class_c_signals');
+    db.run('DELETE FROM abc_skips');
+    db.run('DELETE FROM abc_rec_sent');
+    db.persist();
+    console.log('[Reset] ABC tables cleared — abc_signals, class_c_signals, abc_skips, abc_rec_sent');
+    res.json({ ok: true, message: 'ABC tables cleared.' });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/reset-signals', (req, res) => {
   try {
     const db = require('./db');
