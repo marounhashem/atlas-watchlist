@@ -6,8 +6,14 @@
 // Follows Rule 6: penalises/boosts only, never blocks (except Flow 3 generated
 // signals, which are opt-in and hard-gated by detectFlushRecovery).
 
-const MERCATO_SYMBOLS   = new Set(['US500']);
-const LEVEL_TOLERANCE   = 3.0;   // ±3 points
+const MERCATO_SYMBOLS = new Set([
+  'US500','US30','US100','DE40','UK100','J225','HK50','CN50',
+  'GOLD','SILVER','OILWTI','COPPER','PLATINUM',
+  'BTCUSD','ETHUSD',
+  'EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD',
+  'EURJPY','EURGBP','EURAUD','EURCHF','GBPJPY','GBPCHF','AUDJPY'
+]);
+const LEVEL_TOLERANCE   = 3.0;   // ±3 points / pips
 
 // Score multipliers — same philosophy as existing macro multipliers
 const MULT_APPROVED     = 1.12;  // level match + bias align → +12%
@@ -92,10 +98,10 @@ function applyMercatoToScore(score, mercatoResult) {
 
 // Scan last ~1h of 5-min snapshots for a flush/recovery or breakout retest at
 // the target level. Hard gate for buildMercatoSignal. Not used by Flow 1 or 2.
-function detectFlushRecovery(level, direction, db) {
-  const bars = db.getRecentMarketHistory('US500', FLUSH_LOOKBACK);
+function detectFlushRecovery(level, direction, symbol, db) {
+  const bars = db.getRecentMarketHistory(symbol, FLUSH_LOOKBACK);
   if (!bars || bars.length < 3) {
-    console.log('[Mercato] detectFlushRecovery — insufficient history, bars:', bars ? bars.length : 0);
+    console.log(`[Mercato] detectFlushRecovery — insufficient history for ${symbol}: ${bars ? bars.length : 0} bars`);
     return null;
   }
 
@@ -111,7 +117,7 @@ function detectFlushRecovery(level, direction, db) {
       if (flushed && recovered && stillHolding) {
         const flushDepth = +(level - bar.low).toFixed(1);
         const quality    = i <= 2 ? 'A+' : i <= 4 ? 'A' : 'B';
-        console.log(`[Mercato] FAILED_BREAKDOWN at ${level} depth ${flushDepth} ${i} bars ago ⭐${quality}`);
+        console.log(`[Mercato] FAILED_BREAKDOWN at ${level} on ${symbol} — depth ${flushDepth}, ${i} bars ago ⭐${quality}`);
         return {
           pattern:     'FAILED_BREAKDOWN',
           flush_price: +bar.low.toFixed(2),
@@ -130,7 +136,7 @@ function detectFlushRecovery(level, direction, db) {
       if (flushed && recovered && stillBelow) {
         const flushDepth = +(bar.high - level).toFixed(1);
         const quality    = i <= 2 ? 'A+' : i <= 4 ? 'A' : 'B';
-        console.log(`[Mercato] FAILED_BREAKOUT at ${level} depth ${flushDepth} ${i} bars ago ⭐${quality}`);
+        console.log(`[Mercato] FAILED_BREAKOUT at ${level} on ${symbol} — depth ${flushDepth}, ${i} bars ago ⭐${quality}`);
         return {
           pattern:     'FAILED_BREAKOUT',
           flush_price: +bar.high.toFixed(2),
@@ -149,7 +155,7 @@ function detectFlushRecovery(level, direction, db) {
   const nearLevel    = Math.abs(current.close - level) <= LEVEL_TOLERANCE;
 
   if (direction === 'LONG' && crossedBelow && current.close > level && nearLevel) {
-    console.log(`[Mercato] BREAKOUT_RETEST bullish at ${level}`);
+    console.log(`[Mercato] BREAKOUT_RETEST bullish at ${level} on ${symbol}`);
     return {
       pattern:  'BREAKOUT_RETEST',
       bars_ago: null,
@@ -159,7 +165,7 @@ function detectFlushRecovery(level, direction, db) {
   }
 
   if (direction === 'SHORT' && crossedAbove && current.close < level && nearLevel) {
-    console.log(`[Mercato] BREAKOUT_RETEST bearish at ${level}`);
+    console.log(`[Mercato] BREAKOUT_RETEST bearish at ${level} on ${symbol}`);
     return {
       pattern:  'BREAKOUT_RETEST',
       bars_ago: null,
@@ -168,12 +174,13 @@ function detectFlushRecovery(level, direction, db) {
     };
   }
 
-  console.log(`[Mercato] No pattern at level ${level} direction ${direction} — signal suppressed`);
+  console.log(`[Mercato] No pattern at level ${level} direction ${direction} on ${symbol} — signal suppressed`);
   return null;
 }
 
 function buildMercatoSignal(ctx, currentPrice, direction, db) {
-  const cooldownKey = `US500_${direction}`;
+  const symbol      = ctx.symbol || 'US500';
+  const cooldownKey = `${symbol}_${direction}`;
   const lastFired   = _mercatoCooldowns.get(cooldownKey) || 0;
   if (Date.now() - lastFired < MERCATO_COOLDOWN_MS) return null;
 
@@ -188,7 +195,7 @@ function buildMercatoSignal(ctx, currentPrice, direction, db) {
   if (!biasMatch) return null;
 
   // Hard gate — require flush/recovery or breakout retest pattern
-  const patternResult = detectFlushRecovery(hitLevel, direction, db);
+  const patternResult = detectFlushRecovery(hitLevel, direction, symbol, db);
   if (!patternResult) return null;
 
   // SL from invalidation level, or 0.3% fallback
@@ -233,7 +240,7 @@ function buildMercatoSignal(ctx, currentPrice, direction, db) {
   ].filter(Boolean).join('\n');
 
   return {
-    symbol:         'US500',
+    symbol,
     direction,
     entry:          Math.round(currentPrice * 100) / 100,
     sl,
@@ -259,10 +266,10 @@ function buildMercatoSignal(ctx, currentPrice, direction, db) {
   };
 }
 
-async function checkAndFireMercatoSignal(currentPrice, db, insertSignalFn, sendTelegramFn) {
+async function checkAndFireMercatoSignal(symbol, currentPrice, db, insertSignalFn, sendTelegramFn) {
   try {
-    if (!currentPrice) return;
-    const ctx = db.getMercatoContext('US500');
+    if (!symbol || !currentPrice) return;
+    const ctx = db.getMercatoContext(symbol);
     if (!ctx) return;
 
     const directions = ctx.bias === 'BULL' ? ['LONG']
@@ -276,8 +283,8 @@ async function checkAndFireMercatoSignal(currentPrice, db, insertSignalFn, sendT
       const id = insertSignalFn(sig);
       if (!id) continue;
 
-      _mercatoCooldowns.set(`US500_${direction}`, Date.now());
-      console.log(`[Mercato] Generated signal fired: US500 ${direction} @ ${currentPrice} level=${sig.mercato_level} score=${sig.score} ⭐${sig.pattern_quality}`);
+      _mercatoCooldowns.set(`${symbol}_${direction}`, Date.now());
+      console.log(`[Mercato] Signal fired: ${symbol} ${direction} @ ${currentPrice} level=${sig.mercato_level} pattern=${sig.pattern} ⭐${sig.pattern_quality}`);
 
       if (sendTelegramFn) {
         try {

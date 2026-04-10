@@ -102,6 +102,15 @@ let dbReady = false;
 
 // Custom body parser that handles Pine Script's invalid NaN values
 // Body parser — sanitize NaN/Infinity BEFORE JSON.parse (TradingView sends these)
+// ── CORS — allows local HTML macro tool (file://) to push mercato context ────
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
+  next();
+});
+
 // This is the original working parser. express.json() cannot handle NaN literals.
 // Parses body for ALL POST routes including webhooks. Webhook handlers respond
 // 200 OK immediately after parsing completes (~5ms), then process async.
@@ -2923,12 +2932,15 @@ cron.schedule('* * * * *', async () => {
       }
     }
 
-    // ── Mercato generated signal (Flow 3) — US500 only, runs at end of cycle ─
+    // ── Mercato generated signals (Flow 3) — loop all symbols w/ active context ─
     try {
-      const us500Data = db.getLatestMarketData('US500');
-      if (us500Data && us500Data.close) {
+      const activeContexts = db.getAllActiveMercatoContexts();
+      for (const ctx of activeContexts) {
+        const symData = db.getLatestMarketData(ctx.symbol);
+        if (!symData || !symData.close) continue;
         await checkAndFireMercatoSignal(
-          us500Data.close,
+          ctx.symbol,
+          symData.close,
           db,
           db.insertSignal,
           sendSignalAlert

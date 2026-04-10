@@ -1779,9 +1779,28 @@ function getRecentMarketHistory(symbol, limit = 12) {
   );
 }
 
+// Returns all non-expired contexts. upsertMercatoContext DELETEs existing rows
+// per symbol before inserting, so there's always at most one active row per symbol.
+function getAllActiveMercatoContexts() {
+  try {
+    const rows = all(
+      'SELECT * FROM mercato_context WHERE expires_at > ? ORDER BY created_at DESC',
+      [Date.now()]
+    );
+    return rows.map(row => ({
+      ...row,
+      levels_res: JSON.parse(row.levels_res || '[]'),
+      levels_sup: JSON.parse(row.levels_sup || '[]')
+    }));
+  } catch(e) {
+    console.error('[DB] getAllActiveMercatoContexts error:', e?.message);
+    return [];
+  }
+}
+
 module.exports = {
   init, isReady, persist, persistNow, run, all, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
-  upsertMercatoContext, getMercatoContext, getRecentMarketHistory,
+  upsertMercatoContext, getMercatoContext, getAllActiveMercatoContexts, getRecentMarketHistory,
   upsertMarketData, getLatestMarketData, insertAbcSignal, getAbcSignals, getOpenAbcSignals, activateAbcSignal, updateAbcActive, updateAbcOutcome, getAbcStats,
   insertSignal, refineSignal, updateOutcome, updatePaperOutcome, getPaperTradeStats, updateMFE,
   getOpenSignals, getRecentOutcomes,
