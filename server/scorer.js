@@ -151,7 +151,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260407.3'; // ABC parallel system added
+const SCORER_VERSION = '20260410.1'; // Lower TF only hard gate — require weightedStruct >= 1.5 for PROCEED
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -1757,6 +1757,14 @@ function scoreSymbol(symbol) {
     : macroAdjustedScore >= macroEffectiveMin - 12 ? 'WATCH' : 'SKIP';
   let macroVerdict = structureZero && macroRawVerdict === 'PROCEED' ? 'WATCH' : macroRawVerdict;
   if (momentumForceWatch && macroVerdict === 'PROCEED') macroVerdict = 'WATCH';
+
+  // Hard gate — lower TF only signals are not tradeable
+  // Require at least 1H alignment (weightedStruct >= 1.5) for PROCEED
+  // Signals with only 1m/5m/15m alignment → force WATCH regardless of score
+  if (absWeightedStruct < 1.5 && macroVerdict === 'PROCEED') {
+    console.log(`[Scorer] ${symbol} ${direction} — lower TF only (${absWeightedStruct.toFixed(1)}/8.5) → forced WATCH`);
+    macroVerdict = 'WATCH';
+  }
 
   // ── Event risk tags ──────────────────────────────────────────────────────────
   let eventRiskNote = '';
