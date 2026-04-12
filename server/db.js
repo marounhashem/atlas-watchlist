@@ -388,6 +388,7 @@ function initSchema() {
   try { db.run('ALTER TABLE market_intel ADD COLUMN affected_symbols TEXT'); } catch(e) {}
   try { db.run('ALTER TABLE market_intel ADD COLUMN key_levels TEXT'); } catch(e) {}
   try { db.run('ALTER TABLE market_intel ADD COLUMN time_horizon TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE market_intel ADD COLUMN level_types TEXT'); } catch(e) {}
 
   // DXY reference — stored but not scored
   db.run(`CREATE TABLE IF NOT EXISTS dxy_reference (

@@ -2281,8 +2281,12 @@ app.post('/api/market-intel', async (req, res) => {
       };
 
       const expiryHours = body.ttl ? Math.max(1, Math.round(body.ttl / 3600000)) : 24;
-      const id = db.insertMarketIntel(body.text || body.summary, body.symbol || null, analysis, expiryHours);
+      const fullContent = body.content || body.text || body.summary;
+      const id = db.insertMarketIntel(fullContent, body.symbol || null, analysis, expiryHours);
       if (!id) return res.status(500).json({ ok: false, error: 'DB write failed' });
+      if (body.level_types) {
+        try { db.run('UPDATE market_intel SET level_types=? WHERE id=?', [typeof body.level_types === 'string' ? body.level_types : JSON.stringify(body.level_types), id]); } catch(e) {}
+      }
 
       broadcast({ type: 'INTEL_UPDATE', symbol: body.symbol || 'ALL', summary: body.summary });
       console.log(`[Intel] Pre-analyzed: ${body.symbol || 'ALL'} ${body.direction || ''} — ${String(body.summary).slice(0, 80)}`);
