@@ -2809,7 +2809,27 @@ async function loadIntel() {
       const expColor = exp.cls === 'urgent' ? 'var(--red,var(--short))' : exp.cls === 'warning' ? 'var(--amber,var(--watch))' : exp.cls === 'week' ? 'var(--accent,#8866ff)' : 'var(--dim)';
       let symBadges = '';
       try { const syms = JSON.parse(i.affected_symbols || '[]'); symBadges = syms.map(s => { const c = symBadgeColors[getSymbolAssetClass(s)]; return `<span style="font-size:10px;padding:1px 6px;border-radius:10px;border:1px solid ${c};color:${c};font-family:var(--mono,'monospace');font-weight:700;">${s}</span>`; }).join(' '); } catch(e) {}
-      let lvls = ''; try { let lt = {}; try { lt = JSON.parse(i.level_types || '{}'); } catch(e) {} const l = JSON.parse(i.key_levels || '[]'); if (l.length) { const rl = l.filter(v => (lt[v]||lt[String(v)])==='resistance'); const sl = l.filter(v => (lt[v]||lt[String(v)])==='support'); lvls = `<div style="font-family:var(--mono,'monospace');font-size:11px;margin-top:6px;">${rl.length ? `<span style="color:#ff3d5a">RES: ${rl.join(' → ')}</span>` : ''}${sl.length ? `<span style="color:#00ff88;margin-left:8px">SUP: ${sl.join(' → ')}</span>` : ''}${!rl.length && !sl.length ? l.join(' | ') : ''}</div>`; } } catch(e) {}
+      const fullText = (i.content || i.summary || '').trim();
+      const bodyHtml = fullText.split('\n').map(line => {
+        const l = line.trim();
+        if (!l) return '<div style="height:5px;"></div>';
+        const el = esc(l);
+        if (l.startsWith('📍')) return `<div style="font-weight:600;color:#4da6ff;margin-bottom:6px;">${el}</div>`;
+        if (l.startsWith('📝')) return `<div style="color:#c8d8e8;font-style:italic;margin:4px 0;">${el}</div>`;
+        if (l.startsWith('🔴')) return `<div style="color:#ff3d5a;margin:2px 0;">${el}</div>`;
+        if (l.startsWith('🟢')) return `<div style="color:#00ff88;margin:2px 0;">${el}</div>`;
+        if (l.startsWith('❌')) return `<div style="color:#ff3d5a;opacity:0.8;margin:2px 0;">${el}</div>`;
+        if (l.startsWith('🎯')) return `<div style="color:#ffb300;margin:2px 0;">${el}</div>`;
+        if (l.startsWith('•'))  return `<div style="color:#ffb300;margin-left:10px;margin:2px 0;">${el}</div>`;
+        if (l.startsWith('──')) return `<div style="color:#3a5a7a;font-size:10px;margin:8px 0 3px;letter-spacing:.1em;">${el}</div>`;
+        return `<div style="color:#c8d8e8;margin:2px 0;">${el}</div>`;
+      }).join('');
+      const hasFormattedLevels = fullText.includes('🔴') || fullText.includes('RESISTANCE');
+      let lvls = '';
+      if (!hasFormattedLevels) {
+        try { let lt = {}; try { lt = JSON.parse(i.level_types || '{}'); } catch(e) {} const l = JSON.parse(i.key_levels || '[]'); if (l.length) { const rl = l.filter(v => (lt[v]||lt[String(v)])==='resistance'); const sl = l.filter(v => (lt[v]||lt[String(v)])==='support'); const nl = l.filter(v => !rl.includes(v) && !sl.includes(v)); lvls = `<div style="font-family:var(--mono,'monospace');font-size:11px;margin-top:6px;">${rl.length ? `<div style="color:#ff3d5a">RES: ${rl.join(' → ')}</div>` : ''}${sl.length ? `<div style="color:#00ff88">SUP: ${sl.join(' → ')}</div>` : ''}${nl.length ? `<div style="color:var(--dim)">${nl.join(' | ')}</div>` : ''}</div>`; } } catch(e) {}
+      }
+      const bodyWrap = `<div style="font-size:13px;line-height:1.6;margin-bottom:8px;max-height:400px;overflow-y:auto;">${bodyHtml}</div>`;
       return `<div id="intel-card-${i.id}" style="background:var(--surface,#0f0f18);border:1px solid var(--border);border-left:3px solid var(--amber,var(--watch));border-radius:8px;padding:14px;margin-bottom:10px;transition:all .3s;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
           <div style="display:flex;gap:6px;align-items:center;">
@@ -2821,7 +2841,7 @@ async function loadIntel() {
             <button onclick="deleteIntel(${i.id})" style="background:transparent;border:none;color:var(--dim);font-size:16px;cursor:pointer;padding:2px 6px;border-radius:4px;line-height:1;" onmouseover="this.style.color='var(--red,var(--short))'" onmouseout="this.style.color='var(--dim)'" title="Delete">×</button>
           </div>
         </div>
-        <div style="font-size:13px;color:var(--txt2,var(--muted));line-height:1.6;margin-bottom:8px;">${esc(i.content || i.text || i.summary || '')}</div>
+        ${bodyWrap}
         ${symBadges ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">${symBadges}</div>` : ''}
         ${lvls}
       </div>`;
