@@ -2809,35 +2809,33 @@ async function loadIntel() {
       const expColor = exp.cls === 'urgent' ? 'var(--red,var(--short))' : exp.cls === 'warning' ? 'var(--amber,var(--watch))' : exp.cls === 'week' ? 'var(--accent,#8866ff)' : 'var(--dim)';
       let symBadges = '';
       try { const syms = JSON.parse(i.affected_symbols || '[]'); symBadges = syms.map(s => { const c = symBadgeColors[getSymbolAssetClass(s)]; return `<span style="font-size:10px;padding:1px 6px;border-radius:10px;border:1px solid ${c};color:${c};font-family:var(--mono,'monospace');font-weight:700;">${s}</span>`; }).join(' '); } catch(e) {}
-      const fullText = (i.content || i.text || i.summary || '').trim();
-      const bodyHtml = fullText.split('\n').map(line => {
+      const raw = (i.content || i.text || i.summary || '').trim();
+      const bodyHtml = raw ? raw.split('\n').map(line => {
         const l = line.trim();
-        if (!l) return '<div style="height:4px"></div>';
-        if (l.startsWith('📍')) return `<div style="color:#4da6ff;font-weight:600;margin-bottom:6px;font-family:var(--mono,'monospace');font-size:11px;">${esc(l)}</div>`;
-        if (l.startsWith('📝')) return `<div style="color:#c8d8e8;font-style:italic;margin:4px 0;font-size:11px;line-height:1.6;">${esc(l.slice(3))}</div>`;
-        if (l.startsWith('🔴')) return `<div style="color:#ff3d5a;font-family:var(--mono,'monospace');font-size:11px;margin:2px 0;">${esc(l)}</div>`;
-        if (l.startsWith('🟢')) return `<div style="color:#00ff88;font-family:var(--mono,'monospace');font-size:11px;margin:2px 0;">${esc(l)}</div>`;
-        if (l.startsWith('❌')) return `<div style="color:#ff3d5a;opacity:.75;font-size:11px;margin:1px 0;">${esc(l)}</div>`;
-        if (l.startsWith('🎯')) return `<div style="color:#ffb300;font-size:11px;margin:2px 0;">${esc(l)}</div>`;
-        if (l.startsWith('•'))  return `<div style="color:#ffb300;font-size:11px;margin:1px 0 1px 12px;">${esc(l)}</div>`;
-        if (l.startsWith('──')) return `<div style="color:#2a4560;font-size:10px;letter-spacing:.08em;margin:8px 0 3px;">${esc(l)}</div>`;
-        return `<div style="color:#c8d8e8;font-size:11px;line-height:1.6;margin:1px 0;">${esc(l)}</div>`;
-      }).join('');
-      const hasFormattedLevels = fullText.includes('🔴') || fullText.includes('RESISTANCE');
-      let lvls = '';
-      if (!hasFormattedLevels) {
+        if (!l) return '<div style="height:5px;"></div>';
+        if (/^\[.+\|.+\|.+\]/.test(l)) return `<div style="font-family:monospace;font-size:12px;font-weight:600;color:#4da6ff;margin-bottom:8px;">${esc(l)}</div>`;
+        if (l.startsWith('NOTES:')) return `<div style="font-size:11px;color:#c8d8e8;line-height:1.65;margin-bottom:6px;">${esc(l.slice(6).trim())}</div>`;
+        if (l.startsWith('===')) return `<div style="font-family:monospace;font-size:10px;color:#2a4560;letter-spacing:.1em;margin:10px 0 4px;">${esc(l)}</div>`;
+        if (l.startsWith('[RES]')) return `<div style="font-family:monospace;font-size:11px;color:#ff3d5a;margin:2px 0;"><strong>RES</strong> ${esc(l.slice(5).trim())}</div>`;
+        if (l.startsWith('[SUP]')) return `<div style="font-family:monospace;font-size:11px;color:#00ff88;margin:2px 0;"><strong>SUP</strong> ${esc(l.slice(5).trim())}</div>`;
+        if (l.startsWith('[BULL INV]')) return `<div style="font-size:11px;color:#ff3d5a;opacity:.75;margin:1px 0;">Bull invalidation: ${esc(l.slice(10).trim())}</div>`;
+        if (l.startsWith('[BEAR INV]')) return `<div style="font-size:11px;color:#ff3d5a;opacity:.75;margin:1px 0;">Bear invalidation: ${esc(l.slice(10).trim())}</div>`;
+        if (l.startsWith('[CATALYST]')) return `<div style="font-size:11px;color:#ffb300;margin:2px 0;">Catalyst: ${esc(l.slice(10).trim())}</div>`;
+        if (l.startsWith('- ')) return `<div style="font-size:11px;color:#ffb300;margin:1px 0 1px 10px;">&bull; ${esc(l.slice(2).trim())}</div>`;
+        return `<div style="font-size:11px;color:#c8d8e8;line-height:1.6;">${esc(l)}</div>`;
+      }).join('') : '';
+      let lvlsFallback = '';
+      if (!raw.includes('[RES]') && !raw.includes('[SUP]')) {
         try {
           const kl = JSON.parse(i.key_levels || '[]');
           let lt = {}; try { lt = JSON.parse(i.level_types || '{}'); } catch(e) {}
           const rl = kl.filter(v => (lt[v]||lt[String(v)])==='resistance');
           const sl = kl.filter(v => (lt[v]||lt[String(v)])==='support');
-          const nl = kl.filter(v => !rl.includes(v) && !sl.includes(v));
-          if (rl.length) lvls += `<div style="color:#ff3d5a;font-size:11px;font-family:var(--mono,'monospace');">🔴 RES: ${rl.map(v=>Number(v).toLocaleString()).join(' → ')}</div>`;
-          if (sl.length) lvls += `<div style="color:#00ff88;font-size:11px;font-family:var(--mono,'monospace');">🟢 SUP: ${sl.map(v=>Number(v).toLocaleString()).join(' → ')}</div>`;
-          if (!rl.length && !sl.length && nl.length) lvls = `<div style="color:#5a7a94;font-size:11px;">Levels: ${nl.map(v=>Number(v).toLocaleString()).join(' | ')}</div>`;
+          if (rl.length) lvlsFallback += `<div style="font-family:monospace;font-size:11px;color:#ff3d5a;margin-top:6px;"><strong>RES</strong> ${rl.map(v=>Number(v).toLocaleString()).join(' &rsaquo; ')}</div>`;
+          if (sl.length) lvlsFallback += `<div style="font-family:monospace;font-size:11px;color:#00ff88;"><strong>SUP</strong> ${sl.map(v=>Number(v).toLocaleString()).join(' &rsaquo; ')}</div>`;
         } catch(e) {}
       }
-      const bodyWrap = `<div style="font-size:11px;line-height:1.6;margin-bottom:8px;max-height:500px;overflow-y:auto;">${bodyHtml}</div>`;
+      const bodyWrap = `<div style="line-height:1.6;margin-bottom:8px;max-height:500px;overflow-y:auto;">${bodyHtml}${lvlsFallback}</div>`;
       return `<div id="intel-card-${i.id}" style="background:var(--surface,#0f0f18);border:1px solid var(--border);border-left:3px solid var(--amber,var(--watch));border-radius:8px;padding:14px;margin-bottom:10px;transition:all .3s;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
           <div style="display:flex;gap:6px;align-items:center;">
@@ -2851,7 +2849,6 @@ async function loadIntel() {
         </div>
         ${bodyWrap}
         ${symBadges ? `<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px;">${symBadges}</div>` : ''}
-        ${lvls}
       </div>`;
     }).join('');
   } catch(e) {}
