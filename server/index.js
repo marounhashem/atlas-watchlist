@@ -2281,6 +2281,9 @@ app.post('/api/market-intel', async (req, res) => {
       };
 
       const expiryHours = body.ttl ? Math.max(1, Math.round(body.ttl / 3600000)) : 24;
+      if (body.symbol) {
+        try { db.run('DELETE FROM market_intel WHERE symbol = ? AND expires_at > ?', [body.symbol, Date.now()]); } catch(e) {}
+      }
       const fullContent = body.content || body.text || body.summary;
       const id = db.insertMarketIntel(fullContent, body.symbol || null, analysis, expiryHours);
       if (!id) return res.status(500).json({ ok: false, error: 'DB write failed' });
