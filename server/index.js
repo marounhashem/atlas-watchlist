@@ -1324,6 +1324,22 @@ app.get('/api/mercato', (req, res) => {
   }
 });
 
+app.post('/api/abc-archive-old', (req, res) => {
+  try {
+    db.run(`UPDATE abc_signals SET outcome='ARCHIVED'
+            WHERE abc_version IS NULL
+            OR abc_version != '20260409.1'`);
+    db.run(`UPDATE class_c_signals SET outcome='ARCHIVED'
+            WHERE abc_version IS NULL
+            OR abc_version != '20260409.1'`);
+    db.persist();
+    console.log('[ABC] Pre-rebuild signals archived');
+    res.json({ ok: true, message: 'Pre-rebuild signals archived' });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/reset-abc', (req, res) => {
   try {
     const db = require('./db');
@@ -3033,6 +3049,54 @@ cron.schedule('1,21,41 * * * *', async () => {
   }
 });
 
+// FXSSI watchdog — every 15min, force a rescrape if >10 symbols are stale >60min
+cron.schedule('*/15 * * * *', async () => {
+  if (!dbReady) return;
+  try {
+    const { SYMBOLS } = require('./config');
+    const now = Date.now();
+    let staleCount = 0;
+    for (const sym of Object.keys(SYMBOLS)) {
+      try {
+        const md = db.getLatestMarketData(sym);
+        const fetchedAt = md?.fxssi_fetched_at || md?.ts || 0;
+        if (md && (now - fetchedAt) > 60 * 60 * 1000) staleCount++;
+      } catch(e) {}
+    }
+    if (staleCount > 10) {
+      console.log(`[FXSSI Watchdog] ${staleCount} symbols stale >60min — forcing rescrape`);
+      await runFXSSIScrape(broadcast);
+    }
+  } catch(e) {
+    console.error('[FXSSI Watchdog] error:', e.message);
+  }
+});
+
+// Macro staleness watchdog — every 6h, auto-refresh if macro is >48h stale
+cron.schedule('0 */6 * * *', async () => {
+  if (!dbReady) return;
+  try {
+    const age = db.getMacroContextAge();
+    if (age && age > 48 * 3600000) {
+      console.log(`[Macro Watchdog] Stale ${Math.round(age / 3600000)}h (>48h) — auto-refreshing`);
+      await runMacroContextFetch(broadcast, 'cron_macro_watchdog');
+    }
+  } catch(e) {
+    console.error('[Macro Watchdog] error:', e.message);
+  }
+});
+
+// Manual force-rescrape endpoint
+app.get('/api/fxssi-force', async (req, res) => {
+  try {
+    const result = await runFXSSIScrape(broadcast);
+    const count = Array.isArray(result) ? result.length : (typeof result === 'number' ? result : null);
+    res.json({ ok: true, scraped: count });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Retirement cron — fires at :02/:22/:42 (aligned with FXSSI scrape at :01/:21/:41)
 // FXSSI scrapes first, then 1 minute later we retire ACTIVE signals
 // Fresh FXSSI data is now in DB when new signals start scoring
@@ -3184,7 +3248,7 @@ async function callClaudeWithSearch(prompt) {
 // This function enforces a hard caller guard — any unrecognised caller is
 // blocked with a throw. On startup, macro context is loaded from DB only.
 // This guard exists because startup macro fetches have regressed 3+ times.
-const MACRO_ALLOWED_CALLERS = new Set(['cron_0700', 'macro_force', 'macro_refresh']);
+const MACRO_ALLOWED_CALLERS = new Set(['cron_0700', 'cron_macro_watchdog', 'macro_force', 'macro_refresh']);
 async function runMacroContextFetch(broadcast, caller) {
   if (!MACRO_ALLOWED_CALLERS.has(caller)) {
     const msg = `[MACRO GUARD] BLOCKED — runMacroContextFetch called by "${caller || 'unknown'}". Only allowed: ${[...MACRO_ALLOWED_CALLERS].join(', ')}`;

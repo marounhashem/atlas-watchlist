@@ -242,34 +242,34 @@ function processAbcWebhook(data, deps) {
     rejStrong:    data.rejStrong === true || data.rejStrong === 1 || data.rejStrong === '1' || data.rejStrong === 'true'
   };
 
-  // ACTIVE guard — never save a new signal if one is already ACTIVE for this symbol+direction
+  // Dedup — direct DB query for last 2h same symbol + direction (excludes terminal outcomes)
   try {
-    const alreadyActive = db.getOpenAbcSignals().find(s =>
-      s.symbol === sym && s.direction === direction && s.outcome === 'ACTIVE'
-    );
-    if (alreadyActive) {
-      console.log(`[ABC] ${sym} ${direction} — already ACTIVE id:${alreadyActive.id} — skipping`);
-      try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'ACTIVE_EXISTS',
-        skipReason: `already ACTIVE id:${alreadyActive.id}`, detail: `active_ts=${alreadyActive.active_ts}`,
+    const recentDup = db.all(
+      `SELECT id, ts FROM abc_signals
+       WHERE symbol=? AND direction=?
+       AND outcome NOT IN ('ARCHIVED','IGNORED','WIN','LOSS','EXPIRED')
+       AND ts > ?
+       LIMIT 1`,
+      [sym, direction, Date.now() - 2 * 3600000]
+    )[0];
+    if (recentDup) {
+      console.log(`[ABC] ${sym} ${direction} — duplicate within 2h (id:${recentDup.id}) — skipping`);
+      try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'COOLDOWN',
+        skipReason: `duplicate within 2h`, detail: `recent_id=${recentDup.id}`,
         abcVersion: ABC_VERSION, session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
       return;
     }
   } catch(e) {}
 
-  // Cooldown — 30min same symbol + direction (widen scan + exclude archived/ignored)
+  // ACTIVE guard — never save a new signal if one is already ACTIVE for this symbol+direction
   try {
-    const recent = db.getAbcSignals(200).find(s =>
-      s.symbol === sym &&
-      s.direction === direction &&
-      s.outcome !== 'ARCHIVED' &&
-      s.outcome !== 'IGNORED' &&
-      (Date.now() - s.ts) < 30 * 60 * 1000
+    const activeExists = db.getOpenAbcSignals().find(s =>
+      s.symbol === sym && s.direction === direction && s.outcome === 'ACTIVE'
     );
-    if (recent) {
-      const ageMin = Math.round((Date.now() - recent.ts) / 60000);
-      console.log(`[ABC] ${sym} ${direction} cooldown (${ageMin}m) — skipping`);
-      try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'COOLDOWN',
-        skipReason: `cooldown ${ageMin}m`, detail: `recent_id=${recent.id}`,
+    if (activeExists) {
+      console.log(`[ABC] ${sym} ${direction} — already ACTIVE id:${activeExists.id} — skipping`);
+      try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'ACTIVE_EXISTS',
+        skipReason: `already ACTIVE id:${activeExists.id}`, detail: `active_ts=${activeExists.active_ts}`,
         abcVersion: ABC_VERSION, session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
       return;
     }
@@ -383,12 +383,22 @@ function processAbcWebhook(data, deps) {
 
   if (gates.blocked || gates.verdict === 'SKIP') {
     try {
+      // Prefer gates.gate; fall back to parsing the reason string
+      const reason = gates.reason || '';
+      const gate = gates.gate
+        || (reason.includes('Gravity')      ? 'GRAVITY'
+          : reason.includes('crowd')        ? 'CROWD'
+          : reason.includes('RR')           ? 'RR'
+          : reason.includes('holiday')      ? 'BANKHOLIDAY'
+          : reason.includes('event')        ? 'PREEVENT'
+          : reason.includes('SL too tight') ? 'MINSL'
+          : 'OTHER');
       const gravPrice = fxssiData?.gravity_price || null;
-      const detail = gates.gate === 'GRAVITY' ? `gravity=${gravPrice} entry=${entry} tp=${tp}`
-                   : gates.gate === 'CROWD'   ? `crowdGate=${crowdGate} dir=${direction}`
+      const detail = gate === 'GRAVITY' ? `gravity=${gravPrice} entry=${entry} tp=${tp}`
+                   : gate === 'CROWD'   ? `crowdGate=${crowdGate} dir=${direction}`
                    : `entry=${entry} sl=${sl} tp=${tp}`;
       db.insertAbcSkip({ symbol: sym, direction, pineClass,
-        gate: gates.gate || 'CROWD', skipReason: gates.reason, detail,
+        gate, skipReason: gates.reason, detail,
         abcVersion: ABC_VERSION, session, ts: Date.now() });
     } catch(e) {}
     return;
@@ -421,6 +431,7 @@ function processAbcWebhook(data, deps) {
   const signalId = db.insertAbcSignal({
     symbol: sym, direction, pineClass, score,
     verdict: gates.verdict, entry, sl, tp,
+    tp1, tp2, tp3,
     rr: gates.rr || rr, session,
     reasoning, breakdown: JSON.stringify(breakdown),
     expiresAt,
