@@ -154,7 +154,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260410.3'; // Mercato context — all 30 symbols, per-symbol generated signals + CORS
+const SCORER_VERSION = '20260410.4'; // Mercato context — all 30 symbols, per-symbol generated signals + CORS
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -965,6 +965,9 @@ function scoreSymbol(symbol) {
     // getMacroContext is in-process via index.js — access via global if available
     const macroCtx = global.atlasGetMacroContext ? global.atlasGetMacroContext() : null;
     const macro = macroCtx ? macroCtx[symbol] : null;
+    if (!macro) {
+      console.log(`[Scorer] ${symbol} — no macro context, skipping macro multiplier`);
+    }
     if (macro && macro.ts && (Date.now() - macro.ts) < 26 * 3600000) macroContextAvailable = true;
     if (macro && macro.ts && (Date.now() - macro.ts) < 26 * 3600000) { // use if <26h old
       const macroConflict =

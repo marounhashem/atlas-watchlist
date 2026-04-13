@@ -1875,6 +1875,22 @@ app.get('/api/macro-context', (req, res) => {
   res.json(getMacroContext());
 });
 
+// Delete macro context for a symbol — cascades to in-memory map so scoring
+// stops applying any macro multiplier until a fresh entry is fetched.
+app.delete('/api/macro-context/:symbol', (req, res) => {
+  try {
+    const symbol = req.params.symbol.toUpperCase();
+    db.run('DELETE FROM macro_context WHERE symbol=?', [symbol]);
+    db.persist();
+    if (macroContext[symbol]) delete macroContext[symbol];
+    console.log(`[Macro] Context deleted for ${symbol}`);
+    broadcast({ type: 'MACRO_DELETED', symbol });
+    res.json({ ok: true, symbol });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Macro single-symbol test — fetches GOLD only, persists to DB, returns result (1 API call)
 app.get('/api/macro-test', async (req, res) => {
   try {

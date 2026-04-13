@@ -1022,6 +1022,12 @@
       </div>
       <div id="intel-preview" style="display:none;"></div>
       <div id="intel-list"></div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:24px 0 12px;">
+        <div class="sec" style="margin:0;color:var(--accent,#4da6ff);">📊 MACRO CONTEXT</div>
+        <span id="macro-badge" style="font-size:11px;color:var(--accent,#4da6ff);"></span>
+      </div>
+      <div id="macro-list"></div>
     </div>
   </div>
 
@@ -1203,6 +1209,10 @@ function connect() {
 }
 
 function handleMessage(msg) {
+  if (msg.type === 'MACRO_DELETED') {
+    if (typeof fetchAndRenderMacroContext === 'function') fetchAndRenderMacroContext();
+    return;
+  }
   if (msg.type==='ABC_SIGNAL') {
     abcSignals.unshift(msg);
     if (activeMainTab === 'abc') renderAbcSignals();
@@ -2624,7 +2634,7 @@ function switchMainTab(tab) {
   if (pane) pane.classList.add('active');
   if (tab === 'forex') renderForexSignals();
   if (tab === 'global') renderGlobalSignals();
-  if (tab === 'intel') loadIntel();
+  if (tab === 'intel') { loadIntel(); fetchAndRenderMacroContext(); }
   if (tab === 'bias') renderBiasTab();
   if (tab === 'stats') renderStatsTab();
   if (tab === 'backtest') populateBtSymbols();
@@ -2889,6 +2899,66 @@ async function deleteIntel(id) {
 }
 setInterval(loadIntel, 60000);
 setTimeout(loadIntel, 2000);
+
+// ── Macro context section in Intel tab ──────────────────────────────────────
+async function fetchAndRenderMacroContext() {
+  try {
+    const res = await fetch('/api/macro-context');
+    const data = await res.json() || {};
+    const list  = document.getElementById('macro-list');
+    const badge = document.getElementById('macro-badge');
+    if (!list) return;
+    const symbols = Object.keys(data).sort();
+    if (badge) badge.textContent = symbols.length ? `Active: ${symbols.length}` : '';
+    if (!symbols.length) {
+      list.innerHTML = '<div style="font-size:12px;color:var(--dim);padding:12px;">No macro context loaded. Trigger via /api/macro-force.</div>';
+      return;
+    }
+    const stale48h = 48 * 3600 * 1000;
+    list.innerHTML = symbols.map(sym => {
+      const m = data[sym] || {};
+      const sent = (m.sentiment || 'NEUTRAL').toUpperCase();
+      const sentColor = sent === 'BULLISH' ? '#00ff88' : sent === 'BEARISH' ? '#ff3d5a' : '#ffb300';
+      const strength = Math.max(0, Math.min(10, Number(m.strength) || 0));
+      const ts = Number(m.ts) || 0;
+      const age = ts ? Date.now() - ts : 0;
+      const stale = ts && age > stale48h;
+      const dateText = ts ? new Date(ts).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+      const dateColor = stale ? '#ffb300' : 'var(--dim)';
+      const datePrefix = stale ? '⚠️ ' : '';
+      return `<div id="macro-card-${esc(sym)}" style="background:var(--surface,#0f0f18);border:1px solid var(--border);border-left:3px solid ${sentColor};border-radius:8px;padding:14px;margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="display:flex;gap:8px;align-items:center;">
+            <span style="font-family:var(--mono,'monospace');font-size:11px;color:var(--accent,#4da6ff);font-weight:700;">📊 ${esc(sym)}</span>
+            <span style="font-size:10px;font-weight:700;color:${sentColor};border:1px solid ${sentColor};border-radius:12px;padding:2px 10px;">${sent}</span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;">
+            <span style="font-family:var(--mono,'monospace');font-size:11px;color:${dateColor};">${datePrefix}${dateText}</span>
+            <button onclick="deleteMacroContext('${esc(sym)}')" style="background:transparent;border:none;color:var(--dim);font-size:16px;cursor:pointer;padding:2px 6px;border-radius:4px;line-height:1;" onmouseover="this.style.color='var(--red,var(--short))'" onmouseout="this.style.color='var(--dim)'" title="Delete">×</button>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <div style="font-size:10px;color:var(--dim);font-family:var(--mono,'monospace');">STR ${strength}/10</div>
+          <div style="flex:1;height:4px;background:#1a1a28;border-radius:2px;overflow:hidden;">
+            <div style="width:${strength * 10}%;height:100%;background:${sentColor};"></div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--txt2,var(--muted));line-height:1.55;">${esc(m.summary || '')}</div>
+      </div>`;
+    }).join('');
+  } catch(e) {}
+}
+async function deleteMacroContext(symbol) {
+  try {
+    const card = document.getElementById('macro-card-' + symbol);
+    if (card) card.style.opacity = '0.4';
+    await fetch(`/api/macro-context/${encodeURIComponent(symbol)}`, { method: 'DELETE' });
+    fetchAndRenderMacroContext();
+    if (typeof showToast === 'function') showToast(`📊 Macro context cleared for ${symbol}`);
+  } catch(e) {}
+}
+setInterval(fetchAndRenderMacroContext, 60000);
+setTimeout(fetchAndRenderMacroContext, 2200);
 
 // ── Settings ────────────────────────────────────────────────────────────────
 async function loadSettings() {
