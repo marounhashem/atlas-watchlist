@@ -1293,7 +1293,6 @@ function handleMessage(msg) {
       } catch(e) {}
       renderSignals();
     }
-    if (msg.outcome==='LOSS') showToast(`❌ LOSS — ${msg.symbol} ${msg.direction} ${msg.pnlPct}%`, 'loss');
   } else if (msg.type==='CYCLE_RETIRED') {
     // Fetch fresh past signals after retirement
     fetch('/api/past-signals').then(r=>r.json()).then(data=>{
