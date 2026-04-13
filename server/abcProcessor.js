@@ -120,9 +120,22 @@ function processAbcWebhook(data, deps) {
   const slAtr = atr || (obTop && obBot ? Math.abs(obTop - obBot) : entry * 0.003);
   let sl;
 
-  // Validate preBosSwing is on the correct side of entry
+  // Asset-class SL cap — used twice (preBosSwing sanity + final distance cap)
+  const slMaxPct = getSlMaxPct(sym);
+
+  // Validate preBosSwing is on the correct side of entry AND not pathologically
+  // far away. If the structural swing is >3× the asset class SL cap, ignore it
+  // and fall back to OB edge + ATR. Prevents e.g. ETHUSD anchoring SL to a $630
+  // bear-market swing hundreds of dollars below entry.
+  const maxReasonableSwingPct = slMaxPct * 3;
+  const rawSwingDist = preBosSwing && entry > 0 ? Math.abs(entry - preBosSwing) / entry : 0;
   const preBosValid = preBosSwing && !isNaN(preBosSwing)
-    && (direction === 'LONG' ? preBosSwing < entry : preBosSwing > entry);
+    && (direction === 'LONG' ? preBosSwing < entry : preBosSwing > entry)
+    && rawSwingDist <= maxReasonableSwingPct;
+
+  if (preBosSwing && !preBosValid && rawSwingDist > maxReasonableSwingPct) {
+    console.log(`[ABC] ${sym} preBosSwing ${preBosSwing} ignored — ${(rawSwingDist*100).toFixed(1)}% away > max ${(maxReasonableSwingPct*100).toFixed(1)}%`);
+  }
 
   if (preBosValid) {
     sl = direction === 'LONG'
@@ -143,7 +156,7 @@ function processAbcWebhook(data, deps) {
   }
 
   // ── SL distance cap by asset class ──────────────────────────────────────
-  const slMaxPct = getSlMaxPct(sym);
+  // slMaxPct already computed above for preBosSwing sanity check
   let slDist = Math.abs(entry - sl);
   const slPct = entry > 0 ? slDist / entry : 0;
   let slCapped = false;
