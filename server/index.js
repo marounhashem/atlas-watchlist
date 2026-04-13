@@ -2355,9 +2355,25 @@ app.post('/api/market-intel', async (req, res) => {
 app.delete('/api/market-intel/:id', (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid id' });
-  db.deleteIntel(id);
-  console.log(`[Intel] Deleted intel id:${id}`);
-  res.json({ ok: true, deleted: id });
+  try {
+    // Look up the intel item before deleting so we know the symbol
+    const intel = db.all('SELECT * FROM market_intel WHERE id=?', [id])[0];
+    db.deleteIntel(id);
+
+    // If intel had a symbol, clear mercato context for that symbol too
+    if (intel?.symbol) {
+      db.run('DELETE FROM mercato_context WHERE symbol=?', [intel.symbol]);
+      db.persist();
+      console.log(`[Intel] Deleted intel id:${id} + cleared Mercato context for ${intel.symbol}`);
+      broadcast({ type: 'MERCATO_UPDATE', symbol: intel.symbol, bias: null, regime: null });
+    } else {
+      console.log(`[Intel] Deleted intel id:${id}`);
+    }
+
+    res.json({ ok: true, deleted: id });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.delete('/api/market-intel', (req, res) => {
