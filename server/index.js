@@ -1324,22 +1324,6 @@ app.get('/api/mercato', (req, res) => {
   }
 });
 
-app.post('/api/abc-archive-old', (req, res) => {
-  try {
-    db.run(`UPDATE abc_signals SET outcome='ARCHIVED'
-            WHERE abc_version IS NULL
-            OR abc_version != '20260409.1'`);
-    db.run(`UPDATE class_c_signals SET outcome='ARCHIVED'
-            WHERE abc_version IS NULL
-            OR abc_version != '20260409.1'`);
-    db.persist();
-    console.log('[ABC] Pre-rebuild signals archived');
-    res.json({ ok: true, message: 'Pre-rebuild signals archived' });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
 app.post('/api/reset-abc', (req, res) => {
   try {
     const db = require('./db');
@@ -3099,17 +3083,6 @@ cron.schedule('0 */6 * * *', async () => {
     }
   } catch(e) {
     console.error('[Macro Watchdog] error:', e.message);
-  }
-});
-
-// Manual force-rescrape endpoint
-app.get('/api/fxssi-force', async (req, res) => {
-  try {
-    const result = await runFXSSIScrape(broadcast);
-    const count = Array.isArray(result) ? result.length : (typeof result === 'number' ? result : null);
-    res.json({ ok: true, scraped: count });
-  } catch(e) {
-    res.status(500).json({ error: e.message });
   }
 });
 

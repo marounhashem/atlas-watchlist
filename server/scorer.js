@@ -1754,6 +1754,7 @@ function scoreSymbol(symbol) {
   if (!noOB && data.fxssi_trapped == null) {
     macroAdjustedScore = Math.round(macroAdjustedScore * 0.88);
     macroNote += ' · ⚠ No trapped data — penalty applied';
+    console.log(`[Scorer] ${symbol} noTrapPenalty ×0.88 — trapped=null on OB symbol`);
   }
 
   // Ranging daily: reduced floor for spot (was +4, now +2)
