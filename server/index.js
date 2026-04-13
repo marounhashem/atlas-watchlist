@@ -36,8 +36,15 @@ const server = http.createServer((req, res) => {
   // This guarantees TradingView gets 200 OK in <1ms regardless of server load
   if (req.method === 'POST' && req.url.startsWith('/webhook/')) {
     // Send 200 immediately — before reading body, before any middleware
+    const t0 = Date.now();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end('{"ok":true}');
+    const respMs = Date.now() - t0;
+    if (respMs > 20) {
+      console.warn(`[Webhook] ⚠ slow 200 — ${respMs}ms for ${req.url}`);
+    } else {
+      console.log(`[Webhook] 200 in ${respMs}ms for ${req.url}`);
+    }
 
     // Read body async — stream is still open even after response sent
     // because we used res.end() on the RESPONSE, not closed the REQUEST stream
