@@ -2212,9 +2212,7 @@ async function scoreAllPriority() {
     const { checkAndFireMercatoSignal } = require('./mercato');
     const activeContexts = db.getAllActiveMercatoContexts();
     for (const ctx of activeContexts) {
-      const symData = db.getLatestMarketData
-        ? db.getLatestMarketData(ctx.symbol)
-        : db.prepare('SELECT * FROM market_data WHERE symbol=?').get(ctx.symbol);
+      const symData = db.getLatestMarketData(ctx.symbol);
       if (symData && symData.close) {
         await checkAndFireMercatoSignal(
           ctx.symbol,
