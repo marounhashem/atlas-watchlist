@@ -606,10 +606,18 @@ app.post('/api/abc-ignore', (req, res) => {
 app.post('/api/abc-archive-old', (req, res) => {
   try {
     const ver = ABC_VERSION;
-    db.run("UPDATE abc_signals SET outcome='ARCHIVED' WHERE abc_version != ? OR abc_version IS NULL", [ver]);
-    db.run("UPDATE class_c_signals SET outcome='ARCHIVED' WHERE abc_version != ? OR abc_version IS NULL", [ver]);
+    // 1. Version mismatch — pre-rebuild signals
+    db.run("UPDATE abc_signals SET outcome='ARCHIVED' WHERE (abc_version != ? OR abc_version IS NULL) AND outcome NOT IN ('WIN','LOSS')", [ver]);
+    db.run("UPDATE class_c_signals SET outcome='ARCHIVED' WHERE (abc_version != ? OR abc_version IS NULL) AND outcome NOT IN ('WIN','LOSS')", [ver]);
+    // 2. Broken OPEN rows — no tp1/tp2/tp3 (pre-fix inserts on the same version)
+    db.run("UPDATE abc_signals SET outcome='ARCHIVED' WHERE outcome='OPEN' AND (tp1 IS NULL OR tp2 IS NULL OR tp3 IS NULL)");
+    db.run("UPDATE class_c_signals SET outcome='ARCHIVED' WHERE outcome='OPEN' AND (tp1 IS NULL OR tp2 IS NULL OR tp3 IS NULL)");
+    // 3. Stale OPEN rows — anything older than 24h that never went ACTIVE
+    const cutoff = Date.now() - 24 * 3600000;
+    db.run("UPDATE abc_signals SET outcome='ARCHIVED' WHERE outcome='OPEN' AND ts < ?", [cutoff]);
+    db.run("UPDATE class_c_signals SET outcome='ARCHIVED' WHERE outcome='OPEN' AND ts < ?", [cutoff]);
     db.persist();
-    console.log(`[ABC] Archived signals older than ${ver}`);
+    console.log(`[ABC] Archived — version<${ver}, null TPs, and OPEN>24h`);
     res.json({ ok: true, version: ver });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
