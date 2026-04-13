@@ -51,6 +51,17 @@ function checkAbcOutcomes(broadcast) {
 
     // ── OPEN → ACTIVE (entry touch) ─────────────────────────────────
     if (sig.outcome === 'OPEN') {
+      // Thesis invalidation — OPEN >6h and price >5% away from entry → EXPIRED
+      const ageHours = (Date.now() - sig.ts) / 3600000;
+      const awayPct = direction === 'LONG'
+        ? (price - entry) / entry
+        : (entry - price) / entry;
+      if (ageHours > 6 && awayPct > 0.05) {
+        db.updateAbcOutcome(id, 'EXPIRED', 0, `thesis stale: ${ageHours.toFixed(1)}h, ${(awayPct * 100).toFixed(1)}% away`);
+        console.log(`[ABC Outcome] ${sig.symbol} ${direction} id:${id} → EXPIRED (thesis stale: ${ageHours.toFixed(1)}h, ${(awayPct * 100).toFixed(1)}% away from entry ${entry})`);
+        if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, outcome: 'EXPIRED', ts: Date.now() });
+        continue;
+      }
       const touched = direction === 'LONG'
         ? barLow <= entry + tolerance
         : barHigh >= entry - tolerance;

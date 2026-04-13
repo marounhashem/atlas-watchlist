@@ -306,6 +306,24 @@ function checkOutcomes(broadcast) {
       }
     }
 
+    // ── Thesis invalidation — OPEN >6h and price moved >5% away from entry ─────
+    // The setup is dead — current price has rejected the thesis without ever
+    // touching entry. Auto-expire so the dashboard doesn't fill with stale ideas.
+    if (currentState === 'OPEN' && entry && price) {
+      const ageHours = (Date.now() - sig.ts) / 3600000;
+      // Distance is measured in the direction *away* from entry — a LONG that
+      // gapped up never to return is invalidated, same for a SHORT that gapped down.
+      const awayPct = direction === 'LONG'
+        ? (price - entry) / entry  // positive = price ran up away from a buy-the-dip entry
+        : (entry - price) / entry; // positive = price dumped away from a sell-the-rip entry
+      if (ageHours > 6 && awayPct > 0.05) {
+        updateOutcome(id, 'EXPIRED', 0);
+        console.log(`[Outcome] ${sig.symbol} ${direction} → EXPIRED (thesis stale: ${ageHours.toFixed(1)}h old, price ${(awayPct * 100).toFixed(1)}% away from entry ${entry})`);
+        if (broadcast) broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction, outcome: 'EXPIRED', ts: Date.now() });
+        continue;
+      }
+    }
+
     // ── Expire OPEN signals past their expiry time ─────────────────────────────
     if (currentState === 'OPEN') {
       const expired = sig.expires_at ? Date.now() > sig.expires_at : (Date.now() - sig.ts) / 3600000 > 48;
