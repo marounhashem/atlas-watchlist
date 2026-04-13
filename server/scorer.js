@@ -1751,10 +1751,11 @@ function scoreSymbol(symbol) {
   } catch(e) {}
 
   // noTrap penalty — missing squeeze validation on OB-capable symbols
+  // ×0.80 (was 0.88) — validated as dominant loss factor in recent outcomes
   if (!noOB && data.fxssi_trapped == null) {
-    macroAdjustedScore = Math.round(macroAdjustedScore * 0.88);
+    macroAdjustedScore = Math.round(macroAdjustedScore * 0.80);
     macroNote += ' · ⚠ No trapped data — penalty applied';
-    console.log(`[Scorer] ${symbol} noTrapPenalty ×0.88 — trapped=null on OB symbol`);
+    console.log(`[Scorer] ${symbol} noTrapPenalty ×0.80 applied`);
   }
 
   // Ranging daily: reduced floor for spot (was +4, now +2)

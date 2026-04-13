@@ -963,7 +963,11 @@
     <div style="padding:12px 0;">
       <div class="sec" style="margin:0 0 8px;">💡 TRADE IDEA FEEDBACK</div>
       <textarea id="idea-input" placeholder="Describe your trade idea...&#10;e.g. GOLD SHORT at 4720, target 4680, stop 4740.&#10;RSI 72, rejected resistance twice." style="width:100%;height:80px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:10px;resize:vertical;"></textarea>
-      <div style="display:flex;gap:6px;margin-top:6px;">
+      <div style="display:flex;gap:6px;margin-top:6px;align-items:center;">
+        <div style="display:flex;border:1px solid var(--border);border-radius:4px;overflow:hidden;">
+          <button id="idea-mode-quick" onclick="setIdeaMode('quick')" style="background:var(--accent);color:var(--bg);border:none;padding:6px 10px;font-size:9px;font-weight:700;cursor:pointer;">QUICK</button>
+          <button id="idea-mode-deep"  onclick="setIdeaMode('deep')"  style="background:transparent;color:var(--text);border:none;border-left:1px solid var(--border);padding:6px 10px;font-size:9px;font-weight:700;cursor:pointer;">DEEP</button>
+        </div>
         <button onclick="submitIdea()" style="background:var(--accent);color:var(--bg);border:none;border-radius:4px;padding:6px 16px;font-size:10px;font-weight:700;cursor:pointer;">ANALYSE</button>
         <button id="idea-copy-btn" onclick="copyIdeaExport()" style="display:none;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 12px;font-size:9px;cursor:pointer;">📋 COPY FOR CLAUDE</button>
       </div>
@@ -995,6 +999,7 @@
         <button class="filter-btn" id="abc-of-past" onclick="toggleAbcOutcome('past')" style="font-size:9px;padding:2px 7px;">CLOSED</button>
       </div>
       <div id="abc-stats-panel" style="margin-bottom:12px;padding:10px;background:var(--bg);border:1px solid var(--border2);border-radius:6px;"></div>
+      <div id="primed-strip" style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 0 4px;margin-bottom:8px;border-bottom:1px solid var(--border);"></div>
       <div id="abc-container"><div class="empty">No ABC signals yet — waiting for Pine alerts on /webhook/pine-abc</div></div>
     </div>
   </div>
@@ -2638,7 +2643,7 @@ function switchMainTab(tab) {
   if (tab === 'stats') renderStatsTab();
   if (tab === 'backtest') populateBtSymbols();
   if (tab === 'settings') loadSettings();
-  if (tab === 'abc') { renderAbcSignals(); fetchAbcStats(); }
+  if (tab === 'abc') { renderAbcSignals(); fetchAbcStats(); fetchPrimedSymbols(); }
 }
 
 // ── Forex data ─────────────────────────────────────────────────────────────
@@ -3022,10 +3027,94 @@ async function saveSettings() {
 
 // ── Trade idea feedback ─────────────────────────────────────────────────────
 let lastIdeaExport = '';
+let ideaMode = 'quick';
+function setIdeaMode(m) {
+  ideaMode = m;
+  const q = document.getElementById('idea-mode-quick');
+  const d = document.getElementById('idea-mode-deep');
+  if (q) { q.style.background = m === 'quick' ? 'var(--accent)' : 'transparent'; q.style.color = m === 'quick' ? 'var(--bg)' : 'var(--text)'; }
+  if (d) { d.style.background = m === 'deep'  ? 'var(--accent)' : 'transparent'; d.style.color = m === 'deep'  ? 'var(--bg)' : 'var(--text)'; }
+}
+
+function parseIdeaForQuick(text) {
+  const t = (text || '').toUpperCase();
+  const syms = ['GOLD','SILVER','OILWTI','BTCUSD','ETHUSD','US30','US100','US500','DE40','UK100','J225','HK50','CN50','COPPER','PLATINUM','EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD','EURJPY','EURGBP','EURAUD','EURCHF','GBPJPY','GBPCHF','AUDJPY'];
+  const aliases = { 'XAUUSD':'GOLD','XAGUSD':'SILVER','WTI':'OILWTI','USOIL':'OILWTI','CRUDE':'OILWTI','BTC':'BTCUSD','ETH':'ETHUSD','NAS100':'US100','NASDAQ':'US100','SPX':'US500','S&P':'US500','DOW':'US30','DAX':'DE40','FTSE':'UK100','NKD':'J225','NIKKEI':'J225' };
+  let sym = null;
+  for (const s of syms) { if (t.includes(s)) { sym = s; break; } }
+  if (!sym) for (const a of Object.keys(aliases)) { if (t.includes(a)) { sym = aliases[a]; break; } }
+  let dir = null;
+  if (/\b(SHORT|SELL|BEAR|DOWN|BEARISH)\b/.test(t)) dir = 'SHORT';
+  else if (/\b(LONG|BUY|BULL|UP|BULLISH)\b/.test(t)) dir = 'LONG';
+  return { sym, dir };
+}
+
+function renderQuickIdeaResult(d) {
+  const vColor = d.verdict === 'STRONG'   ? 'var(--green,var(--proceed))'
+                : d.verdict === 'MODERATE' ? 'var(--amber,var(--watch))'
+                : d.verdict === 'WEAK'     ? 'var(--amber,var(--watch))'
+                : 'var(--red,var(--short))';
+  const vBg    = d.verdict === 'STRONG' ? 'rgba(0,200,150,.1)'
+                : d.verdict === 'AVOID'  ? 'rgba(255,60,100,.1)'
+                : 'rgba(245,166,35,.1)';
+  const statusColor = st =>
+      st === 'PASS'    ? 'var(--green,var(--proceed))'
+    : st === 'PARTIAL' ? 'var(--amber,var(--watch))'
+    : st === 'WEAK'    ? 'var(--amber,var(--watch))'
+    : st === 'WARN'    ? 'var(--amber,var(--watch))'
+    : st === 'FAIL'    ? 'var(--red,var(--short))'
+    : 'var(--dim)';
+  const rows = (d.checks || []).map(c => {
+    const col = statusColor(c.status);
+    return `<div style="display:flex;gap:10px;align-items:flex-start;font-size:11px;padding:6px 10px;border-radius:4px;background:var(--surface2,#16161f);margin-bottom:4px;border-left:2px solid ${col};">
+      <span style="min-width:60px;color:var(--dim);font-weight:700;letter-spacing:.04em;">${esc(c.label)}</span>
+      <span style="min-width:56px;color:${col};font-weight:700;font-size:10px;">${esc(c.status)}</span>
+      <span style="color:var(--txt2,var(--muted));line-height:1.55;">${esc(c.detail || '')}</span>
+    </div>`;
+  }).join('');
+  const levels = d.levels || {};
+  const levelsRow = [];
+  if (levels.gravity)        levelsRow.push(`<span style="font-family:var(--mono,monospace);font-size:10px;color:var(--watch);">GRAV ${levels.gravity}</span>`);
+  if (levels.middleOfVolume) levelsRow.push(`<span style="font-family:var(--mono,monospace);font-size:10px;color:var(--dim);">MoV ${levels.middleOfVolume}</span>`);
+  if (levels.slClusters?.length) levelsRow.push(`<span style="font-family:var(--mono,monospace);font-size:10px;color:var(--short);">SL ${levels.slClusters.join(' · ')}</span>`);
+  if (levels.losingClusters?.length) levelsRow.push(`<span style="font-family:var(--mono,monospace);font-size:10px;color:var(--proceed);">LOSE ${levels.losingClusters.join(' · ')}</span>`);
+  const risksHtml = (d.risks && d.risks.length)
+    ? `<div style="margin-top:10px;"><div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;">Macro Risks</div>${d.risks.map(r=>`<div style="font-size:11px;color:var(--txt2,var(--muted));padding:4px 8px;background:rgba(255,60,100,.06);border-left:2px solid var(--short);margin-bottom:3px;border-radius:3px;">${esc(r)}</div>`).join('')}</div>`
+    : '';
+  return `<div style="display:inline-flex;align-items:center;gap:10px;padding:10px 20px;border-radius:8px;background:${vBg};border:1px solid ${vColor};margin-bottom:14px;">
+    <span style="font-size:18px;font-weight:800;color:${vColor};letter-spacing:.05em;">${d.verdict}</span>
+    <span style="font-size:12px;color:var(--txt2,var(--muted));">Score ${d.score}/100 · ${esc(d.symbol)} ${esc(d.direction)}${d.price ? ' @ ' + d.price : ''}</span>
+    <span style="font-size:10px;color:var(--dim);">Session: ${esc(d.session || 'n/a')}${d.dataAge != null ? ' · ' + d.dataAge + 'm old' : ''}</span>
+  </div>
+  ${levelsRow.length ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:8px 10px;background:var(--bg,#09090f);border-radius:6px;">${levelsRow.join('')}</div>` : ''}
+  ${rows}
+  ${risksHtml}`;
+}
+
 async function submitIdea() {
   const input = document.getElementById('idea-input');
   const result = document.getElementById('idea-result');
   if (!input || !input.value.trim()) return;
+
+  if (ideaMode === 'quick') {
+    const parsed = parseIdeaForQuick(input.value);
+    if (!parsed.sym || !parsed.dir) {
+      result.innerHTML = `<div style="color:var(--short);font-size:10px;">Could not detect symbol + direction from text. Try 'GOLD SHORT' or 'BTCUSD LONG'.</div>`;
+      return;
+    }
+    result.innerHTML = '<div style="color:var(--muted);font-size:9px;">Analysing…</div>';
+    try {
+      const res = await fetch(`/api/idea-analyse?symbol=${encodeURIComponent(parsed.sym)}&direction=${encodeURIComponent(parsed.dir)}`);
+      const d = await res.json();
+      if (d.error) { result.innerHTML = `<div style="color:var(--short);font-size:10px;">${esc(d.error)}</div>`; return; }
+      document.getElementById('idea-copy-btn').style.display = 'none';
+      result.innerHTML = renderQuickIdeaResult(d);
+    } catch(e) {
+      result.innerHTML = `<div style="color:var(--short);font-size:9px;">${esc(e.message)}</div>`;
+    }
+    return;
+  }
+
   result.innerHTML = '<div style="color:var(--muted);font-size:9px;">Analysing...</div>';
   try {
     const res = await fetch('/api/trade-feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idea: input.value.trim() }) });
@@ -3071,6 +3160,29 @@ function copyIdeaExport() {
   btn.textContent = '✓ Copied! Paste into Claude.ai';
   setTimeout(() => btn.textContent = '📋 COPY FOR CLAUDE', 3000);
 }
+
+// ── Primed symbols strip (ABC tab) ──────────────────────────────────────────
+function fetchPrimedSymbols() {
+  fetch('/api/primed-symbols').then(r => r.json()).then(data => {
+    const strip = document.getElementById('primed-strip');
+    if (!strip) return;
+    if (!data.symbols || !data.symbols.length) {
+      strip.innerHTML = '<span style="font-size:10px;color:var(--dim);">No primed crowd setups right now</span>';
+      return;
+    }
+    strip.innerHTML = data.symbols.map(s => {
+      const col = s.strength === 'EXTREME' ? 'var(--proceed)'
+                : s.strength === 'STRONG'  ? 'var(--watch)'
+                : 'var(--dim)';
+      const dir = s.direction === 'LONG' ? '▲' : '▼';
+      const crowdSide = s.direction === 'LONG' ? 'SHORT' : 'LONG';
+      return `<span style="background:var(--surface2,#16161f);border:1px solid ${col};border-radius:4px;padding:3px 8px;font-size:10px;font-family:var(--mono,'JetBrains Mono',monospace);color:${col};cursor:default;" title="${s.crowdPct}% crowd ${crowdSide} — ${s.strength}">${dir} ${esc(s.symbol)} ${s.crowdPct}%</span>`;
+    }).join('');
+  }).catch(() => {});
+}
+setInterval(() => {
+  if (activeMainTab === 'abc') fetchPrimedSymbols();
+}, 120000);
 
 // ── ABC signals ─────────────────────────────────────────────────────────────
 function setAbcClass(cls) {

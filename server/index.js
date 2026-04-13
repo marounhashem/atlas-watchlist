@@ -622,6 +622,228 @@ app.post('/api/abc-archive-old', (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Quick idea analysis — deterministic, no Anthropic API ────────────────────
+// Uses live market_data, fxssi_analysis, macro_context for a structured check
+// list. See Deep Analysis (/api/trade-feedback) for the Claude-export variant.
+app.get('/api/idea-analyse', (req, res) => {
+  try {
+    const { SYMBOLS, getSessionNow } = require('./config');
+    const sym = (req.query.symbol || '').toUpperCase();
+    const dir = (req.query.direction || '').toUpperCase();
+    if (!sym || !['LONG','SHORT'].includes(dir)) {
+      return res.status(400).json({ error: 'symbol and direction required' });
+    }
+    const symCfg = SYMBOLS[sym];
+    let md = null;
+    try { md = db.getLatestMarketData(sym); } catch(e) {}
+    if (!md) return res.json({ error: 'No market data for ' + sym });
+
+    let fxAnalysis = null;
+    try {
+      const fa = md.fxssi_analysis ? JSON.parse(md.fxssi_analysis) : null;
+      fxAnalysis = fa?.fxssiAnalysis
+        ? (typeof fa.fxssiAnalysis === 'string' ? JSON.parse(fa.fxssiAnalysis) : fa.fxssiAnalysis)
+        : fa;
+    } catch(e) {}
+
+    let structure = {};
+    try {
+      const raw = JSON.parse(md.raw_payload || '{}');
+      structure = raw.structure || {};
+    } catch(e) {}
+
+    const longPct  = md.fxssi_long_pct;
+    const shortPct = md.fxssi_short_pct;
+    const trapped  = md.fxssi_trapped;
+    const gravity  = fxAnalysis?.gravity?.price;
+    const rsi      = md.rsi;
+    const price    = md.close;
+
+    const checks = [];
+    let score = 0;
+
+    // 1. Crowd positioning
+    const crowdSide = dir === 'LONG' ? shortPct : longPct;
+    if (trapped === (dir === 'LONG' ? 'SHORT' : 'LONG')) {
+      score += crowdSide >= 75 ? 30 : crowdSide >= 65 ? 22 : 15;
+      checks.push({
+        label: 'Crowd Sentiment', status: 'PASS',
+        detail: `${Math.round(crowdSide || 0)}% crowd on wrong side — contrarian squeeze setup`
+      });
+    } else if (trapped == null && crowdSide > 55) {
+      score += 5;
+      checks.push({
+        label: 'Crowd Sentiment', status: 'WEAK',
+        detail: `${Math.round(crowdSide || 50)}% lean but no trapped confirmation`
+      });
+    } else {
+      checks.push({
+        label: 'Crowd Sentiment', status: 'FAIL',
+        detail: trapped
+          ? 'Crowd positioned with direction — no squeeze fuel'
+          : 'Crowd split — no contrarian edge'
+      });
+    }
+
+    // 2. Structure alignment
+    const SW = { '1d': 3, '4h': 2, '1h': 1.5, '15m': 1, '5m': 0.5, '1m': 0.5 };
+    let wStruct = 0;
+    const aligned = [];
+    for (const [tf, w] of Object.entries(SW)) {
+      const v = structure[tf] || 0;
+      if ((dir === 'LONG' && v === 1) || (dir === 'SHORT' && v === -1)) {
+        wStruct += w; aligned.push(tf);
+      } else if (v !== 0) {
+        wStruct -= w * 0.5;
+      }
+    }
+    if (wStruct >= 5) {
+      score += 25;
+      checks.push({ label: 'Structure', status: 'PASS', detail: `Daily+swing confirmed: ${aligned.join(', ')}` });
+    } else if (wStruct >= 2) {
+      score += 12;
+      checks.push({ label: 'Structure', status: 'PARTIAL', detail: `Partial alignment: ${aligned.join(', ')}` });
+    } else {
+      checks.push({ label: 'Structure', status: 'FAIL', detail: `Structure not aligned with ${dir}` });
+    }
+
+    // 3. RSI
+    if (rsi) {
+      const rsiOk     = dir === 'LONG' ? (rsi >= 40 && rsi <= 65) : (rsi >= 35 && rsi <= 70);
+      const rsiStrong = dir === 'LONG' ? (rsi >= 50 && rsi <= 60) : (rsi >= 40 && rsi <= 55);
+      if (rsiStrong) {
+        score += 15;
+        checks.push({ label: 'RSI', status: 'PASS', detail: `RSI ${Math.round(rsi)} — ideal entry zone` });
+      } else if (rsiOk) {
+        score += 8;
+        checks.push({ label: 'RSI', status: 'PARTIAL', detail: `RSI ${Math.round(rsi)} — acceptable` });
+      } else {
+        checks.push({ label: 'RSI', status: 'FAIL', detail: `RSI ${Math.round(rsi)} — extreme` });
+      }
+    }
+
+    // 4. Gravity
+    if (gravity && price) {
+      const gravDistPct = Math.abs(gravity - price) / price * 100;
+      const gravInPath  = (dir === 'LONG' && gravity > price) || (dir === 'SHORT' && gravity < price);
+      if (gravDistPct < 0.3) {
+        score -= 15;
+        checks.push({ label: 'Gravity', status: 'FAIL', detail: `Price within 0.3% of gravity ${gravity} — SL hunt risk` });
+      } else if (gravDistPct < 1.0 && gravInPath) {
+        score -= 5;
+        checks.push({ label: 'Gravity', status: 'WARN', detail: `Gravity at ${gravity} in nearby TP path` });
+      } else {
+        score += 10;
+        checks.push({ label: 'Gravity', status: 'PASS', detail: `Gravity at ${gravity} — clear of entry zone` });
+      }
+    }
+
+    // 5. Macro context
+    let macro = null;
+    try { macro = db.getStoredMacroContext()[sym] || null; } catch(e) {}
+    if (macro) {
+      const macroAlign    = (macro.sentiment === 'BULLISH' && dir === 'LONG') ||
+                            (macro.sentiment === 'BEARISH' && dir === 'SHORT');
+      const macroConflict = (macro.sentiment === 'BULLISH' && dir === 'SHORT') ||
+                            (macro.sentiment === 'BEARISH' && dir === 'LONG');
+      if (macroAlign) {
+        score += 10;
+        checks.push({ label: 'Macro', status: 'PASS', detail: `${macro.sentiment} (strength ${macro.strength}) confirms ${dir}` });
+      } else if (macroConflict && macro.strength >= 6) {
+        score -= 10;
+        checks.push({ label: 'Macro', status: 'FAIL', detail: `${macro.sentiment} (strength ${macro.strength}) opposes ${dir}` });
+      } else {
+        checks.push({ label: 'Macro', status: 'NEUTRAL', detail: `Macro ${macro.sentiment} — neutral impact` });
+      }
+    }
+
+    // 6. Session
+    const session     = (typeof getSessionNow === 'function') ? getSessionNow() : 'unknown';
+    const peakSession = symCfg?.peakSession;
+    if (session === peakSession) {
+      score += 10;
+      checks.push({ label: 'Session', status: 'PASS', detail: `${session} is peak session for ${sym}` });
+    } else if (session === 'offHours') {
+      score -= 5;
+      checks.push({ label: 'Session', status: 'WARN', detail: 'Off-hours — reduced liquidity' });
+    } else {
+      checks.push({ label: 'Session', status: 'NEUTRAL', detail: `${session} session — not peak but active` });
+    }
+
+    const finalScore = Math.max(0, Math.min(100, score));
+    const verdict = finalScore >= 70 ? 'STRONG'
+                  : finalScore >= 50 ? 'MODERATE'
+                  : finalScore >= 30 ? 'WEAK' : 'AVOID';
+
+    const risks  = macro?.key_risks?.slice(0, 3) || [];
+    const levels = {
+      gravity:       gravity || null,
+      slClusters:    fxAnalysis?.slClusters?.slice(0, 3).map(c => c.price) || [],
+      losingClusters: fxAnalysis?.losingClusters?.slice(0, 3).map(c => c.price) || [],
+      middleOfVolume: fxAnalysis?.middleOfVolume || null
+    };
+
+    res.json({
+      symbol: sym, direction: dir, price,
+      score: finalScore, verdict,
+      checks, levels, risks,
+      session,
+      dataAge: md.ts ? Math.round((Date.now() - md.ts) / 60000) : null,
+      ts: new Date().toISOString()
+    });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Primed symbols — crowd already lopsided, actionable context ──────────────
+app.get('/api/primed-symbols', (req, res) => {
+  try {
+    const { SYMBOLS } = require('./config');
+    const primed = [];
+    for (const sym of Object.keys(SYMBOLS)) {
+      const symCfg = SYMBOLS[sym];
+      if (symCfg.noOrderBook) continue;
+      let md = null;
+      try { md = db.getLatestMarketData(sym); } catch(e) {}
+      if (!md) continue;
+      const longPct  = md.fxssi_long_pct;
+      const shortPct = md.fxssi_short_pct;
+      const trapped  = md.fxssi_trapped;
+      if (longPct == null || shortPct == null) continue;
+      const dominantSide = shortPct > longPct ? 'SHORT' : 'LONG';
+      const dominantPct  = Math.max(longPct, shortPct);
+      const signalDir    = dominantSide === 'SHORT' ? 'LONG' : 'SHORT';
+      if (dominantPct >= 58) {
+        let fxAnalysis = null;
+        try {
+          const fa = md.fxssi_analysis ? JSON.parse(md.fxssi_analysis) : null;
+          fxAnalysis = fa?.fxssiAnalysis
+            ? (typeof fa.fxssiAnalysis === 'string' ? JSON.parse(fa.fxssiAnalysis) : fa.fxssiAnalysis)
+            : fa;
+        } catch(e) {}
+        primed.push({
+          symbol:     sym,
+          direction:  signalDir,
+          crowdPct:   Math.round(dominantPct * 10) / 10,
+          trapped:    trapped || null,
+          strength:   dominantPct >= 75 ? 'EXTREME'
+                    : dominantPct >= 65 ? 'STRONG'
+                    : dominantPct >= 60 ? 'MODERATE'
+                    : 'WEAK',
+          gravity:    fxAnalysis?.gravity?.price || null,
+          session:    symCfg.peakSession || null,
+          dataAge:    md.ts ? Math.round((Date.now() - md.ts) / 60000) : null
+        });
+      }
+    }
+    primed.sort((a, b) => b.crowdPct - a.crowdPct);
+    res.json({ count: primed.length, ts: new Date().toISOString(), symbols: primed });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/daily-bias', (req, res) => {
   try {
     const rows = require('./db').all ? require('./db').all('SELECT * FROM daily_bias ORDER BY symbol') : [];

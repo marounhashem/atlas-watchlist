@@ -224,18 +224,11 @@ function processAbcWebhook(data, deps) {
 
   let tp = tp2;  // main TP = structural target
 
-  // RR gate — after structural placement + caps
+  // Initial RR — the class+crowd-aware minimum check happens later, after
+  // crowdGate is computed. Only basic sanity (entry/sl/tp present) enforced here.
   let rr = slDist > 0
     ? Math.round((Math.abs(tp - entry) / slDist) * 10) / 10
     : 0;
-  if (rr < 1.5) {
-    console.log(`[ABC] ${sym} — RR ${rr} below 1.5 after structural placement — SKIP`);
-    try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'RR',
-      skipReason: `RR ${rr} below 1.5 after structural placement`,
-      detail: `entry=${entry} sl=${sl} tp=${tp} rr=${rr}`,
-      abcVersion: ABC_VERSION, session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
-    return;
-  }
 
   if (!entry || !sl || !tp) {
     console.log(`[ABC] ${sym} — missing entry/sl/tp`);
@@ -328,8 +321,8 @@ function processAbcWebhook(data, deps) {
 
   // ── noOrderBook ROUTING — route to class_c_signals with real levels ────────
   if (cfg?.noOrderBook) {
-    const score = buildAbcScore(pineClass, conditions, 'NO_DATA', dailyAligned);
-    const breakdown = buildAbcBreakdown(conditions, 'NO_DATA', dailyAligned);
+    const score = buildAbcScore(pineClass, conditions, 'NO_DATA', dailyAligned, null, direction);
+    const breakdown = buildAbcBreakdown(conditions, 'NO_DATA', dailyAligned, null, direction);
     const reasoning = 'No contrarian data available for this class of symbols — observation only';
     const expiryHours = cfg?.type?.includes('forex') ? 4 : cfg?.type?.includes('crypto') ? 8 : 6;
     const expiresAt = Date.now() + expiryHours * 3600000;
@@ -361,8 +354,8 @@ function processAbcWebhook(data, deps) {
 
   // ── CLASS C ROUTING ─────────────────────────────────────────────────────────
   if (pineClass === 'C') {
-    const score = buildAbcScore('C', conditions, crowdGate, dailyAligned);
-    const breakdown = buildAbcBreakdown(conditions, crowdGate, dailyAligned);
+    const score = buildAbcScore('C', conditions, crowdGate, dailyAligned, fxssiData, direction);
+    const breakdown = buildAbcBreakdown(conditions, crowdGate, dailyAligned, fxssiData, direction);
     const reasoning = buildAbcReasoning('C', direction, sym, crowdGate,
                                          conditions, dailyDirection, fxssiData, score);
     const expiryHours = cfg?.type?.includes('forex') ? 4 : cfg?.type?.includes('crypto') ? 8 : 6;
@@ -388,8 +381,28 @@ function processAbcWebhook(data, deps) {
     return;
   }
 
-  // ── CLASS A / B — run gates ────────────────────────────────────────────────
-  const payload = { pineClass, direction, entry, sl, tp, rr };
+  // ── CLASS A / B — score first, then gates ────────────────────────────────
+  // Score must be computed BEFORE runAbcGates so mapVerdict can use it.
+  let score = buildAbcScore(pineClass, conditions, crowdGate, dailyAligned, fxssiData, direction);
+
+  // RR minimum varies by signal quality.
+  // Higher edge (Class A + aligned crowd) → lower RR required.
+  // Lower edge (no crowd data / misaligned) → need wider reward.
+  const minRr = (pineClass === 'A' && crowdGate === 'ALIGNED') ? 1.2
+    : (pineClass === 'B' && crowdGate === 'ALIGNED')           ? 1.5
+    : (pineClass === 'B' && crowdGate === 'NO_TRAP')           ? 1.8
+    : (pineClass === 'C' && crowdGate === 'ALIGNED')           ? 1.8
+    : 2.0; // NO_DATA or MISALIGNED — need wider reward
+  if (rr < minRr) {
+    console.log(`[ABC] ${sym} — RR ${rr} below ${minRr} (class:${pineClass} crowd:${crowdGate}) — SKIP`);
+    try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'RR',
+      skipReason: `RR ${rr} < min ${minRr}`,
+      detail: `class=${pineClass} crowd=${crowdGate} entry=${entry} sl=${sl} tp=${tp}`,
+      abcVersion: ABC_VERSION, session, ts: Date.now() }); } catch(e) {}
+    return;
+  }
+
+  const payload = { pineClass, direction, entry, sl, tp, rr, score };
   const gates   = runAbcGates(sym, payload, fxssiData, db);
 
   console.log(`[ABC] ${sym} ${direction} Class${pineClass} → ${gates.verdict} | ${gates.reason}`);
@@ -417,9 +430,25 @@ function processAbcWebhook(data, deps) {
     return;
   }
 
-  // Score, breakdown, reasoning
-  let score        = buildAbcScore(pineClass, conditions, crowdGate, dailyAligned);
-  const breakdown  = buildAbcBreakdown(conditions, crowdGate, dailyAligned);
+  // ── Apply gravity TP cap if the gate adjusted it ───────────────────────────
+  if (gates.adjustedTp) {
+    tp2 = gates.adjustedTp;
+    tp  = tp2;
+    rr  = slDist > 0 ? Math.round((Math.abs(tp - entry) / slDist) * 10) / 10 : 0;
+    console.log(`[ABC] ${sym} — TP capped by gravity to ${tp} (RR: ${rr})`);
+    // If the gravity-capped RR dropped below the class+crowd minimum, skip
+    if (rr < minRr) {
+      console.log(`[ABC] ${sym} — after gravity cap RR ${rr} < min ${minRr} — SKIP`);
+      try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'RR',
+        skipReason: `Post-gravity RR ${rr} < min ${minRr}`,
+        detail: `cappedTp=${tp}`, abcVersion: ABC_VERSION, session, ts: Date.now() }); } catch(e) {}
+      return;
+    }
+  }
+
+  // Score already computed above — rebuild breakdown + reasoning now that
+  // score + any gravity-capped tp are final.
+  const breakdown  = buildAbcBreakdown(conditions, crowdGate, dailyAligned, fxssiData, direction);
   let reasoning    = buildAbcReasoning(pineClass, direction, sym, crowdGate,
                                        conditions, dailyDirection, fxssiData, score);
 

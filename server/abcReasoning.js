@@ -2,7 +2,8 @@
 
 // ── Score calculation — replaces hardcoded 88/75/62 ─────────────────────────
 // Score reflects actual conditions met, not just class label
-function buildAbcScore(pineClass, conditions, crowdGate, dailyAligned) {
+// Crowd bonus is tiered by concentration percentage when ALIGNED
+function buildAbcScore(pineClass, conditions, crowdGate, dailyAligned, fxssiData, direction) {
   let score = 0;
 
   // Base — mandatory for all ABC signals (BOS + rejection = minimum)
@@ -22,16 +23,23 @@ function buildAbcScore(pineClass, conditions, crowdGate, dailyAligned) {
   if (conditions.volConfirmed) score += 5;
   if (conditions.rejStrong)    score += 4;
 
-  // Crowd sentiment
-  if (crowdGate === 'ALIGNED')  score += 17;
-  if (crowdGate === 'NO_TRAP')  score += 5;
-  // MISALIGNED and NO_DATA: 0
+  // Crowd sentiment — tiered by concentration on the wrong side
+  if (crowdGate === 'ALIGNED') {
+    const crowdPct = direction === 'LONG'
+      ? (fxssiData?.fxssi_short_pct || 0)
+      : (fxssiData?.fxssi_long_pct  || 0);
+    if      (crowdPct >= 75) score += 17;  // extreme squeeze fuel
+    else if (crowdPct >= 65) score += 12;  // strong squeeze fuel
+    else if (crowdPct >= 60) score += 8;   // moderate squeeze fuel
+    else                     score += 5;   // weak but present
+  }
+  // NO_TRAP / MISALIGNED / NO_DATA: 0
 
   return Math.min(Math.round(score), 95);
 }
 
 // ── Breakdown object — stored in DB, shown on card ───────────────────────────
-function buildAbcBreakdown(conditions, crowdGate, dailyAligned) {
+function buildAbcBreakdown(conditions, crowdGate, dailyAligned, fxssiData, direction) {
   const structureScore = 23 + (dailyAligned ? 10 : 0);
   const confluenceScore = (conditions.cloudPass ? 12 : 0)
                         + (conditions.obPresent  ? 10 : 0)
@@ -39,8 +47,13 @@ function buildAbcBreakdown(conditions, crowdGate, dailyAligned) {
   const momentumScore   = (conditions.rsiDiv       ? 8 : 0)
                         + (conditions.volConfirmed  ? 5 : 0)
                         + (conditions.rejStrong     ? 4 : 0);
-  const crowdScore      = crowdGate === 'ALIGNED'  ? 17
-                        : crowdGate === 'NO_TRAP'  ? 5 : 0;
+  let crowdScore = 0;
+  if (crowdGate === 'ALIGNED') {
+    const crowdPct = direction === 'LONG'
+      ? (fxssiData?.fxssi_short_pct || 0)
+      : (fxssiData?.fxssi_long_pct  || 0);
+    crowdScore = crowdPct >= 75 ? 17 : crowdPct >= 65 ? 12 : crowdPct >= 60 ? 8 : 5;
+  }
 
   return {
     structure:  { score: structureScore,  max: 33, label: 'Structure',

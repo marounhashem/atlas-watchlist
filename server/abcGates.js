@@ -9,23 +9,25 @@ const { isBankHoliday } = require('./marketHours');
 const { SYMBOLS } = require('./config');
 const { isPreEventRisk, isPostEventSuppressed } = require('./forexCalendar');
 
-// ── Verdict mapping by class × crowd sentiment ────────────────────────────────
-// Class A: structurally strongest — crowd sentiment pass=PROCEED, fail=WATCH
-// Class B: needs crowd sentiment — pass=PROCEED, fail=SKIP
-// Class C: weakest — crowd sentiment pass=WATCH, fail=SKIP
-function mapVerdict(pineClass, fxssiPassed, fxssiNoData) {
-  if (fxssiPassed) {
-    if (pineClass === 'A') return 'PROCEED';
-    if (pineClass === 'B') return 'PROCEED';
-    if (pineClass === 'C') return 'WATCH';
-  } else if (fxssiNoData) {
-    if (pineClass === 'A') return 'WATCH';
-    if (pineClass === 'B') return 'WATCH';
-    if (pineClass === 'C') return 'SKIP';
-  } else {
-    if (pineClass === 'A') return 'WATCH';
-    if (pineClass === 'B') return 'SKIP';
-    if (pineClass === 'C') return 'SKIP';
+// ── Verdict mapping by class × crowd sentiment × score ──────────────────────
+// Class A: structurally strongest — crowd pass=PROCEED always
+// Class B: crowd pass + score >= 65 → PROCEED; else WATCH
+// Class C: crowd pass + score >= 55 → WATCH; else SKIP
+function mapVerdict(pineClass, fxssiPassed, fxssiNoData, score) {
+  const sc = score || 0;
+  if (pineClass === 'A') {
+    if (fxssiPassed) return 'PROCEED';
+    if (fxssiNoData) return 'WATCH';
+    return 'WATCH';
+  }
+  if (pineClass === 'B') {
+    if (fxssiPassed) return sc >= 65 ? 'PROCEED' : 'WATCH';
+    if (fxssiNoData) return 'WATCH';
+    return 'SKIP';
+  }
+  if (pineClass === 'C') {
+    if (fxssiPassed) return sc >= 55 ? 'WATCH' : 'SKIP';
+    return 'SKIP';
   }
   return 'SKIP';
 }
@@ -58,22 +60,23 @@ function checkFxssi(symbol, fxssiData) {
   return { passed: true, noData: false, reason: `Crowd majority ${trapped === 'SHORT' ? 'short' : 'long'} — contrarian ${direction.toLowerCase()} pressure` };
 }
 
-// ── Gravity proximity gate ────────────────────────────────────────────────────
-// If TP is blocked by a gravity cluster, skip the trade
-function checkGravity(direction, tp, fxssiData) {
-  if (!fxssiData || !tp) return { passed: true, reason: 'No gravity data' };
+// ── Gravity proximity gate — smart TP cap ────────────────────────────────────
+// <30% of path: block entirely (too close to target)
+// 30-60%: cap TP just before gravity, let the trade continue
+// >60% or out of path: pass through, no adjustment
+function checkGravity(direction, entry, tp, fxssiData) {
+  if (!fxssiData || !tp || !entry) {
+    return { passed: true, reason: 'No gravity data', adjustedTp: null };
+  }
 
   // Skip gravity gate if FXSSI data is stale (>45min)
   const fxssiAge = fxssiData.fetchedAt ? Date.now() - fxssiData.fetchedAt : Infinity;
   if (fxssiAge > 45 * 60 * 1000) {
-    return { passed: true, reason: 'Gravity data stale — gate skipped' };
+    return { passed: true, reason: 'Gravity data stale — gate skipped', adjustedTp: null };
   }
 
   const gravity = fxssiData.gravity_price || fxssiData.fxssi_gravity;
-  if (!gravity) return { passed: true, reason: 'No gravity level' };
-
-  const entry = fxssiData._entry;
-  if (!entry) return { passed: true, reason: 'No entry for gravity check' };
+  if (!gravity) return { passed: true, reason: 'No gravity level', adjustedTp: null };
 
   const tpDist     = Math.abs(tp - entry);
   const gravDist   = Math.abs(gravity - entry);
@@ -81,12 +84,36 @@ function checkGravity(direction, tp, fxssiData) {
     ? gravity > entry && gravity < tp
     : gravity < entry && gravity > tp;
 
-  // Block only if gravity is in the first half of the TP path (within 50%)
-  if (gravInPath && gravDist < tpDist * 0.50) {
-    return { passed: false, reason: `Gravity at ${gravity} blocks TP path (${Math.round(gravDist/tpDist*100)}% of move)` };
+  if (!gravInPath) {
+    return { passed: true, reason: 'Gravity outside TP path', adjustedTp: null };
   }
 
-  return { passed: true, reason: 'Gravity clear of TP path' };
+  const gravPct = tpDist > 0 ? gravDist / tpDist : 0;
+
+  // Gravity within 30% of TP path — too close to target, block
+  if (gravPct < 0.30) {
+    return {
+      passed: false,
+      reason: `Gravity at ${gravity} blocks TP path (${Math.round(gravPct * 100)}% of path)`,
+      adjustedTp: null
+    };
+  }
+
+  // Gravity between 30-60% of path — cap TP just before gravity with 5% buffer
+  if (gravPct < 0.60) {
+    const buffer = gravDist * 0.05;
+    const cappedTp = direction === 'LONG'
+      ? Math.round((gravity - buffer) * 100000) / 100000
+      : Math.round((gravity + buffer) * 100000) / 100000;
+    return {
+      passed: true,
+      reason: `Gravity at ${gravity} — TP capped to ${cappedTp}`,
+      adjustedTp: cappedTp
+    };
+  }
+
+  // Gravity beyond 60% of path — clear
+  return { passed: true, reason: 'Gravity clear of TP path', adjustedTp: null };
 }
 
 // ── Intel key levels context (reasoning annotation only, no block) ────────────
@@ -124,9 +151,10 @@ function getIntelContext(symbol, entry, tp, atr, db) {
 }
 
 // ── Main gate runner ──────────────────────────────────────────────────────────
-// Returns { verdict, blocked, reason, intelContext }
+// Returns { verdict, blocked, reason, intelContext, adjustedTp }
+// Score is passed in via payload so verdict mapping can use class+crowd+score.
 function runAbcGates(symbol, payload, fxssiData, db) {
-  const { pineClass, direction, entry, sl, tp } = payload;
+  const { pineClass, direction, entry, sl, tp, score } = payload;
 
   // 1. Bank holiday
   if (isBankHoliday(symbol)) {
@@ -176,14 +204,14 @@ function runAbcGates(symbol, payload, fxssiData, db) {
   // 6. Crowd sentiment gate
   const fxssiCheck = checkFxssi(symbol, fxssiData);
 
-  // 7. Gravity proximity gate
-  const gravityCheck = checkGravity(direction, tp, fxssiData);
+  // 7. Gravity proximity gate — may cap TP instead of blocking
+  const gravityCheck = checkGravity(direction, entry, tp, fxssiData);
   if (!gravityCheck.passed) {
     return { verdict: 'SKIP', blocked: true, gate: 'GRAVITY', reason: gravityCheck.reason };
   }
 
-  // 8. Class × crowd sentiment verdict mapping
-  const verdict = mapVerdict(pineClass, fxssiCheck.passed, fxssiCheck.noData);
+  // 8. Class × crowd × score verdict mapping
+  const verdict = mapVerdict(pineClass, fxssiCheck.passed, fxssiCheck.noData, score);
   if (verdict === 'SKIP') {
     return { verdict: 'SKIP', blocked: true, gate: 'CROWD', reason: `Class ${pineClass} + crowd sentiment fail → SKIP. ${fxssiCheck.reason}` };
   }
@@ -196,10 +224,18 @@ function runAbcGates(symbol, payload, fxssiData, db) {
   const reasoning = [
     `Class ${pineClass} ${verdict}`,
     fxssiNote,
+    gravityCheck.adjustedTp ? `⚠ TP capped by gravity` : '',
     intelContext
   ].filter(Boolean).join(' · ');
 
-  return { verdict, blocked: false, reason: reasoning, rr, intelContext };
+  return {
+    verdict,
+    blocked: false,
+    reason: reasoning,
+    rr,
+    intelContext,
+    adjustedTp: gravityCheck.adjustedTp
+  };
 }
 
 module.exports = { runAbcGates };
