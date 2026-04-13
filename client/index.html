@@ -3036,17 +3036,25 @@ function setIdeaMode(m) {
   if (d) { d.style.background = m === 'deep'  ? 'var(--accent)' : 'transparent'; d.style.color = m === 'deep'  ? 'var(--bg)' : 'var(--text)'; }
 }
 
-function parseIdeaForQuick(text) {
-  const t = (text || '').toUpperCase();
-  const syms = ['GOLD','SILVER','OILWTI','BTCUSD','ETHUSD','US30','US100','US500','DE40','UK100','J225','HK50','CN50','COPPER','PLATINUM','EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD','EURJPY','EURGBP','EURAUD','EURCHF','GBPJPY','GBPCHF','AUDJPY'];
-  const aliases = { 'XAUUSD':'GOLD','XAGUSD':'SILVER','WTI':'OILWTI','USOIL':'OILWTI','CRUDE':'OILWTI','BTC':'BTCUSD','ETH':'ETHUSD','NAS100':'US100','NASDAQ':'US100','SPX':'US500','S&P':'US500','DOW':'US30','DAX':'DE40','FTSE':'UK100','NKD':'J225','NIKKEI':'J225' };
-  let sym = null;
-  for (const s of syms) { if (t.includes(s)) { sym = s; break; } }
-  if (!sym) for (const a of Object.keys(aliases)) { if (t.includes(a)) { sym = aliases[a]; break; } }
-  let dir = null;
-  if (/\b(SHORT|SELL|BEAR|DOWN|BEARISH)\b/.test(t)) dir = 'SHORT';
-  else if (/\b(LONG|BUY|BULL|UP|BULLISH)\b/.test(t)) dir = 'LONG';
-  return { sym, dir };
+async function parseIdeaForQuick(text) {
+  try {
+    const r = await fetch('/api/idea-parse', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    const d = await r.json();
+    return {
+      sym:   d.symbol   || null,
+      dir:   d.direction || null,
+      entry: d.entry != null ? d.entry : null,
+      sl:    d.sl    != null ? d.sl    : null,
+      tp:    d.tp    != null ? d.tp    : null,
+      rr:    d.rr    != null ? d.rr    : null
+    };
+  } catch(e) {
+    return { sym: null, dir: null };
+  }
 }
 
 function renderQuickIdeaResult(d) {
@@ -3064,6 +3072,7 @@ function renderQuickIdeaResult(d) {
     : st === 'WARN'    ? 'var(--amber,var(--watch))'
     : st === 'FAIL'    ? 'var(--red,var(--short))'
     : 'var(--dim)';
+
   const rows = (d.checks || []).map(c => {
     const col = statusColor(c.status);
     return `<div style="display:flex;gap:10px;align-items:flex-start;font-size:11px;padding:6px 10px;border-radius:4px;background:var(--surface2,#16161f);margin-bottom:4px;border-left:2px solid ${col};">
@@ -3072,20 +3081,70 @@ function renderQuickIdeaResult(d) {
       <span style="color:var(--txt2,var(--muted));line-height:1.55;">${esc(c.detail || '')}</span>
     </div>`;
   }).join('');
+
+  // ── Side-by-side: YOUR IDEA vs SYSTEM SUGGESTS ──────────────────────────
+  const u = d.userLevels || {};
+  const fmtNum = v => (v == null ? '—' : String(v));
+  const sideCmpHtml = (u.entry || u.sl || u.tp)
+    ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;padding:12px;background:var(--bg,#09090f);border:1px solid var(--border);border-radius:6px;font-family:var(--mono,monospace);font-size:11px;">
+        <div>
+          <div style="font-size:10px;color:var(--dim);letter-spacing:.1em;margin-bottom:6px;">YOUR IDEA</div>
+          <div style="display:grid;grid-template-columns:56px 1fr;gap:4px;">
+            <span style="color:var(--dim);">Entry</span><span>${fmtNum(u.entry)}</span>
+            <span style="color:var(--dim);">SL</span><span style="color:var(--short);">${fmtNum(u.sl)}</span>
+            <span style="color:var(--dim);">TP</span><span style="color:var(--proceed);">${fmtNum(u.tp)}</span>
+            <span style="color:var(--dim);">R:R</span><span>${u.rr != null ? u.rr : '—'}</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--accent,#4da6ff);letter-spacing:.1em;margin-bottom:6px;">SYSTEM SUGGESTS</div>
+          <div style="display:grid;grid-template-columns:56px 1fr;gap:4px;">
+            <span style="color:var(--dim);">Entry</span><span>${fmtNum(u.entry)}${u.entry ? ' <span style=\"color:var(--dim);font-size:9px;\">(same)</span>' : ''}</span>
+            <span style="color:var(--dim);">SL</span><span style="color:var(--short);">${fmtNum(d.suggestedSl)}${d.suggestedSl ? ' <span style=\"color:var(--dim);font-size:9px;\">(losing cluster)</span>' : ''}</span>
+            <span style="color:var(--dim);">TP</span><span style="color:var(--proceed);">${fmtNum(d.suggestedTp)}${d.suggestedTp ? ' <span style=\"color:var(--dim);font-size:9px;\">(SL cluster magnet)</span>' : ''}</span>
+            <span style="color:var(--dim);">R:R</span><span>${d.suggestedRr != null ? d.suggestedRr : '—'}</span>
+          </div>
+        </div>
+      </div>`
+    : '';
+
+  // ── Narrative lines (crowd, gravity, key levels in path) ─────────────────
+  const narrativeLines = [];
+  if (d.crowdNarrative) {
+    const mark = d.crowdNarrative.includes('trapped') || d.crowdNarrative.includes('squeeze fuel') ? '✓' : '·';
+    narrativeLines.push(`<div style="font-size:11px;color:var(--txt2,var(--muted));padding:3px 0;"><span style="color:${mark==='✓'?'var(--proceed)':'var(--dim)'};">${mark}</span> ${esc(d.crowdNarrative)}</div>`);
+  }
+  if (d.gravityWarning) {
+    const mark = d.gravityWarning.startsWith('✓') ? '' : d.gravityWarning.startsWith('⚠') ? '' : '';
+    const col  = d.gravityWarning.startsWith('⚠') ? 'var(--short)' : d.gravityWarning.startsWith('✓') ? 'var(--proceed)' : 'var(--dim)';
+    narrativeLines.push(`<div style="font-size:11px;padding:3px 0;color:${col};">${esc(d.gravityWarning)}</div>`);
+  }
+  if (d.keyLevelsInPath && d.keyLevelsInPath.length) {
+    const lvls = d.keyLevelsInPath.map(l => `${l.price} (${l.type})`).join(' · ');
+    narrativeLines.push(`<div style="font-size:11px;color:var(--watch);padding:3px 0;">⚠ ${d.keyLevelsInPath.length} key level${d.keyLevelsInPath.length>1?'s':''} in TP path: ${esc(lvls)}</div>`);
+  }
+  const narrativeHtml = narrativeLines.length
+    ? `<div style="margin-bottom:12px;padding:10px;background:var(--surface2,#16161f);border-radius:6px;">${narrativeLines.join('')}</div>`
+    : '';
+
   const levels = d.levels || {};
   const levelsRow = [];
   if (levels.gravity)        levelsRow.push(`<span style="font-family:var(--mono,monospace);font-size:10px;color:var(--watch);">GRAV ${levels.gravity}</span>`);
   if (levels.middleOfVolume) levelsRow.push(`<span style="font-family:var(--mono,monospace);font-size:10px;color:var(--dim);">MoV ${levels.middleOfVolume}</span>`);
   if (levels.slClusters?.length) levelsRow.push(`<span style="font-family:var(--mono,monospace);font-size:10px;color:var(--short);">SL ${levels.slClusters.join(' · ')}</span>`);
   if (levels.losingClusters?.length) levelsRow.push(`<span style="font-family:var(--mono,monospace);font-size:10px;color:var(--proceed);">LOSE ${levels.losingClusters.join(' · ')}</span>`);
+
   const risksHtml = (d.risks && d.risks.length)
     ? `<div style="margin-top:10px;"><div style="font-size:10px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-bottom:6px;">Macro Risks</div>${d.risks.map(r=>`<div style="font-size:11px;color:var(--txt2,var(--muted));padding:4px 8px;background:rgba(255,60,100,.06);border-left:2px solid var(--short);margin-bottom:3px;border-radius:3px;">${esc(r)}</div>`).join('')}</div>`
     : '';
+
   return `<div style="display:inline-flex;align-items:center;gap:10px;padding:10px 20px;border-radius:8px;background:${vBg};border:1px solid ${vColor};margin-bottom:14px;">
     <span style="font-size:18px;font-weight:800;color:${vColor};letter-spacing:.05em;">${d.verdict}</span>
     <span style="font-size:12px;color:var(--txt2,var(--muted));">Score ${d.score}/100 · ${esc(d.symbol)} ${esc(d.direction)}${d.price ? ' @ ' + d.price : ''}</span>
     <span style="font-size:10px;color:var(--dim);">Session: ${esc(d.session || 'n/a')}${d.dataAge != null ? ' · ' + d.dataAge + 'm old' : ''}</span>
   </div>
+  ${sideCmpHtml}
+  ${narrativeHtml}
   ${levelsRow.length ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:8px 10px;background:var(--bg,#09090f);border-radius:6px;">${levelsRow.join('')}</div>` : ''}
   ${rows}
   ${risksHtml}`;
@@ -3097,14 +3156,17 @@ async function submitIdea() {
   if (!input || !input.value.trim()) return;
 
   if (ideaMode === 'quick') {
-    const parsed = parseIdeaForQuick(input.value);
+    const parsed = await parseIdeaForQuick(input.value);
     if (!parsed.sym || !parsed.dir) {
-      result.innerHTML = `<div style="color:var(--short);font-size:10px;">Could not detect symbol + direction from text. Try 'GOLD SHORT' or 'BTCUSD LONG'.</div>`;
+      result.innerHTML = `<div style="color:var(--short);font-size:10px;">Could not detect symbol + direction from text. Try 'GOLD SHORT entry 4710 sl 4750 tp 4660'.</div>`;
       return;
     }
-    result.innerHTML = '<div style="color:var(--muted);font-size:9px;">Analysing…</div>';
     try {
-      const res = await fetch(`/api/idea-analyse?symbol=${encodeURIComponent(parsed.sym)}&direction=${encodeURIComponent(parsed.dir)}`);
+      const qs = new URLSearchParams({ symbol: parsed.sym, direction: parsed.dir });
+      if (parsed.entry != null) qs.set('entry', String(parsed.entry));
+      if (parsed.sl    != null) qs.set('sl',    String(parsed.sl));
+      if (parsed.tp    != null) qs.set('tp',    String(parsed.tp));
+      const res = await fetch('/api/idea-analyse?' + qs.toString());
       const d = await res.json();
       if (d.error) { result.innerHTML = `<div style="color:var(--short);font-size:10px;">${esc(d.error)}</div>`; return; }
       document.getElementById('idea-copy-btn').style.display = 'none';

@@ -625,6 +625,54 @@ app.post('/api/abc-archive-old', (req, res) => {
 // ── Quick idea analysis — deterministic, no Anthropic API ────────────────────
 // Uses live market_data, fxssi_analysis, macro_context for a structured check
 // list. See Deep Analysis (/api/trade-feedback) for the Claude-export variant.
+// ── Idea parser — regex only, no API ─────────────────────────────────────────
+// Accepts free-text trade idea, returns {symbol, direction, entry, sl, tp, rr}.
+// Used by the client IDEA tab Quick flow before hitting /api/idea-analyse.
+function _parseIdeaText(text) {
+  const raw = String(text || '');
+  const clean = raw.replace(/[^\x00-\x7F\s]/g, ' ');
+
+  // Symbol
+  let symbol = null;
+  try {
+    const { resolveSymbol } = require('./symbolAliases');
+    symbol = resolveSymbol(clean);
+  } catch(e) {}
+
+  // Direction
+  let direction = null;
+  if (/\b(short|sell|bear|down|bearish)\b/i.test(clean) || /sell\s*limit|sell\s*stop/i.test(clean)) direction = 'SHORT';
+  else if (/\b(long|buy|bull|up|bullish)\b/i.test(clean) || /buy\s*limit|buy\s*stop/i.test(clean)) direction = 'LONG';
+
+  // Levels
+  let entry = null, sl = null, tp = null;
+  const entryM = clean.match(/(?:buy|sell|entry|enter|limit|stop order)\s+(?:at\s+)?([\d.]+)/i) || clean.match(/\bat\s+([\d.]+)/i);
+  if (entryM) entry = parseFloat(entryM[1]);
+  const slM = clean.match(/(?:stop|sl|stop.?loss)[:\s]+([\d.]+)/i);
+  if (slM) sl = parseFloat(slM[1]);
+  const tpM = clean.match(/(?:target\s*1|tp\s*1|first.?target)[:\s]+([\d.]+)/i) || clean.match(/(?:target|tp|take.?profit)[:\s]+([\d.]+)/i);
+  if (tpM) tp = parseFloat(tpM[1]);
+
+  let rr = null;
+  if (entry != null && sl != null && tp != null) {
+    const risk = Math.abs(entry - sl);
+    const reward = Math.abs(tp - entry);
+    rr = risk > 0 ? Math.round((reward / risk) * 10) / 10 : null;
+  }
+  return { symbol, direction, entry, sl, tp, rr };
+}
+
+app.post('/api/idea-parse', (req, res) => {
+  try {
+    const text = (req.body && req.body.text) || '';
+    if (!text) return res.status(400).json({ error: 'text required' });
+    const out = _parseIdeaText(text);
+    res.json(out);
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/idea-analyse', (req, res) => {
   try {
     const { SYMBOLS, getSessionNow } = require('./config');
@@ -633,6 +681,10 @@ app.get('/api/idea-analyse', (req, res) => {
     if (!sym || !['LONG','SHORT'].includes(dir)) {
       return res.status(400).json({ error: 'symbol and direction required' });
     }
+    // Optional user-provided levels from the client Quick flow
+    const userEntry = req.query.entry != null && req.query.entry !== '' ? parseFloat(req.query.entry) : null;
+    const userSl    = req.query.sl    != null && req.query.sl    !== '' ? parseFloat(req.query.sl)    : null;
+    const userTp    = req.query.tp    != null && req.query.tp    !== '' ? parseFloat(req.query.tp)    : null;
     const symCfg = SYMBOLS[sym];
     let md = null;
     try { md = db.getLatestMarketData(sym); } catch(e) {}
@@ -783,12 +835,121 @@ app.get('/api/idea-analyse', (req, res) => {
       middleOfVolume: fxAnalysis?.middleOfVolume || null
     };
 
+    // ── System-suggested SL/TP from fxssi cluster data ───────────────────────
+    // Anchor off user's entry if provided, otherwise live price.
+    // Nomenclature note on FXSSI clusters:
+    //   losingClusters = zones where existing positions are underwater — stops
+    //     live here, price hunts them. Above entry for a SHORT, below for a LONG.
+    //   slClusters = take-profit magnets on the other side of entry.
+    const entryRef   = (userEntry && userEntry > 0) ? userEntry : price;
+    const slClusters = (fxAnalysis?.slClusters     || []).filter(c => c && typeof c.price === 'number');
+    const lsClusters = (fxAnalysis?.losingClusters || []).filter(c => c && typeof c.price === 'number');
+
+    let suggestedSl = null;
+    let suggestedTp = null;
+    if (entryRef && dir === 'SHORT') {
+      // SHORT: SL lives ABOVE entry at losing clusters (stop hunts)
+      const losingAbove = lsClusters.filter(c => c.price > entryRef).sort((a, b) => a.price - b.price);
+      suggestedSl = losingAbove[0]?.price || null;
+      // SHORT: TP targets the nearest SL-cluster BELOW entry
+      const slBelow = slClusters.filter(c => c.price < entryRef).sort((a, b) => b.price - a.price);
+      suggestedTp = slBelow[0]?.price || null;
+    } else if (entryRef && dir === 'LONG') {
+      // LONG: SL lives BELOW entry at losing clusters
+      const losingBelow = lsClusters.filter(c => c.price < entryRef).sort((a, b) => b.price - a.price);
+      suggestedSl = losingBelow[0]?.price || null;
+      // LONG: TP targets the nearest SL-cluster ABOVE entry
+      const slAbove = slClusters.filter(c => c.price > entryRef).sort((a, b) => a.price - b.price);
+      suggestedTp = slAbove[0]?.price || null;
+    }
+    // Fallback: if a user TP was provided, compute a 50%-of-their-distance SL
+    if (!suggestedSl && entryRef && userTp && userTp !== entryRef) {
+      const userDist = Math.abs(entryRef - userTp);
+      suggestedSl = dir === 'SHORT' ? entryRef + userDist * 0.5 : entryRef - userDist * 0.5;
+    }
+    if (!suggestedTp && userTp) suggestedTp = userTp;
+    const suggestedRr = (suggestedSl && suggestedTp && entryRef)
+      ? Math.round((Math.abs(suggestedTp - entryRef) / Math.abs(suggestedSl - entryRef)) * 10) / 10
+      : null;
+
+    // ── User RR from their own levels (for the side-by-side) ─────────────────
+    let userRr = null;
+    if (userEntry && userSl && userTp && userEntry !== userSl) {
+      userRr = Math.round((Math.abs(userTp - userEntry) / Math.abs(userSl - userEntry)) * 10) / 10;
+    }
+
+    // ── Crowd narrative (human sentence, not just a number) ──────────────────
+    const lp = Math.round(longPct || 0);
+    const sp = Math.round(shortPct || 0);
+    let crowdNarrative = null;
+    if (trapped === 'LONG' && dir === 'SHORT') {
+      crowdNarrative = `${lp}% of retail positioned LONG — trapped longs provide squeeze fuel for SHORT`;
+    } else if (trapped === 'SHORT' && dir === 'LONG') {
+      crowdNarrative = `${sp}% of retail positioned SHORT — trapped shorts provide squeeze fuel for LONG`;
+    } else if (trapped === 'LONG' && dir === 'LONG') {
+      crowdNarrative = `${lp}% retail LONG — crowd is with you, no contrarian edge`;
+    } else if (trapped === 'SHORT' && dir === 'SHORT') {
+      crowdNarrative = `${sp}% retail SHORT — crowd is with you, no contrarian edge`;
+    } else if (longPct != null && shortPct != null) {
+      crowdNarrative = `Crowd split ${lp}%/${sp}% — no dominant positioning`;
+    } else {
+      crowdNarrative = 'No crowd data available';
+    }
+
+    // ── Gravity warning (context-aware, not just "in path") ──────────────────
+    let gravityWarning = null;
+    if (gravity && entryRef) {
+      const gravDistPct = Math.abs(gravity - entryRef) / entryRef;
+      if (gravDistPct < 0.005) {
+        gravityWarning = `⚠ Price within 0.5% of gravity ${gravity} — SL hunt risk before TP`;
+      } else if (dir === 'SHORT' && userSl && gravity > entryRef && gravity < userSl) {
+        gravityWarning = `✓ Gravity at ${gravity} between entry and SL — protects trade`;
+      } else if (dir === 'LONG' && userSl && gravity < entryRef && gravity > userSl) {
+        gravityWarning = `✓ Gravity at ${gravity} between entry and SL — protects trade`;
+      } else {
+        const inTpPath = userTp
+          ? ((dir === 'SHORT' && gravity < entryRef && gravity > userTp) ||
+             (dir === 'LONG'  && gravity > entryRef && gravity < userTp))
+          : false;
+        gravityWarning = inTpPath
+          ? `⚠ Gravity at ${gravity} in TP path — price may stall there`
+          : `Gravity at ${gravity} — monitor`;
+      }
+    }
+
+    // ── Key levels that sit between entry and TP (from fxssi clusters) ───────
+    const keyLevelsInPath = [];
+    if (entryRef && userTp) {
+      const lo = Math.min(entryRef, userTp);
+      const hi = Math.max(entryRef, userTp);
+      for (const c of [...slClusters, ...lsClusters]) {
+        if (c.price > lo && c.price < hi) {
+          keyLevelsInPath.push({ price: c.price, type: slClusters.includes(c) ? 'sl-cluster' : 'losing-cluster' });
+        }
+      }
+      keyLevelsInPath.sort((a, b) => Math.abs(a.price - entryRef) - Math.abs(b.price - entryRef));
+    }
+
     res.json({
       symbol: sym, direction: dir, price,
       score: finalScore, verdict,
       checks, levels, risks,
       session,
       dataAge: md.ts ? Math.round((Date.now() - md.ts) / 60000) : null,
+      // Side-by-side comparison fields
+      userLevels: {
+        entry: userEntry || null,
+        sl:    userSl    || null,
+        tp:    userTp    || null,
+        rr:    userRr
+      },
+      suggestedSl,
+      suggestedTp,
+      suggestedRr,
+      // Narrative annotations
+      crowdNarrative,
+      gravityWarning,
+      keyLevelsInPath: keyLevelsInPath.slice(0, 5),
       ts: new Date().toISOString()
     });
   } catch(e) {
