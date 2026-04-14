@@ -978,13 +978,10 @@ function scoreSymbol(symbol) {
         (direction === 'SHORT' && macro.supports_short && !macro.supports_long);
 
       if (macroConflict) {
-        // Direct macro penalty — no superseded decay (removed 20260407.2)
-        const basePenalty = macro.strength >= 8 ? 0.70 : macro.strength >= 6 ? 0.78 : macro.strength >= 4 ? 0.88 : 0.94;
-        conflictMultiplier *= basePenalty;
+        conflictMultiplier *= 0.90;
         macroNote = `⚠ Macro ${macro.sentiment} (${macro.strength}/10) conflicts — ${macro.summary}`;
       } else if (macroConfirm) {
-        const bonus = macro.strength >= 7 ? 1.08 : 1.04;
-        conflictMultiplier *= bonus;
+        conflictMultiplier *= 1.10;
         macroNote = `✓ Macro ${macro.sentiment} confirms — ${macro.summary}`;
       }
     }

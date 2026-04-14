@@ -8,7 +8,7 @@ const SYMBOLS = {
     peakSession: 'london',
     scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
     macroEvents: ['FOMC', 'CPI', 'NFP', 'DXY'],
-    minScoreProceed: 78
+    minScoreProceed: 73
   },
   SILVER: {
     label: 'Silver',
@@ -19,7 +19,7 @@ const SYMBOLS = {
     peakSession: 'london',
     scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
     macroEvents: ['FOMC', 'CPI', 'NFP', 'DXY'],
-    minScoreProceed: 78
+    minScoreProceed: 73
   },
   OILWTI: {
     label: 'Oil WTI',
@@ -30,7 +30,7 @@ const SYMBOLS = {
     peakSession: 'newYork',
     scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
     macroEvents: ['EIA_CRUDE', 'OPEC', 'API_REPORT'],
-    minScoreProceed: 78
+    minScoreProceed: 73
   },
   BTCUSD: {
     label: 'Bitcoin',
@@ -41,7 +41,7 @@ const SYMBOLS = {
     peakSession: 'newYork',
     scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
     macroEvents: ['FOMC'],
-    minScoreProceed: 78
+    minScoreProceed: 73
   },
   US30: {
     label: 'Dow Jones',
@@ -52,7 +52,7 @@ const SYMBOLS = {
     peakSession: 'newYork',
     scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
     macroEvents: ['FOMC', 'CPI', 'NFP', 'EARNINGS'],
-    minScoreProceed: 78
+    minScoreProceed: 73
   },
   US100: {
     label: 'Nasdaq 100',
@@ -63,147 +63,147 @@ const SYMBOLS = {
     peakSession: 'newYork',
     scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
     macroEvents: ['FOMC', 'CPI', 'NFP', 'EARNINGS'],
-    minScoreProceed: 78
+    minScoreProceed: 73
   },
   // ── Forex pairs ─────────────────────────────────────────────────────────────
   EURUSD: {
     label: 'EUR/USD', capitalTicker: 'EURUSD', pineTicker: 'EURUSD',
     assetClass: 'forex', sessions: { london: true, newYork: true, asia: true },
     peakSession: 'london', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['FOMC','ECB','CPI','NFP'], minScoreProceed: 78
+    macroEvents: ['FOMC','ECB','CPI','NFP'], minScoreProceed: 73
   },
   GBPUSD: {
     label: 'GBP/USD', capitalTicker: 'GBPUSD', pineTicker: 'GBPUSD',
     assetClass: 'forex', sessions: { london: true, newYork: true, asia: true },
     peakSession: 'london', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['FOMC','BOE','CPI','NFP'], minScoreProceed: 78
+    macroEvents: ['FOMC','BOE','CPI','NFP'], minScoreProceed: 73
   },
   USDJPY: {
     label: 'USD/JPY', capitalTicker: 'USDJPY', pineTicker: 'USDJPY',
     assetClass: 'forex', sessions: { london: true, newYork: true, asia: true },
     peakSession: 'asia', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['FOMC','BOJ','CPI','NFP'], minScoreProceed: 78
+    macroEvents: ['FOMC','BOJ','CPI','NFP'], minScoreProceed: 73
   },
   USDCHF: {
     label: 'USD/CHF', capitalTicker: 'USDCHF', pineTicker: 'USDCHF',
     assetClass: 'forex', sessions: { london: true, newYork: true, asia: false },
     peakSession: 'london', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['FOMC','SNB','CPI','NFP'], minScoreProceed: 78
+    macroEvents: ['FOMC','SNB','CPI','NFP'], minScoreProceed: 73
   },
   USDCAD: {
     label: 'USD/CAD', capitalTicker: 'USDCAD', pineTicker: 'USDCAD',
     assetClass: 'forex', sessions: { london: true, newYork: true, asia: false },
     peakSession: 'newYork', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['FOMC','BOC','OIL','NFP'], minScoreProceed: 78
+    macroEvents: ['FOMC','BOC','OIL','NFP'], minScoreProceed: 73
   },
   AUDUSD: {
     label: 'AUD/USD', capitalTicker: 'AUDUSD', pineTicker: 'AUDUSD',
     assetClass: 'forex', sessions: { london: true, newYork: true, asia: true },
     peakSession: 'asia', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['FOMC','RBA','CPI','CHINA'], minScoreProceed: 78
+    macroEvents: ['FOMC','RBA','CPI','CHINA'], minScoreProceed: 73
   },
   NZDUSD: {
     label: 'NZD/USD', capitalTicker: 'NZDUSD', pineTicker: 'NZDUSD',
     assetClass: 'forex', sessions: { london: true, newYork: true, asia: true },
     peakSession: 'asia', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['FOMC','RBNZ','CPI'], minScoreProceed: 78
+    macroEvents: ['FOMC','RBNZ','CPI'], minScoreProceed: 73
   },
   EURJPY: {
     label: 'EUR/JPY', capitalTicker: 'EURJPY', pineTicker: 'EURJPY',
     assetClass: 'forex', sessions: { london: true, newYork: true, asia: true },
     peakSession: 'london', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['ECB','BOJ','CPI'], minScoreProceed: 78
+    macroEvents: ['ECB','BOJ','CPI'], minScoreProceed: 73
   },
   EURGBP: {
     label: 'EUR/GBP', capitalTicker: 'EURGBP', pineTicker: 'EURGBP',
     assetClass: 'forex', sessions: { london: true, newYork: false, asia: false },
     peakSession: 'london', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['ECB','BOE','CPI'], minScoreProceed: 78
+    macroEvents: ['ECB','BOE','CPI'], minScoreProceed: 73
   },
   EURAUD: {
     label: 'EUR/AUD', capitalTicker: 'EURAUD', pineTicker: 'EURAUD',
     assetClass: 'forex', sessions: { london: true, newYork: true, asia: true },
     peakSession: 'london', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['ECB','RBA','CPI'], minScoreProceed: 78
+    macroEvents: ['ECB','RBA','CPI'], minScoreProceed: 73
   },
   EURCHF: {
     label: 'EUR/CHF', capitalTicker: 'EURCHF', pineTicker: 'EURCHF',
     assetClass: 'forex', sessions: { london: true, newYork: true, asia: false },
     peakSession: 'london', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['ECB','SNB'], minScoreProceed: 78
+    macroEvents: ['ECB','SNB'], minScoreProceed: 73
   },
   GBPJPY: {
     label: 'GBP/JPY', capitalTicker: 'GBPJPY', pineTicker: 'GBPJPY',
     assetClass: 'forex', sessions: { london: true, newYork: true, asia: true },
     peakSession: 'london', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['BOE','BOJ','CPI'], minScoreProceed: 78
+    macroEvents: ['BOE','BOJ','CPI'], minScoreProceed: 73
   },
   GBPCHF: {
     label: 'GBP/CHF', capitalTicker: 'GBPCHF', pineTicker: 'GBPCHF',
     assetClass: 'forex', sessions: { london: true, newYork: false, asia: false },
     peakSession: 'london', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['BOE','SNB'], minScoreProceed: 78
+    macroEvents: ['BOE','SNB'], minScoreProceed: 73
   },
   AUDJPY: {
     label: 'AUD/JPY', capitalTicker: 'AUDJPY', pineTicker: 'AUDJPY',
     assetClass: 'forex', sessions: { london: true, newYork: true, asia: true },
     peakSession: 'asia', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['RBA','BOJ'], minScoreProceed: 78
+    macroEvents: ['RBA','BOJ'], minScoreProceed: 73
   },
   ETHUSD: {
     label: 'ETH/USD', capitalTicker: 'ETHUSD', pineTicker: 'ETHUSD',
     assetClass: 'crypto', sessions: { london: true, newYork: true, asia: true },
     peakSession: 'newYork', scoringWeights: { pine: 0.50, fxssi: 0.35, session: 0.15 },
-    macroEvents: ['FOMC'], minScoreProceed: 78
+    macroEvents: ['FOMC'], minScoreProceed: 73
   },
   // ── Global indices + commodities (no FXSSI order book) ───────────────────
   US500: {
     label: 'S&P 500', capitalTicker: 'US500', pineTicker: 'US500',
     assetClass: 'index', sessions: { london: false, newYork: true, asia: false },
     peakSession: 'newYork', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
-    macroEvents: ['FOMC','CPI','NFP'], minScoreProceed: 80, noOrderBook: true, group: 'global'
+    macroEvents: ['FOMC','CPI','NFP'], minScoreProceed: 75, noOrderBook: true, group: 'global'
   },
   DE40: {
     label: 'DAX', capitalTicker: 'DE40', pineTicker: 'DE40',
     assetClass: 'index', sessions: { london: true, newYork: false, asia: false },
     peakSession: 'london', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
-    macroEvents: ['ECB','CPI'], minScoreProceed: 80, noOrderBook: true, group: 'global'
+    macroEvents: ['ECB','CPI'], minScoreProceed: 75, noOrderBook: true, group: 'global'
   },
   UK100: {
     label: 'FTSE 100', capitalTicker: 'UK100', pineTicker: 'UK100',
     assetClass: 'index', sessions: { london: true, newYork: false, asia: false },
     peakSession: 'london', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
-    macroEvents: ['BOE','CPI'], minScoreProceed: 80, noOrderBook: true, group: 'global'
+    macroEvents: ['BOE','CPI'], minScoreProceed: 75, noOrderBook: true, group: 'global'
   },
   J225: {
     label: 'Nikkei 225', capitalTicker: 'J225', pineTicker: 'J225',
     assetClass: 'index', sessions: { london: false, newYork: false, asia: true },
     peakSession: 'asia', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
-    macroEvents: ['BOJ'], minScoreProceed: 80, noOrderBook: true, group: 'global'
+    macroEvents: ['BOJ'], minScoreProceed: 75, noOrderBook: true, group: 'global'
   },
   HK50: {
     label: 'Hang Seng', capitalTicker: 'HK50', pineTicker: 'HK50',
     assetClass: 'index', sessions: { london: false, newYork: false, asia: true },
     peakSession: 'asia', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
-    macroEvents: [], minScoreProceed: 80, noOrderBook: true, group: 'global'
+    macroEvents: [], minScoreProceed: 75, noOrderBook: true, group: 'global'
   },
   CN50: {
     label: 'China A50', capitalTicker: 'CN50', pineTicker: 'CN50',
     assetClass: 'index', sessions: { london: false, newYork: false, asia: true },
     peakSession: 'asia', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
-    macroEvents: [], minScoreProceed: 82, noOrderBook: true, group: 'global'
+    macroEvents: [], minScoreProceed: 77, noOrderBook: true, group: 'global'
   },
   COPPER: {
     label: 'Copper', capitalTicker: 'COPPER', pineTicker: 'COPPER',
     assetClass: 'commodity', sessions: { london: true, newYork: true, asia: false },
     peakSession: 'london', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
-    macroEvents: ['FOMC','CPI'], minScoreProceed: 80, noOrderBook: true, group: 'global'
+    macroEvents: ['FOMC','CPI'], minScoreProceed: 75, noOrderBook: true, group: 'global'
   },
   PLATINUM: {
     label: 'Platinum', capitalTicker: 'PLATINUM', pineTicker: 'PLATINUM',
     assetClass: 'commodity', sessions: { london: true, newYork: true, asia: false },
     peakSession: 'london', scoringWeights: { pine: 0.60, fxssi: 0.25, session: 0.15 },
-    macroEvents: ['FOMC'], minScoreProceed: 80, noOrderBook: true, group: 'global'
+    macroEvents: ['FOMC'], minScoreProceed: 75, noOrderBook: true, group: 'global'
   },
 };
 
