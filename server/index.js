@@ -549,6 +549,17 @@ app.get('/api/past-signals', (req, res) => {
   res.json(getPastCycleSignals(200));
 });
 
+app.get('/api/debug-skips', (req, res) => {
+  try {
+    const skips = db.all('SELECT gate, skip_reason AS reason, symbol, ts FROM abc_skips ORDER BY ts DESC LIMIT 50');
+    const abcRecent = db.all('SELECT symbol, pine_class, score, verdict, outcome, ts FROM abc_signals ORDER BY ts DESC LIMIT 30');
+    const scorerRecent = db.all('SELECT symbol, score, verdict, ts FROM signals ORDER BY ts DESC LIMIT 30');
+    res.json({ skips, abcRecent, scorerRecent });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/abc-signals', (req, res) => {
   try {
     let signals = db.getAbcSignals(200);
