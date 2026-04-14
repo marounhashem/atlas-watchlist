@@ -511,6 +511,7 @@ function initSchema() {
   try { db.run('ALTER TABLE market_data ADD COLUMN fvg_low REAL'); } catch(e) {}
   try { db.run('ALTER TABLE market_data ADD COLUMN fvg_mid REAL'); } catch(e) {}
   try { db.run('ALTER TABLE market_data ADD COLUMN fxssi_hourly_analysis TEXT'); } catch(e) {}
+  try { db.run('ALTER TABLE market_data ADD COLUMN fxssi_fetched_at INTEGER'); console.log('[DB] Migration: added fxssi_fetched_at column'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN paper_outcome TEXT DEFAULT NULL'); console.log('[DB] Migration: added paper_outcome column'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN paper_outcome_ts INTEGER DEFAULT NULL'); } catch(e) {}
   try { db.run('ALTER TABLE signals ADD COLUMN fxssi_stale INTEGER DEFAULT 0'); } catch(e) {}
@@ -632,9 +633,10 @@ function upsertMarketData(symbol, data) {
        structure,fvg_present,fvg_high,fvg_low,fvg_mid,
        fxssi_long_pct,fxssi_short_pct,fxssi_trapped,
        ob_absorption,ob_imbalance,ob_large_orders,
-       fxssi_analysis,fxssi_hourly_analysis,raw_payload)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       fxssi_analysis,fxssi_hourly_analysis,fxssi_fetched_at,raw_payload)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [...baseParams, data.fxssiAnalysis || null, data.fxssiHourlyAnalysis || null,
+        n(data.fxssiFetchedAt),
         JSON.stringify({ ...data, ...(data.rawExtra || {}) })]
     );
   } else {

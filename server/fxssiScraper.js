@@ -441,7 +441,8 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
           obAbsorption:  analysed.obAbsorption,
           obImbalance:   analysed.obImbalance,
           obLargeOrders: analysed.largeOrders,
-          fxssiAnalysis: JSON.stringify(analysed)
+          fxssiAnalysis: JSON.stringify(analysed),
+          fxssiFetchedAt: now
         });
 
       if (broadcast) broadcast({ type: 'FXSSI_UPDATE', symbol, analysed, ts: now });
@@ -490,6 +491,7 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
               obImbalance: existingH.ob_imbalance,
               obLargeOrders: existingH.ob_large_orders,
               fxssiAnalysis: existingH.fxssi_analysis,
+              fxssiFetchedAt: existingH.fxssi_fetched_at || null,
               fxssiHourlyAnalysis: JSON.stringify(analysedH)
             });
           }
@@ -579,7 +581,8 @@ function processBridgePayload(payload) {
         obAbsorption:  analysed.obAbsorption,
         obImbalance:   analysed.obImbalance,
         obLargeOrders: analysed.largeOrders,
-        fxssiAnalysis: JSON.stringify(analysed)
+        fxssiAnalysis: JSON.stringify(analysed),
+        fxssiFetchedAt: Date.now()
       });
     }
 

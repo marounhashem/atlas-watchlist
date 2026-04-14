@@ -277,6 +277,7 @@ function processPineWebhook(data) {
     obImbalance:   data.obImbalance   || existing?.ob_imbalance    || 0,
     obLargeOrders: data.obLargeOrders || existing?.ob_large_orders || false,
     fxssiAnalysis: existing?.fxssi_analysis || null,
+    fxssiFetchedAt: existing?.fxssi_fetched_at || null,
     rawExtra: {
       momScore, structure: rawStructureObj,
       rsi: data.rsi && typeof data.rsi === 'object' ? data.rsi : null,
@@ -315,7 +316,8 @@ function processFxssiWebhook(data) {
       fvgHigh: latest.fvg_high, fvgLow: latest.fvg_low, fvgMid: latest.fvg_mid,
       fxssiLongPct: data.longPct, fxssiShortPct: data.shortPct, fxssiTrapped: data.trapped,
       obAbsorption: latest.ob_absorption, obImbalance: latest.ob_imbalance,
-      obLargeOrders: latest.ob_large_orders, fxssiAnalysis: latest.fxssi_analysis
+      obLargeOrders: latest.ob_large_orders, fxssiAnalysis: latest.fxssi_analysis,
+      fxssiFetchedAt: Date.now()
     });
     console.log(`[Webhook] FXSSI ${sym} updated`);
   }
