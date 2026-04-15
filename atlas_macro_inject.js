@@ -18,7 +18,7 @@
  *   supports_long   true when macro gives LONG signals a multiplier tailwind
  *   supports_short  true when macro gives SHORT signals a multiplier tailwind
  *
- * Server handles 12h TTL via */15 cleanup cron — do NOT set avoid_until/expires_at.
+ * Server handles 12h TTL via a 15-min cleanup cron — do NOT set avoid_until/expires_at.
  *
  * Data authored: 2026-04-15 (Iran peace talks FAILED over weekend, US naval
  * blockade of Iranian ports active Apr 9-10, ~230 tankers waiting in Persian
