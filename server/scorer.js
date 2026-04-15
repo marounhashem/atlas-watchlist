@@ -154,7 +154,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260410.4'; // Mercato context — all 30 symbols, per-symbol generated signals + CORS
+const SCORER_VERSION = '20260415.1'; // Macro context TTL tightened to 12h + pre-analyzed inject endpoint
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
