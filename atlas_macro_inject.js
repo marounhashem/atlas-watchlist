@@ -17,20 +17,24 @@
  *   key_risks       array of strings — what would flip the thesis
  *   supports_long   true when macro gives LONG signals a multiplier tailwind
  *   supports_short  true when macro gives SHORT signals a multiplier tailwind
- *   avoid_until     optional ISO string — scorer will avoid fresh entries until then
  *
- * Data authored: 2026-04-15 (Iran de-escalation tone, Hormuz still 10%,
- * Fed on hold, hot CPI driven by energy only, DXY 98, gold off ATH, risk-on rally).
+ * Server handles 12h TTL via */15 cleanup cron — do NOT set avoid_until/expires_at.
+ *
+ * Data authored: 2026-04-15 (Iran peace talks FAILED over weekend, US naval
+ * blockade of Iranian ports active Apr 9-10, ~230 tankers waiting in Persian
+ * Gulf, CPI HOT at 3.3% YoY on gasoline +21.2%, Fed cut repricing 2→1 for 2026,
+ * DXY 98 still weak on 7-day losing streak, metals rally accelerating,
+ * Nasdaq 100 pushing 25,842 on 10-day win streak.)
  */
 
 const ATLAS_URL = process.env.ATLAS_URL || 'http://localhost:3001';
 const ENDPOINT = `${ATLAS_URL}/api/macro-inject`;
 
-// Shared risk set — Hormuz break + Fed path + CPI print cadence dominate every symbol
+// Shared risk set — Iran blockade + Fed repricing + CPI stickiness dominate every symbol
 const CORE_RISKS = [
-  'Iran-US talks collapse, Hormuz flows stay at 10%',
-  'Fed April 28-29 surprises hawkish on sticky core CPI',
-  'Oil spikes back above $100 on Hormuz re-escalation'
+  'Surprise Iran ceasefire breakthrough collapses oil premium',
+  'Fed June FOMC pivots hawkish on hot 3.3% CPI print',
+  'Oil spikes above $110 on Hormuz tanker incident'
 ];
 
 const SYMBOLS = [
@@ -38,9 +42,9 @@ const SYMBOLS = [
   {
     symbol: 'GOLD',
     sentiment: 'BULLISH',
-    strength: 7,
-    summary: 'Gold $4,781, ~15% below Jan $5,595 ATH. DXY 7-day losing streak + Fed cut repricing rebuilds bid; institutional targets $5,400-$6,300 for year-end.',
-    key_risks: ['Hard Iran ceasefire kills haven bid', 'DXY reclaims 100 on Fed hawk surprise', ...CORE_RISKS.slice(0, 1)],
+    strength: 8,
+    summary: 'Gold $4,820, bid on hot 3.3% CPI + Iran blockade + DXY 7-day downtrend + Fed cut repricing. Holding above $4,800 support; institutional targets $5,400-$6,300 year-end.',
+    key_risks: ['Surprise Iran ceasefire kills haven bid', 'DXY reclaims 100 on Fed hawk surprise', 'Rapid CPI cooldown'],
     supports_long: true,
     supports_short: false
   },
@@ -48,17 +52,17 @@ const SYMBOLS = [
     symbol: 'SILVER',
     sentiment: 'BULLISH',
     strength: 8,
-    summary: 'Silver ~$74-77, +150% YoY, metals frenzy driven by industrial/data-center demand on top of gold tailwind. Highest decade-plus levels.',
-    key_risks: ['Industrial demand rollover on recession fears', 'Unsustainable rally narrative triggers profit-taking'],
+    summary: 'Silver $79.35, surged 5%+ prior session on gold tailwind + industrial demand + Iran shock. Highest levels in over a decade, metals frenzy intact.',
+    key_risks: ['Profit-taking after parabolic run', 'Industrial demand rollover on recession fears', 'Gold reversal'],
     supports_long: true,
     supports_short: false
   },
   {
     symbol: 'COPPER',
     sentiment: 'BULLISH',
-    strength: 8,
-    summary: 'Copper $5.81/lb (near $6.30 peak, +37% YoY). Supply squeeze + electrification/data-center demand. Rally flagged as "unsustainable" but no reversal signal yet.',
-    key_risks: ['China CSI 300 weakness spreads to industrial metals', 'Unsustainable rally reversal'],
+    strength: 6,
+    summary: 'Copper $6.08/lb (+0.87% 24h), still bid on electrification/data-center demand but LME inventories at 8-year highs signal demand softening. Conviction trimmed.',
+    key_risks: ['LME inventory build accelerates', 'China CSI 300 weakness spreads', 'Rally exhaustion after parabolic move'],
     supports_long: true,
     supports_short: false
   },
@@ -66,8 +70,8 @@ const SYMBOLS = [
     symbol: 'PLATINUM',
     sentiment: 'BULLISH',
     strength: 7,
-    summary: 'Platinum $2,108 — strongest in years on auto-catalyst demand + precious metals rotation. Retail + institutional see it as the 2026 breakout metal.',
-    key_risks: ['Auto demand softening', 'Metals rotation unwinds'],
+    summary: 'Platinum $2,108 (+0.34%, +117.91% YoY). Auto-catalyst demand + precious metals rotation continue driving price; still strongest in years.',
+    key_risks: ['Auto demand softening on recession fears', 'Metals rotation unwinds', 'Profit-taking after parabolic YoY gain'],
     supports_long: true,
     supports_short: false
   },
@@ -75,11 +79,11 @@ const SYMBOLS = [
   // ── ENERGY ─────────────────────────────────────────────────────────────────
   {
     symbol: 'OILWTI',
-    sentiment: 'NEUTRAL',
-    strength: 5,
-    summary: 'WTI $90.81, off Feb/Mar spike peaks but Hormuz still at 10% (~2.1mbpd). De-escalation pulls price down, supply-break keeps a floor. Two-way risk.',
-    key_risks: ['Hormuz reopens fully → $75 flush', 'Talks collapse → $110+ re-spike', 'OPEC+ announcement'],
-    supports_long: false,
+    sentiment: 'BULLISH',
+    strength: 6,
+    summary: 'WTI $92, up from weekend as US-Iran peace talks failed and US naval blockade of Iranian ports active since Apr 9-10. ~230 tankers waiting in Persian Gulf; Brent $96.80.',
+    key_risks: ['Sudden peace breakthrough → $75 flush', 'OPEC+ surprise production hike', 'US recession fear cuts demand'],
+    supports_long: true,
     supports_short: false
   },
 
@@ -88,8 +92,8 @@ const SYMBOLS = [
     symbol: 'US500',
     sentiment: 'BULLISH',
     strength: 7,
-    summary: 'S&P 500 at 6,967 (+1.18%), erased Iran war losses, now positive YTD and within sight of late-Jan ATH. Tech leading; weaker dollar + Fed cut repricing + peace-talk optimism.',
-    key_risks: ['Ceasefire breaks (happened once already)', 'Sticky core CPI forces Fed hawk pivot', 'Earnings disappointment in Q1 reports'],
+    summary: 'S&P 500 6,976 (+0.12%), approaching Jan 28 ATH of 7,002. Tech leadership + weak DXY + rate-cut repricing offset hot CPI concerns. Near-term overbought.',
+    key_risks: ['Hot CPI forces Fed hawk pivot at June FOMC', 'Iran blockade tightens further', 'Earnings disappointment in Q1 reports'],
     supports_long: true,
     supports_short: false
   },
@@ -97,17 +101,17 @@ const SYMBOLS = [
     symbol: 'US30',
     sentiment: 'BULLISH',
     strength: 6,
-    summary: 'Dow 48,535 (+0.66%), lagging Nasdaq on less tech exposure but participating in the relief rally. Industrial/energy components benefit from stable oil.',
-    key_risks: ['Rotation away from defensives', 'Earnings miss in industrials', ...CORE_RISKS.slice(2, 3)],
+    summary: 'Dow 48,536 (+0.66%), led by Amazon/Nvidia/Nike. Lagging Nasdaq on less tech exposure but participating in rally. Energy components benefit from higher oil.',
+    key_risks: ['Rotation away from cyclicals', 'Industrials Q1 earnings miss', ...CORE_RISKS.slice(1, 2)],
     supports_long: true,
     supports_short: false
   },
   {
     symbol: 'US100',
     sentiment: 'BULLISH',
-    strength: 8,
-    summary: 'Nasdaq 100 on 10-day win streak (longest since 2021), +1.96% to 23,639. Tech/software leadership, weak dollar tailwind, AI-capex narrative intact.',
-    key_risks: ['10-day streak exhaustion', 'Rate-path surprise hits long-duration tech', 'AI capex pause signal'],
+    strength: 7,
+    summary: 'Nasdaq 100 25,842 on 10-day win streak (longest since 2021). Tech/software leadership + weak dollar tailwind + AI-capex narrative intact, but extended.',
+    key_risks: ['10-day streak exhaustion', 'Rate-path shock hits long-duration tech', 'Hot CPI → Fed hawk pivot'],
     supports_long: true,
     supports_short: false
   },
@@ -115,10 +119,10 @@ const SYMBOLS = [
   // ── EUROPE INDICES ─────────────────────────────────────────────────────────
   {
     symbol: 'UK100',
-    sentiment: 'NEUTRAL',
-    strength: 5,
-    summary: 'FTSE bid on defensives + BP/Shell benefit from elevated crude. Stoxx 600 +1% on de-escalation hopes but energy-importer drag caps upside.',
-    key_risks: ['Oil crash unwinds energy-heavy FTSE bid', 'BoE stuck on sticky UK inflation'],
+    sentiment: 'BULLISH',
+    strength: 6,
+    summary: 'FTSE 10,628 (+0.25%), bid on elevated oil supporting BP/Shell + defensive rotation. Energy-heavy composition is a direct Iran-shock tailwind.',
+    key_risks: ['Oil flush on ceasefire unwinds BP/Shell bid', 'BoE stuck on UK inflation stickiness', 'Miners drag on China weakness'],
     supports_long: true,
     supports_short: false
   },
@@ -126,8 +130,8 @@ const SYMBOLS = [
     symbol: 'DE40',
     sentiment: 'NEUTRAL',
     strength: 5,
-    summary: 'DAX ~24,037, volatile. Germany is energy-import victim of the Iran shock; ECB stuck between inflation stickiness and growth drag. Recovery hopes fight the shock.',
-    key_risks: ['Energy shock extends if Hormuz stays broken', 'ECB delays cuts on inflation stickiness', 'Autos/industrials miss Q1'],
+    summary: 'DAX 24,044 (+0.12%), modest gains but Germany is energy-import victim of Iran shock. ECB stuck between inflation stickiness and growth drag.',
+    key_risks: ['Energy shock deepens on further Hormuz disruption', 'ECB delays cuts on inflation stickiness', 'Autos/industrials miss Q1'],
     supports_long: false,
     supports_short: false
   },
@@ -137,26 +141,26 @@ const SYMBOLS = [
     symbol: 'J225',
     sentiment: 'BULLISH',
     strength: 7,
-    summary: 'Nikkei 58,134 (+0.44%), nearing ATH. Weak yen backdrop + Japanese exporter tailwind + risk-on regional tone. Flagged as 2026 outperformer.',
-    key_risks: ['Yen strength squeeze on BoJ pivot', 'Ceasefire break hits risk-on globally'],
+    summary: 'Nikkei ~58,000 near ATH. Weak yen (down 11.29% YTD) tailwind for exporters + risk-on regional tone. Flagged as 2026 outperformer.',
+    key_risks: ['Yen strength squeeze on BoJ pivot', 'Iran shock triggers risk-off globally', 'Global tech pullback'],
     supports_long: true,
     supports_short: false
   },
   {
     symbol: 'HK50',
-    sentiment: 'BULLISH',
-    strength: 7,
-    summary: 'Hang Seng 26,190 (+1.2%), highest since March. Riding the regional relief rally + weak dollar + China stimulus hopes.',
-    key_risks: ['China property/deflation relapse', 'Mainland CSI 300 weakness spreads', 'Geopolitics re-escalates'],
-    supports_long: true,
+    sentiment: 'NEUTRAL',
+    strength: 5,
+    summary: 'Hang Seng 25,708 (-0.71%), pulled back from recent highs despite earlier Iran-ceasefire bid. Riding regional sentiment but without strong directional conviction.',
+    key_risks: ['China property/deflation relapse', 'Mainland CSI 300 weakness spreads', 'Tech sector pullback'],
+    supports_long: false,
     supports_short: false
   },
   {
     symbol: 'CN50',
     sentiment: 'BEARISH',
     strength: 5,
-    summary: 'CSI 300 -0.34% at 4,685, bucking Asian regional gains. Mainland China lagging on deflation/property overhang despite global risk-on.',
-    key_risks: ['Stimulus surprise', 'Beijing props up A-shares directly', 'Hong Kong strength spills over'],
+    summary: 'CSI 300 lagging regional gains on deflation/property overhang. Mainland China underperforming despite global risk-on; LME copper inventory build flags China demand softness.',
+    key_risks: ['Beijing stimulus surprise', 'PBoC easing pivot', 'Commodity demand rebound'],
     supports_long: false,
     supports_short: true
   },
@@ -166,17 +170,17 @@ const SYMBOLS = [
     symbol: 'BTCUSD',
     sentiment: 'BULLISH',
     strength: 7,
-    summary: 'BTC ~$74k, +8.1% weekly, two-month high on Iran de-escalation + weak dollar. Rebounding from Feb 5 flush to $60k; $75k breakout level in play.',
-    key_risks: ['$75k breakout fails into heavy supply', 'Ceasefire break triggers risk-off', 'Spot ETF outflow surprise'],
+    summary: 'BTC $73,725 (+5.05% 24h), rebounding hard on weak DXY + tech risk-on + inflation hedge narrative. $75k breakout resistance in play; two-month high.',
+    key_risks: ['$75k breakout fails into heavy supply', 'Iran shock triggers risk-off de-risking', 'Spot ETF outflow surprise'],
     supports_long: true,
     supports_short: false
   },
   {
     symbol: 'ETHUSD',
     sentiment: 'BULLISH',
-    strength: 8,
-    summary: 'ETH ~$2,375, +12.4% weekly, outperforming BTC on relief rally. Two-month high, beta-to-BTC playing out strongly on risk-on flip.',
-    key_risks: ['Beta unwind if BTC stalls', 'ETH/BTC ratio rollover', 'Risk-off from Iran break'],
+    strength: 7,
+    summary: 'ETH riding BTC beta on the risk-on flip + weak DXY + inflation hedge narrative. Outperforming during up-legs; participating in crypto rally.',
+    key_risks: ['Beta unwind if BTC stalls at $75k', 'ETH/BTC ratio rollover', 'Risk-off from Iran escalation'],
     supports_long: true,
     supports_short: false
   },
@@ -186,8 +190,8 @@ const SYMBOLS = [
     symbol: 'EURUSD',
     sentiment: 'NEUTRAL',
     strength: 4,
-    summary: 'EUR hit hardest by Iran energy shock (Europe imports oil), but DXY 98 and 7-day losing streak pulls pair higher. Net conflicted — two-way price action.',
-    key_risks: ['Fed hawkish surprise reverses DXY slide', 'Energy shock re-intensifies on Hormuz break', 'ECB signals earlier cuts'],
+    summary: 'EUR/USD 1.1795 (+0.30%), +4.54% YTD on DXY weakness. Europe is energy-import victim of Iran shock — net conflicted, two-way price action likely.',
+    key_risks: ['Fed hawk surprise reverses DXY slide', 'Iran blockade deepens EUR energy drag', 'ECB earlier-cut signal'],
     supports_long: false,
     supports_short: false
   },
@@ -195,26 +199,26 @@ const SYMBOLS = [
     symbol: 'GBPUSD',
     sentiment: 'NEUTRAL',
     strength: 4,
-    summary: 'GBP capped by BoE stickiness + energy import drag; DXY weakness provides partial tailwind. Bearish technical bias into key support but no clean macro edge.',
+    summary: 'Cable 1.3588 near session highs. GBP capped by BoE stickiness + energy import drag; DXY weakness provides partial tailwind. No clean macro edge.',
     key_risks: ['UK CPI surprise', 'DXY reclaims 100', 'BoE cut timing shift'],
     supports_long: false,
     supports_short: false
   },
   {
     symbol: 'USDJPY',
-    sentiment: 'BEARISH',
-    strength: 6,
-    summary: 'DXY 98 7-day downtrend + JPY haven bid into Iran uncertainty pressures USDJPY lower. Yen outperforming as safe-haven flows return on any risk-off flicker.',
-    key_risks: ['BoJ dovish surprise', 'Fed hawk pivot', 'Clean Iran ceasefire removes haven bid'],
+    sentiment: 'NEUTRAL',
+    strength: 4,
+    summary: 'USDJPY 159.28, JPY weak 11.29% YTD despite DXY 7-day downtrend. Haven bid into Iran risk fights yield-differential gravity; two-way risk.',
+    key_risks: ['BoJ hawkish pivot on imported inflation', 'Fed hawk repricing', 'Clean Iran ceasefire removes haven bid'],
     supports_long: false,
-    supports_short: true
+    supports_short: false
   },
   {
     symbol: 'USDCAD',
     sentiment: 'BEARISH',
-    strength: 6,
-    summary: 'Oil $90+ supports CAD; DXY weakness compounds. Double headwind for pair — short bias preferred while Brent holds $90+ and DXY below 99.',
-    key_risks: ['Oil flush below $80 on ceasefire', 'BoC dovish surprise', 'DXY reversal'],
+    strength: 7,
+    summary: 'USDCAD 1.3765, double headwind from WTI $92 supporting CAD + DXY 7-day downtrend. Short bias clean while Brent holds $96+.',
+    key_risks: ['Oil flush below $80 on ceasefire', 'BoC dovish surprise', 'DXY reversal above 100'],
     supports_long: false,
     supports_short: true
   },
@@ -222,7 +226,7 @@ const SYMBOLS = [
     symbol: 'USDCHF',
     sentiment: 'BEARISH',
     strength: 6,
-    summary: 'CHF bid as Europe-proximate haven into Iran tail risk + DXY 7-day downtrend. SNB tolerant of CHF strength given imported inflation fears.',
+    summary: 'USDCHF 0.7810 (-0.43%), CHF +5.26% YTD on haven bid + DXY downtrend. SNB tolerant of strength given imported inflation concerns.',
     key_risks: ['SNB intervention on excessive CHF strength', 'Fed hawk pivot', 'Ceasefire removes haven bid'],
     supports_long: false,
     supports_short: true
@@ -231,17 +235,17 @@ const SYMBOLS = [
     symbol: 'AUDUSD',
     sentiment: 'BULLISH',
     strength: 5,
-    summary: 'AUD tailwind from copper $5.81 + risk-on rally + weak DXY. Offset by China CSI 300 weakness. Modest long bias while metals complex bids.',
-    key_risks: ['China demand rollover', 'Copper reversal', 'DXY reclaims 100'],
+    summary: 'AUDUSD 0.7143, tailwind from copper $6.08 + risk-on + weak DXY. Offset by China CSI weakness + LME copper inventory build. Modest long bias.',
+    key_risks: ['China demand rollover', 'Copper reversal on LME inventory', 'DXY reclaims 100'],
     supports_long: true,
     supports_short: false
   },
   {
     symbol: 'NZDUSD',
-    sentiment: 'NEUTRAL',
-    strength: 5,
-    summary: 'NZD riding risk-on + weak DXY but without the metals kicker AUD gets. Dairy pricing neutral. Modest long lean, secondary to AUD.',
-    key_risks: ['RBNZ dovish surprise', 'Risk-off from Iran break', 'Dairy auction miss'],
+    sentiment: 'BULLISH',
+    strength: 6,
+    summary: 'NZDUSD 0.5886 (+0.31%). RBNZ shifted hawkish — 74bps hikes priced by year-end on inflation/wage stickiness. New tailwind on top of risk-on + weak DXY.',
+    key_risks: ['RBNZ walks back hawkish signal', 'Risk-off from Iran escalation', 'Dairy auction miss'],
     supports_long: true,
     supports_short: false
   },
@@ -252,7 +256,7 @@ const SYMBOLS = [
     sentiment: 'NEUTRAL',
     strength: 3,
     summary: 'Both EUR and GBP hit by energy import drag; no clean directional macro edge. Pure technicals pair — let price structure lead.',
-    key_risks: ['ECB/BoE divergence', 'UK CPI asymmetry', 'Energy shock re-intensifies'],
+    key_risks: ['ECB/BoE divergence', 'UK CPI asymmetry vs EU', 'Energy shock re-intensifies'],
     supports_long: false,
     supports_short: false
   },
@@ -260,26 +264,26 @@ const SYMBOLS = [
     symbol: 'EURAUD',
     sentiment: 'BEARISH',
     strength: 6,
-    summary: 'AUD benefits from copper/metals rally + risk-on; EUR dragged by energy shock. Clean short bias while this divergence holds.',
-    key_risks: ['China CSI weakness spreads to copper', 'ECB hawkish surprise', 'Metals reversal'],
+    summary: 'AUD benefits from copper $6.08 + risk-on; EUR dragged by energy shock. Clean short bias while metals-rally vs energy-drag divergence holds.',
+    key_risks: ['China CSI weakness hits copper', 'ECB hawkish surprise', 'Metals reversal on inventory build'],
     supports_long: false,
     supports_short: true
   },
   {
     symbol: 'EURJPY',
-    sentiment: 'BEARISH',
-    strength: 6,
-    summary: 'EUR hit by energy import, JPY bid as haven — double headwind for the cross. Short bias until Iran tail clears.',
-    key_risks: ['Clean ceasefire removes haven bid', 'BoJ dovish surprise', 'ECB hawk surprise'],
+    sentiment: 'NEUTRAL',
+    strength: 4,
+    summary: 'EUR hit by energy import drag, JPY has haven bid but weak 11.29% YTD on yield gravity. Cross direction conflicted; no clean macro edge today.',
+    key_risks: ['BoJ hawkish pivot', 'Iran ceasefire removes JPY haven bid', 'ECB hawk surprise'],
     supports_long: false,
-    supports_short: true
+    supports_short: false
   },
   {
     symbol: 'EURCHF',
     sentiment: 'BEARISH',
     strength: 6,
-    summary: 'EUR weak on energy shock; CHF bid as Europe-proximate haven. SNB tolerating strength. Short bias respects SNB intervention risk.',
-    key_risks: ['SNB intervention', 'Ceasefire removes haven bid', 'ECB hawk pivot'],
+    summary: 'EUR weak on energy shock; CHF bid as Europe-proximate haven with +5.26% YTD strength. SNB tolerating strength. Short bias respects intervention risk.',
+    key_risks: ['SNB intervention', 'Ceasefire removes CHF haven bid', 'ECB hawk pivot'],
     supports_long: false,
     supports_short: true
   },
@@ -287,26 +291,26 @@ const SYMBOLS = [
     symbol: 'GBPCHF',
     sentiment: 'BEARISH',
     strength: 5,
-    summary: 'GBP energy-import drag + CHF haven bid. Weaker conviction than EURCHF but same directional story.',
-    key_risks: ['SNB intervention', 'BoE hawk surprise on UK CPI', 'Ceasefire removes haven bid'],
+    summary: 'GBP energy-import drag + CHF haven bid + YTD strength. Weaker conviction than EURCHF but same directional story.',
+    key_risks: ['SNB intervention', 'BoE hawk surprise on UK CPI', 'Ceasefire removes CHF haven bid'],
     supports_long: false,
     supports_short: true
   },
   {
     symbol: 'GBPJPY',
     sentiment: 'NEUTRAL',
-    strength: 4,
-    summary: 'Both GBP and JPY carry bearish tilts against USD — GBP from energy drag, JPY haven bid cuts both ways against GBP. No clean macro edge.',
-    key_risks: ['BoJ dovish surprise', 'UK CPI asymmetry', 'Risk-on/off regime flip'],
+    strength: 3,
+    summary: 'GBP has energy drag, JPY weak YTD despite haven bid. Two conflicted currencies — no clean macro edge, technicals-only pair today.',
+    key_risks: ['BoJ hawkish pivot', 'UK CPI asymmetry', 'Risk-on/off regime flip'],
     supports_long: false,
     supports_short: false
   },
   {
     symbol: 'AUDJPY',
-    sentiment: 'NEUTRAL',
+    sentiment: 'BULLISH',
     strength: 5,
-    summary: 'Classic risk-on/off proxy pair — AUD benefits from metals + risk-on, JPY from haven bid. Conflicted, slight long lean while risk-on holds.',
-    key_risks: ['Iran ceasefire break → risk-off', 'BoJ hawk surprise', 'Copper reversal'],
+    summary: 'Classic risk-on proxy — AUD benefits from copper + metals + risk-on; JPY weak YTD on yield gravity. Modest long bias while risk-on holds.',
+    key_risks: ['Iran ceasefire flips narrative', 'BoJ hawkish surprise', 'Copper reversal on LME build'],
     supports_long: true,
     supports_short: false
   },
@@ -318,8 +322,8 @@ const SYMBOLS = [
     symbol: 'DXY',
     sentiment: 'BEARISH',
     strength: 6,
-    summary: 'DXY 98.08, 7 straight down days, lowest since pre-Iran conflict. De-escalation pricing + Fed cut repricing + weak risk-haven demand. Key 98 support in play.',
-    key_risks: ['Fed hawk surprise at Apr 28-29', 'Ceasefire break triggers safe-haven USD bid', 'US CPI re-accelerates beyond energy'],
+    summary: 'DXY 98.09, 7 straight down days, lowest since late February. Weak despite hawkish Fed repricing — weak risk-haven demand + post-conflict soft-USD narrative.',
+    key_risks: ['Fed hawk surprise at June FOMC on hot 3.3% CPI', 'Iran escalation triggers safe-haven USD bid', 'Euro area data shock'],
     supports_long: false,
     supports_short: true
   }
