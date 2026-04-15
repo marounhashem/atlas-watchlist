@@ -2286,6 +2286,44 @@ app.delete('/api/macro-context/:symbol', (req, res) => {
   }
 });
 
+// Macro inject — pre-analyzed macro context from local tool (no Anthropic call).
+// Accepts a single symbol object or { symbols: [...] }. Writes to macro_context
+// table, updates in-memory macroContext map, broadcasts MACRO_UPDATE per symbol.
+app.post('/api/macro-inject', (req, res) => {
+  try {
+    const body = req.body || {};
+    const items = Array.isArray(body.symbols) ? body.symbols
+                : Array.isArray(body) ? body
+                : body.symbol ? [body] : [];
+    if (!items.length) return res.status(400).json({ ok: false, error: 'no symbols' });
+    const written = [];
+    const skipped = [];
+    for (const it of items) {
+      const symbol = (it.symbol || '').toUpperCase();
+      if (!symbol || !it.sentiment) { skipped.push({ symbol, reason: 'missing symbol or sentiment' }); continue; }
+      const ctx = {
+        sentiment: it.sentiment,
+        strength: typeof it.strength === 'number' ? it.strength : 5,
+        summary: it.summary || '',
+        key_risks: Array.isArray(it.key_risks) ? it.key_risks : [],
+        supports_long: !!it.supports_long,
+        supports_short: !!it.supports_short,
+        avoid_until: it.avoid_until || null,
+        ts: Date.now()
+      };
+      macroContext[symbol] = ctx;
+      db.upsertMacroContext(symbol, ctx);
+      if (typeof broadcast === 'function') broadcast({ type: 'MACRO_UPDATE', symbol, context: ctx, ts: ctx.ts });
+      written.push(symbol);
+    }
+    console.log(`[Macro] Injected ${written.length} symbols (pre-analyzed, no API): ${written.join(', ')}`);
+    res.json({ ok: true, written, skipped, count: written.length });
+  } catch (e) {
+    console.error('[Macro] Inject error:', e.message);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // Macro single-symbol test — fetches GOLD only, persists to DB, returns result (1 API call)
 app.get('/api/macro-test', async (req, res) => {
   try {
