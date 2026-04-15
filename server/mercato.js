@@ -13,7 +13,25 @@ const MERCATO_SYMBOLS = new Set([
   'EURUSD','GBPUSD','USDJPY','USDCHF','USDCAD','AUDUSD','NZDUSD',
   'EURJPY','EURGBP','EURAUD','EURCHF','GBPJPY','GBPCHF','AUDJPY'
 ]);
-const LEVEL_TOLERANCE   = 3.0;   // ±3 points / pips
+
+// Per-asset-class level tolerance. Returns absolute price distance.
+// Indices use fixed point buffer (bigger absolute moves). Commodities + crypto
+// use a medium buffer. Forex uses 0.08% of current price (pip-proportional).
+const _INDEX_SYMBOLS = new Set(['US500','US30','US100','DE40','UK100','J225','HK50','CN50']);
+const _COMMODITY_CRYPTO_SYMBOLS = new Set(['GOLD','SILVER','OILWTI','COPPER','PLATINUM','BTCUSD','ETHUSD']);
+const FOREX_TOLERANCE_PCT = 0.0008;
+
+function getSymbolTolerance(symbol, price) {
+  if (_INDEX_SYMBOLS.has(symbol)) return 8.0;
+  if (_COMMODITY_CRYPTO_SYMBOLS.has(symbol)) return 5.0;
+  return Math.max(0, (price || 0) * FOREX_TOLERANCE_PCT);
+}
+
+function _fmtTol(symbol, tolerance) {
+  return _INDEX_SYMBOLS.has(symbol) || _COMMODITY_CRYPTO_SYMBOLS.has(symbol)
+    ? tolerance.toFixed(1)
+    : tolerance.toFixed(5);
+}
 
 // Score multipliers — same philosophy as existing macro multipliers
 const MULT_APPROVED     = 1.12;  // level match + bias align → +12%
@@ -35,8 +53,10 @@ function checkMercato(symbol, price, direction, db) {
   const ctx = db.getMercatoContext(symbol);
   if (!ctx) return null;
 
+  const tolerance = getSymbolTolerance(symbol, price);
+  const tolLabel  = _fmtTol(symbol, tolerance);
   const allLevels = [...(ctx.levels_res || []), ...(ctx.levels_sup || [])];
-  const nearLevel = allLevels.find(l => Math.abs(l - price) <= LEVEL_TOLERANCE);
+  const nearLevel = allLevels.find(l => Math.abs(l - price) <= tolerance);
 
   const biasAlign =
     (ctx.bias === 'BULL' && direction === 'LONG')  ||
@@ -51,7 +71,7 @@ function checkMercato(symbol, price, direction, db) {
     return {
       tag:        'APPROVED',
       multiplier: MULT_APPROVED,
-      note:       `✅ MERCATO APPROVED — Level ${nearLevel} ±${LEVEL_TOLERANCE} · Bias ${ctx.bias} aligned`,
+      note:       `✅ MERCATO APPROVED — Level ${nearLevel} ±${tolLabel} · Bias ${ctx.bias} aligned`,
       levelHit:   nearLevel,
       bias:       ctx.bias,
       regime:     ctx.regime
@@ -71,7 +91,7 @@ function checkMercato(symbol, price, direction, db) {
 
   if (nearLevel || biasAlign) {
     const parts = [];
-    if (nearLevel) parts.push(`Level ${nearLevel} ±${LEVEL_TOLERANCE} match`);
+    if (nearLevel) parts.push(`Level ${nearLevel} ±${tolLabel} match`);
     if (biasAlign) parts.push(`Bias ${ctx.bias} aligned`);
     else           parts.push('Bias NEUTRAL');
     return {
@@ -105,13 +125,14 @@ function detectFlushRecovery(level, direction, symbol, db) {
     return null;
   }
 
-  const current = bars[0];
+  const tolerance = getSymbolTolerance(symbol, level);
+  const current   = bars[0];
 
   for (let i = 1; i < bars.length; i++) {
     const bar = bars[i];
 
     if (direction === 'LONG') {
-      const flushed      = bar.low   < level - LEVEL_TOLERANCE;
+      const flushed      = bar.low   < level - tolerance;
       const recovered    = bar.close > level;
       const stillHolding = current.close > level;
       if (flushed && recovered && stillHolding) {
@@ -130,7 +151,7 @@ function detectFlushRecovery(level, direction, symbol, db) {
     }
 
     if (direction === 'SHORT') {
-      const flushed    = bar.high  > level + LEVEL_TOLERANCE;
+      const flushed    = bar.high  > level + tolerance;
       const recovered  = bar.close < level;
       const stillBelow = current.close < level;
       if (flushed && recovered && stillBelow) {
@@ -152,7 +173,7 @@ function detectFlushRecovery(level, direction, symbol, db) {
   // Breakout retest fallback — price previously crossed level, now retesting
   const crossedBelow = bars.slice(1).some(b => b.close < level);
   const crossedAbove = bars.slice(1).some(b => b.close > level);
-  const nearLevel    = Math.abs(current.close - level) <= LEVEL_TOLERANCE;
+  const nearLevel    = Math.abs(current.close - level) <= tolerance;
 
   if (direction === 'LONG' && crossedBelow && current.close > level && nearLevel) {
     console.log(`[Mercato] BREAKOUT_RETEST bullish at ${level} on ${symbol}`);
@@ -178,21 +199,32 @@ function detectFlushRecovery(level, direction, symbol, db) {
   return null;
 }
 
+// Which level-type should be scanned for a given (bias, direction) pair?
+// BULL   LONG  → supports (bias-aligned bounce)
+// BULL   SHORT → resistances (failed breakout rejection)
+// BEAR   LONG  → resistances (reverse of BULL)
+// BEAR   SHORT → supports    (reverse of BULL)
+// NEUTRAL both → scan supports and resistances (no bias constraint)
+function _levelsForProbe(ctx, direction) {
+  const sup = ctx.levels_sup || [];
+  const res = ctx.levels_res || [];
+  if (ctx.bias === 'BULL')    return direction === 'LONG' ? sup : res;
+  if (ctx.bias === 'BEAR')    return direction === 'LONG' ? res : sup;
+  /* NEUTRAL */               return [...sup, ...res];
+}
+
 function buildMercatoSignal(ctx, currentPrice, direction, db) {
   const symbol      = ctx.symbol || 'US500';
   const cooldownKey = `${symbol}_${direction}`;
   const lastFired   = _mercatoCooldowns.get(cooldownKey) || 0;
   if (Date.now() - lastFired < MERCATO_COOLDOWN_MS) return null;
 
-  const allLevels = [...(ctx.levels_res || []), ...(ctx.levels_sup || [])];
-  const hitLevel  = allLevels.find(l => Math.abs(l - currentPrice) <= LEVEL_TOLERANCE);
-  if (!hitLevel) return null;
+  const tolerance = getSymbolTolerance(symbol, currentPrice);
+  const tolLabel  = _fmtTol(symbol, tolerance);
 
-  const biasMatch =
-    (ctx.bias === 'BULL' && direction === 'LONG')  ||
-    (ctx.bias === 'BEAR' && direction === 'SHORT') ||
-    (ctx.bias === 'NEUTRAL');
-  if (!biasMatch) return null;
+  const scanLevels = _levelsForProbe(ctx, direction);
+  const hitLevel   = scanLevels.find(l => Math.abs(l - currentPrice) <= tolerance);
+  if (!hitLevel) return null;
 
   // Hard gate — require flush/recovery or breakout retest pattern
   const patternResult = detectFlushRecovery(hitLevel, direction, symbol, db);
@@ -233,7 +265,7 @@ function buildMercatoSignal(ctx, currentPrice, direction, db) {
   const reasoning = [
     MERCATO_TAG,
     patternResult.note,
-    `Level ${hitLevel} confirmed ±${LEVEL_TOLERANCE}pts`,
+    `Level ${hitLevel} confirmed ±${tolLabel}`,
     `Bias: ${ctx.bias} | Regime: ${ctx.regime || 'N/A'}`,
     ctx.notes ? `📝 ${ctx.notes}` : null,
     `RR: ${rr}R | SL from ${direction === 'LONG' ? 'bull' : 'bear'} invalidation`
@@ -272,9 +304,12 @@ async function checkAndFireMercatoSignal(symbol, currentPrice, db, insertSignalF
     const ctx = db.getMercatoContext(symbol);
     if (!ctx) return;
 
-    const directions = ctx.bias === 'BULL' ? ['LONG']
-                     : ctx.bias === 'BEAR' ? ['SHORT']
-                     : ['LONG', 'SHORT'];
+    // Always probe both directions — buildMercatoSignal routes to the correct
+    // level type (support vs resistance) based on bias + direction:
+    //   BULL  → LONG@sup + SHORT@res (failed breakout)
+    //   BEAR  → LONG@res + SHORT@sup (reverse)
+    //   NEUTRAL → both legs scan both level types
+    const directions = ['LONG', 'SHORT'];
 
     for (const direction of directions) {
       const sig = buildMercatoSignal(ctx, currentPrice, direction, db);
