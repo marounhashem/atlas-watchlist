@@ -3945,6 +3945,27 @@ cron.schedule('5 * * * *', () => {
   try { db.clearExpiredIntel(); } catch(e) {}
 });
 
+// Macro context TTL — drop rows + in-memory entries older than 12 hours.
+// Runs every 15 minutes. Scorer's freshness gate is also 12h so this just
+// keeps the DB clean and the /api/macro-context response honest.
+const MACRO_TTL_MS = 12 * 3600000;
+cron.schedule('*/15 * * * *', () => {
+  try {
+    const cutoff = Date.now() - MACRO_TTL_MS;
+    const stale = db.all('SELECT symbol FROM macro_context WHERE ts < ?', [cutoff]);
+    if (!stale.length) return;
+    db.run('DELETE FROM macro_context WHERE ts < ?', [cutoff]);
+    db.persist();
+    for (const row of stale) {
+      if (macroContext[row.symbol]) delete macroContext[row.symbol];
+      if (typeof broadcast === 'function') broadcast({ type: 'MACRO_DELETED', symbol: row.symbol, reason: 'ttl_12h' });
+    }
+    console.log(`[Macro] TTL cleanup — deleted ${stale.length} expired rows: ${stale.map(r => r.symbol).join(', ')}`);
+  } catch(e) {
+    console.error('[Macro] TTL cleanup error:', e.message);
+  }
+});
+
 // Daily DB backup at midnight UTC — keep 3 rolling backups
 cron.schedule('0 0 * * *', () => {
   try {

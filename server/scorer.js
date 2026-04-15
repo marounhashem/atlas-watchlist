@@ -968,8 +968,8 @@ function scoreSymbol(symbol) {
     if (!macro) {
       console.log(`[Scorer] ${symbol} — no macro context, skipping macro multiplier`);
     }
-    if (macro && macro.ts && (Date.now() - macro.ts) < 26 * 3600000) macroContextAvailable = true;
-    if (macro && macro.ts && (Date.now() - macro.ts) < 26 * 3600000) { // use if <26h old
+    if (macro && macro.ts && (Date.now() - macro.ts) < 12 * 3600000) macroContextAvailable = true;
+    if (macro && macro.ts && (Date.now() - macro.ts) < 12 * 3600000) { // use if <12h old
       const macroConflict =
         (direction === 'LONG'  && macro.supports_short && !macro.supports_long) ||
         (direction === 'SHORT' && macro.supports_long  && !macro.supports_short);
