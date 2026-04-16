@@ -3502,10 +3502,10 @@ cron.schedule('* * * * *', () => {
   try { checkAbcOutcomes(broadcast); } catch(e) { console.error('[ABC Outcome] Error:', e.message); }
 });
 
-// FXSSI auto-scrape — interval-based (every 20min), cron fires every minute to check
+// FXSSI auto-scrape — interval-based (every 20min), cron checks every 5min
 // Runs 24/7 regardless of market hours — FXSSI data is live trader positioning,
 // valid at all times. Stopping during market close caused stale data at open.
-cron.schedule('* * * * *', async () => {
+cron.schedule('*/5 * * * *', async () => {
   if (!dbReady) return;
   const willFetch = shouldFetch();
   const { lastFxssiFetch } = require('./fxssiScraper');
