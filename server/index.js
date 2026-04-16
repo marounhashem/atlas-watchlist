@@ -635,6 +635,22 @@ app.post('/api/abc-archive-old', (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// Expire stuck ACTIVE signals that are past their expires_at
+app.post('/api/abc-expire-stuck', (req, res) => {
+  try {
+    const now = Date.now();
+    const stuck = db.all("SELECT id, symbol, direction, expires_at FROM abc_signals WHERE outcome='ACTIVE' AND expires_at IS NOT NULL AND expires_at < ?", [now]);
+    if (!stuck.length) return res.json({ ok: true, expired: 0, message: 'No stuck ACTIVE signals' });
+    db.run("UPDATE abc_signals SET outcome='EXPIRED' WHERE outcome='ACTIVE' AND expires_at IS NOT NULL AND expires_at < ?", [now]);
+    db.persist();
+    for (const s of stuck) {
+      if (typeof broadcast === 'function') broadcast({ type: 'ABC_OUTCOME', signalId: s.id, outcome: 'EXPIRED', ts: now });
+    }
+    console.log(`[ABC] Expired ${stuck.length} stuck ACTIVE signals: ${stuck.map(s => s.symbol).join(', ')}`);
+    res.json({ ok: true, expired: stuck.length, signals: stuck.map(s => ({ id: s.id, symbol: s.symbol, direction: s.direction })) });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Quick idea analysis — deterministic, no Anthropic API ────────────────────
 // Uses live market_data, fxssi_analysis, macro_context for a structured check
 // list. See Deep Analysis (/api/trade-feedback) for the Claude-export variant.

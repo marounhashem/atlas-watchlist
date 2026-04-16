@@ -84,6 +84,14 @@ function checkAbcOutcomes(broadcast) {
 
     if (sig.outcome !== 'ACTIVE') continue;
 
+    // ── Expiry enforcement — ACTIVE signals past expires_at → EXPIRED
+    if (sig.expires_at && Date.now() > sig.expires_at) {
+      db.updateAbcOutcome(id, 'EXPIRED', 0, `active expired after ${((Date.now() - sig.active_ts) / 3600000).toFixed(1)}h`);
+      console.log(`[ABC Outcome] ${sig.symbol} ${direction} id:${id} → EXPIRED (past expires_at)`);
+      if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, outcome: 'EXPIRED', ts: Date.now() });
+      continue;
+    }
+
     // ── SL hit ──────────────────────────────────────────────────────
     const slHit = direction === 'LONG' ? barLow <= sl : barHigh >= sl;
     if (slHit) {
