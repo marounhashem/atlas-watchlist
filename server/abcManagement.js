@@ -51,14 +51,26 @@ function checkAbcOutcomes(broadcast) {
 
     // ── OPEN → ACTIVE (entry touch) ─────────────────────────────────
     if (sig.outcome === 'OPEN') {
-      // Thesis invalidation — OPEN >6h and price >5% away from entry → EXPIRED
+      // Thesis invalidation — two expiry conditions for OPEN signals:
+      // 1. Price ran >5% PAST entry in trade direction after 6h → OB not filled, trade missed
+      // 2. Price moved >3% AGAINST entry direction after 4h → structure likely broken
       const ageHours = (Date.now() - sig.ts) / 3600000;
       const awayPct = direction === 'LONG'
-        ? (price - entry) / entry
-        : (entry - price) / entry;
+        ? (price - entry) / entry      // positive = price above entry (past long OB)
+        : (entry - price) / entry;     // positive = price below entry (past short OB)
+      const againstPct = direction === 'LONG'
+        ? (entry - price) / entry      // positive = price below entry (against long)
+        : (price - entry) / entry;     // positive = price above entry (against short)
+
       if (ageHours > 6 && awayPct > 0.05) {
-        db.updateAbcOutcome(id, 'EXPIRED', 0, `thesis stale: ${ageHours.toFixed(1)}h, ${(awayPct * 100).toFixed(1)}% away`);
-        console.log(`[ABC Outcome] ${sig.symbol} ${direction} id:${id} → EXPIRED (thesis stale: ${ageHours.toFixed(1)}h, ${(awayPct * 100).toFixed(1)}% away from entry ${entry})`);
+        db.updateAbcOutcome(id, 'EXPIRED', 0, `OB missed: ${ageHours.toFixed(1)}h, price ${(awayPct * 100).toFixed(1)}% beyond entry`);
+        console.log(`[ABC Outcome] ${sig.symbol} ${direction} id:${id} → EXPIRED (OB missed: price ${(awayPct * 100).toFixed(1)}% beyond entry)`);
+        if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, outcome: 'EXPIRED', ts: Date.now() });
+        continue;
+      }
+      if (ageHours > 4 && againstPct > 0.03) {
+        db.updateAbcOutcome(id, 'EXPIRED', 0, `structure broken: ${ageHours.toFixed(1)}h, price ${(againstPct * 100).toFixed(1)}% against entry`);
+        console.log(`[ABC Outcome] ${sig.symbol} ${direction} id:${id} → EXPIRED (structure broken: price ${(againstPct * 100).toFixed(1)}% against entry)`);
         if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, outcome: 'EXPIRED', ts: Date.now() });
         continue;
       }

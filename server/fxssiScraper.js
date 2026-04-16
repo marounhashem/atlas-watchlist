@@ -47,7 +47,8 @@ function getFxssiNullStreak(symbol) {
 // Interval-based fetch check — replaces exact-minute match (:01/:21/:41)
 // Exact-minute was a silent failure mode: if cron fired at :02 the check failed and nothing logged
 const FXSSI_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes
-let lastFxssiFetch = 0;
+let lastFxssiFetch   = 0;
+let _scrapeInProgress = false;
 
 function shouldFetch(symbol) {
   if (process.env.FXSSI_FORCE === '1') return true;
@@ -275,13 +276,21 @@ async function fetchSymbol(pair, period = 1200) {
   const MAX_RETRIES = 2;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const res = await fetch(url, {
-        headers: {
-          'Accept': 'application/json, text/javascript, */*; q=0.01',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
-          'Referer': 'https://fxssi.com/'
-        }
-      });
+      const controller = new AbortController();
+      const timeoutId  = setTimeout(() => controller.abort(), 10000); // 10s hard timeout
+      let res;
+      try {
+        res = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36',
+            'Referer': 'https://fxssi.com/'
+          }
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (res.status === 429 || res.status === 503) {
         const wait = (attempt + 1) * 2000; // 2s, 4s, 6s backoff
@@ -330,9 +339,16 @@ async function fetchSymbol(pair, period = 1200) {
 // ── Main scrape loop ─────────────────────────────────────────────────────────
 async function runFXSSIScrape(broadcast, forceWrite = false) {
   if (!process.env.FXSSI_TOKEN) return;
+  if (_scrapeInProgress && !forceWrite) {
+    console.warn('[FXSSI] Scrape already in progress — skipping concurrent invocation');
+    return;
+  }
+  _scrapeInProgress = true;
 
   const scrapeStart = Date.now();
   const now = Date.now();
+
+  try {
 
   for (const [symbol, pair] of Object.entries(FXSSI_SYMBOLS)) {
     try {
@@ -513,6 +529,10 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
   console.log(`[FXSSI] Scrape complete in ${scrapeDuration}s (${Object.keys(FXSSI_SYMBOLS).length} symbols)`);
   if (scrapeDuration > 30) {
     console.warn(`[FXSSI] ⚠ Scrape took ${scrapeDuration}s — approaching rate limit window. Consider reducing symbol count.`);
+  }
+
+  } finally {
+    _scrapeInProgress = false;
   }
 }
 

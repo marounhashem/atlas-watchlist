@@ -3,7 +3,7 @@
 // ── ABC Processor — moved from index.js ─────────────────────────────────────
 // Handles Pine ABC webhook signals, daily bias ingestion, and Class C routing.
 
-const ABC_VERSION = '20260409.1';
+const ABC_VERSION = '20260416.2';
 
 const { runAbcGates } = require('./abcGates');
 const { buildAbcScore, buildAbcBreakdown, buildAbcReasoning } = require('./abcReasoning');
@@ -350,18 +350,22 @@ function processAbcWebhook(data, deps) {
     try {
       const md = db.getLatestMarketData(sym);
       if (!md) return null;
-      // Parse gravity from fxssi_analysis JSON (no gravity_price column on market_data)
+      // Parse gravity + fetchedAt from fxssi_analysis JSON
+      // (no gravity_price column on market_data; fetchedAt is inside the JSON blob)
       let gravPrice = null;
+      let fetchedAt = null;
       try {
         const fa = md.fxssi_analysis ? JSON.parse(md.fxssi_analysis) : null;
         const fx = fa?.fxssiAnalysis ? (typeof fa.fxssiAnalysis === 'string' ? JSON.parse(fa.fxssiAnalysis) : fa.fxssiAnalysis) : (fa?.longPct != null ? fa : null);
         gravPrice = fx?.gravity?.price || null;
+        fetchedAt = fa?.fetchedAt || null;
       } catch(e) {}
       return {
         fxssi_long_pct:  md.fxssi_long_pct,
         fxssi_short_pct: md.fxssi_short_pct,
         fxssi_trapped:   md.fxssi_trapped,
-        gravity_price:   gravPrice
+        gravity_price:   gravPrice,
+        fetchedAt        // required by checkGravity staleness gate in abcGates.js
       };
     } catch(e) { return null; }
   })();
