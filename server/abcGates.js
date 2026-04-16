@@ -13,21 +13,23 @@ const { isPreEventRisk, isPostEventSuppressed } = require('./forexCalendar');
 // Class A: structurally strongest — crowd pass=PROCEED always
 // Class B: crowd pass + score >= 65 → PROCEED; else WATCH
 // Class C: crowd pass + score >= 55 → WATCH; else SKIP
-function mapVerdict(pineClass, fxssiPassed, fxssiNoData, score) {
-  const sc = score || 0;
-  if (pineClass === 'A') {
-    if (fxssiPassed) return 'PROCEED';
-    if (fxssiNoData) return 'WATCH';
-    return 'WATCH';
-  }
-  if (pineClass === 'B') {
-    if (fxssiPassed) return sc >= 65 ? 'PROCEED' : 'WATCH';
-    if (fxssiNoData) return 'WATCH';
-    return 'SKIP';
-  }
-  if (pineClass === 'C') {
-    if (fxssiPassed) return sc >= 55 ? 'WATCH' : 'SKIP';
-    return 'SKIP';
+function mapVerdict(pineClass, fxssiPassed, fxssiNoData, fxssiSplit) {
+  if (fxssiPassed) {
+    if (pineClass === 'A') return 'PROCEED';
+    if (pineClass === 'B') return 'PROCEED';
+    if (pineClass === 'C') return 'WATCH';
+  } else if (fxssiSplit) {
+    if (pineClass === 'A') return 'WATCH';
+    if (pineClass === 'B') return 'WATCH';
+    if (pineClass === 'C') return 'SKIP';
+  } else if (fxssiNoData) {
+    if (pineClass === 'A') return 'WATCH';
+    if (pineClass === 'B') return 'WATCH';
+    if (pineClass === 'C') return 'SKIP';
+  } else {
+    if (pineClass === 'A') return 'WATCH';
+    if (pineClass === 'B') return 'SKIP';
+    if (pineClass === 'C') return 'SKIP';
   }
   return 'SKIP';
 }
@@ -48,6 +50,7 @@ function checkFxssi(symbol, fxssiData) {
     return {
       passed: false,
       noData: false,
+      split: true,
       reason: `Crowd split (long:${fxssiData.fxssi_long_pct?.toFixed(1)}% short:${fxssiData.fxssi_short_pct?.toFixed(1)}%) — no contrarian edge`
     };
   }
@@ -210,8 +213,8 @@ function runAbcGates(symbol, payload, fxssiData, db) {
     return { verdict: 'SKIP', blocked: true, gate: 'GRAVITY', reason: gravityCheck.reason };
   }
 
-  // 8. Class × crowd × score verdict mapping
-  const verdict = mapVerdict(pineClass, fxssiCheck.passed, fxssiCheck.noData, score);
+  // 8. Class × crowd verdict mapping
+  const verdict = mapVerdict(pineClass, fxssiCheck.passed, fxssiCheck.noData, fxssiCheck.split);
   if (verdict === 'SKIP') {
     return { verdict: 'SKIP', blocked: true, gate: 'CROWD', reason: `Class ${pineClass} + crowd sentiment fail → SKIP. ${fxssiCheck.reason}` };
   }
