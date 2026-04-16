@@ -94,7 +94,7 @@ function processAbcWebhook(data, deps) {
   if (pineClass !== 'A') {
     try {
       const openCount = db.getOpenAbcSignals().length;
-      if (openCount >= 3) {
+      if (openCount >= 5) {
         console.log(`[ABC] ${sym} Class${pineClass} — burst gate: ${openCount} signals already open, skipping non-A`);
         try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'BURST',
           skipReason: `${openCount} signals open — cross-symbol burst limit`,
@@ -319,7 +319,7 @@ function processAbcWebhook(data, deps) {
        AND outcome NOT IN ('ARCHIVED','IGNORED','WIN','LOSS','EXPIRED')
        AND ts > ?
        LIMIT 1`,
-      [sym, direction, Date.now() - 8 * 3600000]
+      [sym, direction, Date.now() - 4 * 3600000]
     )[0];
     if (recentDup) {
       console.log(`[ABC] ${sym} ${direction} — duplicate within 8h (id:${recentDup.id}) — skipping`);
@@ -456,11 +456,13 @@ function processAbcWebhook(data, deps) {
   // RR minimum varies by signal quality.
   // Higher edge (Class A + aligned crowd) → lower RR required.
   // Lower edge (no crowd data / misaligned) → need wider reward.
-  const minRr = (pineClass === 'A' && crowdGate === 'ALIGNED') ? 1.2
-    : (pineClass === 'B' && crowdGate === 'ALIGNED')           ? 1.5
-    : (pineClass === 'B' && crowdGate === 'NO_TRAP')           ? 1.8
-    : (pineClass === 'C' && crowdGate === 'ALIGNED')           ? 1.8
-    : 2.0; // NO_DATA or MISALIGNED — need wider reward
+  const minRr = (pineClass === 'A' && crowdGate === 'ALIGNED')    ? 1.2  // best structure + crowd = lowest bar
+    : (pineClass === 'A' && crowdGate === 'NO_TRAP')              ? 1.5  // best structure, crowd split = reasonable bar
+    : (pineClass === 'A' && crowdGate === 'NO_DATA')              ? 1.5  // best structure, no crowd data = same
+    : (pineClass === 'B' && crowdGate === 'ALIGNED')              ? 1.5
+    : (pineClass === 'B' && crowdGate === 'NO_TRAP')              ? 1.8
+    : (pineClass === 'C' && crowdGate === 'ALIGNED')              ? 1.8
+    : 2.0; // Class A MISALIGNED, Class B/C NO_DATA, Class B MISALIGNED = need wider reward
   if (rr < minRr) {
     console.log(`[ABC] ${sym} — RR ${rr} below ${minRr} (class:${pineClass} crowd:${crowdGate}) — SKIP`);
     try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'RR',
