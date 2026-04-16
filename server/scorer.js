@@ -154,7 +154,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260415.1'; // Macro context TTL tightened to 12h + pre-analyzed inject endpoint
+const SCORER_VERSION = '20260416.1'; // Structure gate guard for old Pine + ABC burst/stale fixes
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -923,9 +923,21 @@ function scoreSymbol(symbol) {
       }
     }
   } catch(e) {}
+
+  // Flag: true only when Pine sent a real multi-TF structure object
+  // Used to guard gates that were designed for multi-TF data only
+  const hasMultiTfStructure = weightedStructScore !== 0;
+
   if (weightedStructScore === 0) {
-    const structure = data.structure || 'ranging';
-    weightedStructScore = structure === 'bullish' ? 2.0 : structure === 'bearish' ? -2.0 : 0;
+    // No multi-TF structure data — use bias from old Pine as proxy
+    // bias is ema_bull + macd_bull + rsi_bull, range -3 to +3
+    const biasVal = (data.bias != null) ? Number(data.bias) : 0;
+    const biasAbs = Math.abs(biasVal);
+    const biasSign = biasVal >= 0 ? 1 : -1;
+    if (biasAbs >= 3) weightedStructScore = biasSign * 2.0;
+    else if (biasAbs >= 2) weightedStructScore = biasSign * 1.5;
+    else if (biasAbs >= 1) weightedStructScore = biasSign * 1.0;
+    // biasAbs === 0 → weightedStructScore stays 0
   }
   const absWeightedStruct = Math.abs(weightedStructScore);
 
@@ -1204,12 +1216,15 @@ function scoreSymbol(symbol) {
 
   // ── Dynamic minScore floor by weighted structure ────────────────────────────
   // Weak structure needs higher score to PROCEED — prevents lower-TF-only signals
-  if (absWeightedStruct < 2.0) {
-    adjustedMinScore = Math.max(adjustedMinScore, 85);
-  } else if (absWeightedStruct < 3.5) {
-    adjustedMinScore = Math.max(adjustedMinScore, 82);
-  } else if (absWeightedStruct < 5.0) {
-    adjustedMinScore = Math.max(adjustedMinScore, 80);
+  // Only applies when Pine sent real multi-TF structure data
+  if (hasMultiTfStructure) {
+    if (absWeightedStruct < 2.0) {
+      adjustedMinScore = Math.max(adjustedMinScore, 85);
+    } else if (absWeightedStruct < 3.5) {
+      adjustedMinScore = Math.max(adjustedMinScore, 82);
+    } else if (absWeightedStruct < 5.0) {
+      adjustedMinScore = Math.max(adjustedMinScore, 80);
+    }
   }
   // noOrderBook: additional +3 on top (additive, not separate floor)
   if (noOB && absWeightedStruct < 5.0) {
@@ -1766,7 +1781,7 @@ function scoreSymbol(symbol) {
   // Hard gate — lower TF only signals are not tradeable
   // Require at least 1H alignment (weightedStruct >= 1.5) for PROCEED
   // Signals with only 1m/5m/15m alignment → force WATCH regardless of score
-  if (absWeightedStruct < 1.5 && macroVerdict === 'PROCEED') {
+  if (hasMultiTfStructure && absWeightedStruct < 1.5 && macroVerdict === 'PROCEED') {
     console.log(`[Scorer] ${symbol} ${direction} — lower TF only (${absWeightedStruct.toFixed(1)}/8.5) → forced WATCH`);
     macroVerdict = 'WATCH';
   }

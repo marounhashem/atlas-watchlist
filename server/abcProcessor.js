@@ -88,6 +88,23 @@ function processAbcWebhook(data, deps) {
   const cfg = SYMBOLS[sym];
   const dp = getAbcDp(sym);
 
+  // ── Cross-symbol burst gate ───────────────────────────────────────────────
+  // Prevents 5-6 signals flooding all symbol slots simultaneously in one bar window.
+  // Class A always passes. Class B/C gated when >=3 signals already OPEN or ACTIVE.
+  if (pineClass !== 'A') {
+    try {
+      const openCount = db.getOpenAbcSignals().length;
+      if (openCount >= 3) {
+        console.log(`[ABC] ${sym} Class${pineClass} — burst gate: ${openCount} signals already open, skipping non-A`);
+        try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'BURST',
+          skipReason: `${openCount} signals open — cross-symbol burst limit`,
+          abcVersion: ABC_VERSION, session: getSessionNow ? getSessionNow() : 'unknown',
+          ts: Date.now() }); } catch(e) {}
+        return;
+      }
+    } catch(e) {}
+  }
+
   // ── Structural entry/SL/TP calculation ────────────────────────────
   const obTop = parseFloat(data.obTop);
   const obBot = parseFloat(data.obBot);
@@ -116,8 +133,34 @@ function processAbcWebhook(data, deps) {
       : Math.round((refPrice + atrVal * 0.3) * dp) / dp;
   }
 
+  // ── Price tracking upsert ─────────────────────────────────────────────────
+  // checkAbcOutcomes reads market_data for SL/TP detection.
+  // If Scorer Pine is stale/absent for this symbol, market_data has no price.
+  // Only insert a price-only row when existing data is >5min stale — never overwrite
+  // a fresh Scorer row that carries FXSSI data.
+  try {
+    const existingMd = db.getLatestMarketData(sym);
+    const mdAge = existingMd ? (Date.now() - existingMd.ts) : Infinity;
+    if (mdAge > 5 * 60 * 1000) { // stale or missing
+      db.upsertMarketData(sym, {
+        close: entry,
+        high: obTop > 0 ? obTop : Math.round(entry * 1.001 * dp) / dp,
+        low:  obBot > 0 ? obBot : Math.round(entry * 0.999 * dp) / dp,
+        rsi:  parseFloat(data.rsi) || null,
+        bias: direction === 'LONG' ? 2 : -2,
+        biasScore: null,
+        structure: direction === 'LONG' ? 'bullish' : 'bearish',
+        fvgPresent: false
+      });
+      console.log(`[ABC] ${sym} market_data price fallback inserted (stale ${Math.round(mdAge/60000)}m)`);
+    }
+  } catch(e) {
+    console.error(`[ABC] ${sym} market_data fallback error:`, e.message);
+  }
+
   // Stale OB gate — reject if current price is >2% from OB entry
-  const currentPrice = db.getLatestMarketData(sym)?.close;
+  const mdForPrice = db.getLatestMarketData(sym);
+  const currentPrice = mdForPrice?.close || parseFloat(data.close) || null;
   if (currentPrice) {
     const distFromEntry = Math.abs(currentPrice - entry) / entry;
     if (distFromEntry > 0.02) {
@@ -142,8 +185,15 @@ function processAbcWebhook(data, deps) {
   // bear-market swing hundreds of dollars below entry.
   const maxReasonableSwingPct = slMaxPct * 3;
   const rawSwingDist = preBosSwing && entry > 0 ? Math.abs(entry - preBosSwing) / entry : 0;
+  // Direction sanity — preBosSwing must be on the correct side of entry
+  const preBosOnWrongSide = preBosSwing
+    && ((direction === 'LONG' && preBosSwing >= entry) ||
+        (direction === 'SHORT' && preBosSwing <= entry));
+  if (preBosOnWrongSide) {
+    console.log(`[ABC] ${sym} preBosSwing ${preBosSwing} is on WRONG side of entry ${entry} for ${direction} — ignoring`);
+  }
   const preBosValid = preBosSwing && !isNaN(preBosSwing)
-    && (direction === 'LONG' ? preBosSwing < entry : preBosSwing > entry)
+    && !preBosOnWrongSide
     && rawSwingDist <= maxReasonableSwingPct;
 
   if (preBosSwing && !preBosValid && rawSwingDist > maxReasonableSwingPct) {
