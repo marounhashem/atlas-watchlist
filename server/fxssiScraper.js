@@ -1,5 +1,5 @@
 // FXSSI Order Book Scraper — Railway server
-// Fetches at :01, :21, :41 — caches 20min — full level analysis
+// Interval-based: fetches every 20min (cron checks every minute)
 // Logic ported from ATLAS//FIVE content_fxssi.js
 
 const { upsertMarketData, getLatestMarketData } = require('./db');
@@ -44,12 +44,16 @@ function getFxssiNullStreak(symbol) {
   return nullStreaks[symbol] || 0;
 }
 
+// Interval-based fetch check — replaces exact-minute match (:01/:21/:41)
+// Exact-minute was a silent failure mode: if cron fired at :02 the check failed and nothing logged
+const FXSSI_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes
+let lastFxssiFetch = 0;
+
 function shouldFetch(symbol) {
   if (process.env.FXSSI_FORCE === '1') return true;
   // Always fetch if cache is empty (startup / restart)
   if (symbol && !cache[symbol]) return true;
-  const min = new Date().getUTCMinutes();
-  return min === 1 || min === 21 || min === 41;
+  return Date.now() - lastFxssiFetch > FXSSI_INTERVAL_MS;
 }
 
 // ── Core analysis — ported from content_fxssi.js ─────────────────────────────
@@ -504,6 +508,7 @@ async function runFXSSIScrape(broadcast, forceWrite = false) {
     }
   }
 
+  lastFxssiFetch = Date.now();
   const scrapeDuration = Math.round((Date.now() - scrapeStart) / 1000);
   console.log(`[FXSSI] Scrape complete in ${scrapeDuration}s (${Object.keys(FXSSI_SYMBOLS).length} symbols)`);
   if (scrapeDuration > 30) {
@@ -603,4 +608,8 @@ function getFxssiCacheAge(symbol) {
   return Date.now() - cached.ts;
 }
 
-module.exports = { runFXSSIScrape, processBridgePayload, getFxssiCacheAge, getFxssiNullStreak, analyseOrderBook, FXSSI_SYMBOLS };
+module.exports = {
+  runFXSSIScrape, processBridgePayload, getFxssiCacheAge, getFxssiNullStreak,
+  analyseOrderBook, FXSSI_SYMBOLS, shouldFetch,
+  get lastFxssiFetch() { return lastFxssiFetch; }
+};
