@@ -116,6 +116,19 @@ function processAbcWebhook(data, deps) {
       : Math.round((refPrice + atrVal * 0.3) * dp) / dp;
   }
 
+  // Stale OB gate — reject if current price is >2% from OB entry
+  const currentPrice = db.getLatestMarketData(sym)?.close;
+  if (currentPrice) {
+    const distFromEntry = Math.abs(currentPrice - entry) / entry;
+    if (distFromEntry > 0.02) {
+      console.log(`[ABC] ${sym} — entry ${entry} is ${(distFromEntry*100).toFixed(1)}% from current price ${currentPrice} — stale OB, skipping`);
+      try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'STALE_OB',
+        skipReason: `entry ${entry} vs price ${currentPrice} = ${(distFromEntry*100).toFixed(1)}% apart`,
+        abcVersion: ABC_VERSION, session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
+      return;
+    }
+  }
+
   // SL — pre-BOS swing with ATR buffer, or OB edge fallback
   const slAtr = atr || (obTop && obBot ? Math.abs(obTop - obBot) : entry * 0.003);
   let sl;

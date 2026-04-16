@@ -84,8 +84,16 @@ if not na(obBearTop) and obBearTop < close
     obBearTop := na
     obBearBot := na
 
-// ── LAYER 5 — PULLBACK CHECK (current-TF only, no request.security) ─────────
+// Invalidate OB if price has moved too far from it (stale)
 atr14 = ta.atr(atrLen)
+if not na(obBearBot) and close < obBearBot - atr14 * 2
+    obBearTop := na
+    obBearBot := na
+if not na(obBullTop) and close > obBullTop + atr14 * 2
+    obBullTop := na
+    obBullBot := na
+
+// ── LAYER 5 — PULLBACK CHECK (current-TF only, no request.security) ─────────
 
 // Pullback: price has retraced from recent swing — use local swing extremes
 recentHigh = ta.highest(high, swingLen)
