@@ -256,26 +256,27 @@ function processAbcWebhook(data, deps) {
        AND outcome NOT IN ('ARCHIVED','IGNORED','WIN','LOSS','EXPIRED')
        AND ts > ?
        LIMIT 1`,
-      [sym, direction, Date.now() - 2 * 3600000]
+      [sym, direction, Date.now() - 8 * 3600000]
     )[0];
     if (recentDup) {
-      console.log(`[ABC] ${sym} ${direction} — duplicate within 2h (id:${recentDup.id}) — skipping`);
+      console.log(`[ABC] ${sym} ${direction} — duplicate within 8h (id:${recentDup.id}) — skipping`);
       try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'COOLDOWN',
-        skipReason: `duplicate within 2h`, detail: `recent_id=${recentDup.id}`,
+        skipReason: `duplicate within 8h`, detail: `recent_id=${recentDup.id}`,
         abcVersion: ABC_VERSION, session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
       return;
     }
   } catch(e) {}
 
-  // ACTIVE guard — never save a new signal if one is already ACTIVE for this symbol+direction
+  // ACTIVE/OPEN guard — never save a new signal if one is already OPEN or ACTIVE for this symbol+direction
   try {
     const activeExists = db.getOpenAbcSignals().find(s =>
-      s.symbol === sym && s.direction === direction && s.outcome === 'ACTIVE'
+      s.symbol === sym && s.direction === direction &&
+      (s.outcome === 'ACTIVE' || s.outcome === 'OPEN')
     );
     if (activeExists) {
-      console.log(`[ABC] ${sym} ${direction} — already ACTIVE id:${activeExists.id} — skipping`);
+      console.log(`[ABC] ${sym} ${direction} — already ${activeExists.outcome} id:${activeExists.id} — skipping`);
       try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'ACTIVE_EXISTS',
-        skipReason: `already ACTIVE id:${activeExists.id}`, detail: `active_ts=${activeExists.active_ts}`,
+        skipReason: `already ${activeExists.outcome} id:${activeExists.id}`, detail: `active_ts=${activeExists.active_ts}`,
         abcVersion: ABC_VERSION, session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
       return;
     }
