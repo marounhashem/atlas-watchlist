@@ -84,8 +84,15 @@ function checkAbcOutcomes(broadcast) {
         if (!atp1) {
           const dir = direction === 'LONG' ? 1 : -1;
           atp1 = Math.round((entry + dir * slDist) * dp) / dp;
-          atp2 = Math.round(tp * dp) / dp;
-          atp3 = Math.round((tp + dir * slDist * 0.5) * dp) / dp;
+          // Guard against null tp from old schema rows — would silently produce TP at 0
+          if (tp != null && !isNaN(tp)) {
+            atp2 = Math.round(tp * dp) / dp;
+            atp3 = Math.round((tp + dir * slDist * 0.5) * dp) / dp;
+          } else {
+            console.warn(`[ABC Outcome] ${sig.symbol} id:${id} — tp null in fallback, deriving from slDist`);
+            atp2 = Math.round((entry + dir * slDist * 2.0) * dp) / dp;
+            atp3 = Math.round((entry + dir * slDist * 3.0) * dp) / dp;
+          }
         }
         db.activateAbcSignal(id, atp1, atp2, atp3, rsiNow);
         console.log(`[ABC Outcome] ${sig.symbol} ${direction} id:${id} → ACTIVE (RSI: ${rsiNow})`);

@@ -301,14 +301,16 @@ function processAbcWebhook(data, deps) {
     return;
   }
 
-  // Parse condition flags — default false for old payloads
+  // Parse condition flags — case-insensitive, covers bool / int / string variants
+  const toBool = v => v === true || v === 1
+    || (typeof v === 'string' && (v === '1' || v.toLowerCase() === 'true'));
   const conditions = {
-    cloudPass:    data.cloudPass === true || data.cloudPass === 1 || data.cloudPass === '1' || data.cloudPass === 'true',
-    obPresent:    data.obPresent === true || data.obPresent === 1 || data.obPresent === '1' || data.obPresent === 'true',
-    pullbackIn:   data.pullbackIn === true || data.pullbackIn === 1 || data.pullbackIn === '1' || data.pullbackIn === 'true',
-    rsiDiv:       data.rsiDiv === true || data.rsiDiv === 1 || data.rsiDiv === '1' || data.rsiDiv === 'true',
-    volConfirmed: data.volConfirmed === true || data.volConfirmed === 1 || data.volConfirmed === '1' || data.volConfirmed === 'true',
-    rejStrong:    data.rejStrong === true || data.rejStrong === 1 || data.rejStrong === '1' || data.rejStrong === 'true'
+    cloudPass:    toBool(data.cloudPass),
+    obPresent:    toBool(data.obPresent),
+    pullbackIn:   toBool(data.pullbackIn),
+    rsiDiv:       toBool(data.rsiDiv),
+    volConfirmed: toBool(data.volConfirmed),
+    rejStrong:    toBool(data.rejStrong)
   };
 
   // Dedup — direct DB query for last 2h same symbol + direction (excludes terminal outcomes)
@@ -343,7 +345,10 @@ function processAbcWebhook(data, deps) {
         abcVersion: ABC_VERSION, session: getSessionNow ? getSessionNow() : 'unknown', ts: Date.now() }); } catch(e) {}
       return;
     }
-  } catch(e) {}
+  } catch(e) {
+    console.error(`[ABC] ${sym} dedup query failed — skipping to be safe:`, e.message);
+    return; // fail closed — do not insert potentially-duplicate signal
+  }
 
   // Get FXSSI / crowd data
   const fxssiData = (() => {
@@ -359,7 +364,9 @@ function processAbcWebhook(data, deps) {
         const fx = fa?.fxssiAnalysis ? (typeof fa.fxssiAnalysis === 'string' ? JSON.parse(fa.fxssiAnalysis) : fa.fxssiAnalysis) : (fa?.longPct != null ? fa : null);
         gravPrice = fx?.gravity?.price || null;
         fetchedAt = fa?.fetchedAt || null;
-      } catch(e) {}
+      } catch(parseErr) {
+        console.warn(`[ABC] ${sym} fxssi_analysis parse error — gravity gate may fallback to stale bypass:`, parseErr.message);
+      }
       return {
         fxssi_long_pct:  md.fxssi_long_pct,
         fxssi_short_pct: md.fxssi_short_pct,

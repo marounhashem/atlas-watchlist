@@ -1674,6 +1674,7 @@ function insertAbcSkip(s) {
       [s.symbol || null, s.direction || null, s.pineClass || null,
        s.skipReason || null, s.gate || null, s.detail || null,
        s.abcVersion || null, s.session || null, s.ts || Date.now()]);
+    persist();
   } catch(e) { console.error('[DB] insertAbcSkip error:', e?.message); }
 }
 
@@ -1714,7 +1715,8 @@ function markAbcRecSent(signalId, recType) {
   try {
     run('INSERT OR IGNORE INTO abc_rec_sent (signal_id, rec_type, ts) VALUES (?,?,?)',
       [signalId, recType, Date.now()]);
-  } catch(e) {}
+    persist();
+  } catch(e) { console.error('[DB] markAbcRecSent error:', e?.message); }
 }
 
 function isAbcInfoRecSentRecently(signalId) {

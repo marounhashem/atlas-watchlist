@@ -209,10 +209,13 @@ const SYMBOLS = {
 
 function getSessionNow() {
   const uaeHour = new Date(Date.now() + 4 * 3600000).getUTCHours();
-  // NewYork checked first — takes priority during 17-19 UAE overlap with London
-  if (uaeHour >= 17 && uaeHour < 25) return 'newYork';
-  if (uaeHour >= 11 && uaeHour < 19) return 'london';
-  if (uaeHour >= 2  && uaeHour < 10) return 'asia';
+  // UAE time (UTC+4). Session boundaries:
+  //   newYork : 17:00–23:59 UAE (NY open 13:30 UTC → UAE 17:30)
+  //   london  : 11:00–16:59 UAE (LSE open 08:00 UTC → UAE 12:00; overlaps NY capped)
+  //   asia    : 02:00–09:59 UAE (Tokyo open 00:00 UTC → UAE 04:00)
+  if (uaeHour >= 17)                  return 'newYork';
+  if (uaeHour >= 11 && uaeHour < 17)  return 'london';
+  if (uaeHour >=  2 && uaeHour < 10)  return 'asia';
   return 'offHours';
 }
 

@@ -200,15 +200,16 @@ function runAbcGates(symbol, payload, fxssiData, db) {
     return { verdict: 'SKIP', blocked: true, gate: 'NOORDERBOOK', reason: 'No contrarian data available for this class of symbols' };
   }
 
-  // 5. Inject direction into fxssiData for gate checks
-  if (fxssiData) fxssiData._direction = direction;
-  if (fxssiData) fxssiData._entry     = entry;
+  // 5. Build enriched fxssiData for gate checks (spread instead of mutate)
+  const enrichedFxssi = fxssiData
+    ? { ...fxssiData, _direction: direction, _entry: entry }
+    : null;
 
   // 6. Crowd sentiment gate
-  const fxssiCheck = checkFxssi(symbol, fxssiData);
+  const fxssiCheck = checkFxssi(symbol, enrichedFxssi);
 
   // 7. Gravity proximity gate — may cap TP instead of blocking
-  const gravityCheck = checkGravity(direction, entry, tp, fxssiData);
+  const gravityCheck = checkGravity(direction, entry, tp, enrichedFxssi);
   if (!gravityCheck.passed) {
     return { verdict: 'SKIP', blocked: true, gate: 'GRAVITY', reason: gravityCheck.reason };
   }
