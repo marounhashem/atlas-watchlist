@@ -5,6 +5,10 @@ const claudeLearner = require('./claudeLearner');
 let _SYMBOLS = null;
 function getSymbols() { return _SYMBOLS || (_SYMBOLS = require('./config').SYMBOLS); }
 
+// In-memory RSI tracker for 2-bar confirmation on extreme RSI CLOSE recs
+// Key: signalId, Value: last RSI reading that was extreme
+const _prevExtremeRsi = new Map();
+
 // ── Partial TP at 1:1 R:R ──────────────────────────────────────────────────
 function checkPartialTP(sig, currentPrice) {
   const { entry, sl, tp, direction } = sig;
@@ -437,28 +441,51 @@ function generateRecommendations(sig, data, price) {
     }
   } catch(e) {}
 
-  // RSI extreme against direction
+  // RSI extreme against direction — requires 2-bar confirmation + tighter thresholds
+  // Threshold: <22 for LONG (was 30), >78 for SHORT (was 70)
+  // If trade is in profit (progress > 20%), downgrade to MOVE_SL instead of CLOSE
   try {
     const rsi = data.rsi || 50;
-    if (direction === 'LONG'  && rsi < 30) {
-      recs.push({
-        type: 'CLOSE',
-        reason: `RSI ${rsi} — extreme momentum against LONG, likely accelerating down`,
-        urgency: 'HIGH',
-        price,
-        mfe_pct: mfePct,
-        progress_pct: progressPct
-      });
-    }
-    if (direction === 'SHORT' && rsi > 70) {
-      recs.push({
-        type: 'CLOSE',
-        reason: `RSI ${rsi} — extreme momentum against SHORT, likely accelerating up`,
-        urgency: 'HIGH',
-        price,
-        mfe_pct: mfePct,
-        progress_pct: progressPct
-      });
+    const isExtremeLong  = direction === 'LONG'  && rsi < 22;
+    const isExtremeShort = direction === 'SHORT' && rsi > 78;
+
+    if (isExtremeLong || isExtremeShort) {
+      // 2-bar confirmation: check if previous reading was also extreme
+      const prevRsi = _prevExtremeRsi.get(id);
+      const prevWasExtreme = prevRsi != null &&
+        ((direction === 'LONG' && prevRsi < 25) || (direction === 'SHORT' && prevRsi > 75));
+      _prevExtremeRsi.set(id, rsi); // track for next check
+
+      if (prevWasExtreme) {
+        if (progressPct > 20) {
+          // Trade in profit — tighten stop instead of closing
+          const midSl = direction === 'LONG'
+            ? Math.round(((price + entry) / 2) * 100) / 100
+            : Math.round(((price + entry) / 2) * 100) / 100;
+          recs.push({
+            type: 'MOVE_SL',
+            reason: `RSI ${rsi} extreme but trade in profit — trail SL to protect gains`,
+            urgency: 'MEDIUM',
+            price,
+            suggestedSl: midSl,
+            mfe_pct: mfePct,
+            progress_pct: progressPct
+          });
+        } else {
+          // Trade not in profit + 2 consecutive extreme readings → CLOSE
+          recs.push({
+            type: 'CLOSE',
+            reason: `RSI ${rsi} — 2-bar extreme against ${direction}, momentum accelerating`,
+            urgency: 'HIGH',
+            price,
+            mfe_pct: mfePct,
+            progress_pct: progressPct
+          });
+        }
+      }
+    } else {
+      // RSI normalised — clear the tracker for this signal
+      _prevExtremeRsi.delete(id);
     }
   } catch(e) {}
 

@@ -3028,7 +3028,7 @@ app.get('/api/db-status', (req, res) => {
 });
 
 // Manual DB prune — emergency use and verification
-app.post('/api/db-prune', (req, res) => {
+function handleDbPrune(req, res) {
   try {
     const stats = db.runRetentionCleanup();
     const dbPath = process.env.DB_PATH || path.join(__dirname, '../data/atlas.db');
@@ -3037,7 +3037,9 @@ app.post('/api/db-prune', (req, res) => {
   } catch(e) {
     res.status(500).json({ ok: false, error: e.message });
   }
-});
+}
+app.post('/api/db-prune', handleDbPrune);
+app.get('/api/db-prune', handleDbPrune);
 
 // DXY reference
 app.get('/api/dxy-status', (req, res) => {
