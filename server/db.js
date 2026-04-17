@@ -1803,6 +1803,82 @@ function getAllActiveMercatoContexts() {
   }
 }
 
+// ── Retention cleanup — prevents unbounded DB growth ─────────────────────
+// Called by a nightly cron. Safe to run during normal operation.
+// All deletes are targeted at historical/analytics tables. Signals,
+// active trades, and recent market data are preserved.
+function runRetentionCleanup() {
+  if (!db) return null;
+  const now = Date.now();
+  const stats = { before: {}, after: {}, deleted: {} };
+
+  try {
+    // Get BEFORE counts for key tables
+    const tables = ['fxssi_history', 'market_data', 'abc_skips', 'market_data_history', 'signals', 'abc_signals'];
+    for (const t of tables) {
+      try {
+        stats.before[t] = db.exec(`SELECT COUNT(*) FROM ${t}`)[0]?.values?.[0]?.[0] || 0;
+      } catch(e) { stats.before[t] = 'missing'; }
+    }
+
+    // 1. fxssi_history — keep 14 days only (was unlimited)
+    db.run('DELETE FROM fxssi_history WHERE fetched_at < ?', [now - 14 * 86400000]);
+
+    // 2. market_data — keep only latest 10 rows per symbol (was unlimited per-symbol history)
+    db.run(`
+      DELETE FROM market_data
+      WHERE id NOT IN (
+        SELECT id FROM market_data md1
+        WHERE (
+          SELECT COUNT(*) FROM market_data md2
+          WHERE md2.symbol = md1.symbol AND md2.ts >= md1.ts
+        ) <= 10
+      )
+    `);
+
+    // 3. abc_skips — keep 14 days only (analytics only, no trading impact)
+    db.run('DELETE FROM abc_skips WHERE ts < ?', [now - 14 * 86400000]);
+
+    // 4. market_data_history — keep 7 days (was 14) — reduces size substantially
+    db.run('DELETE FROM market_data_history WHERE snapshot_ts < ?', [now - 7 * 86400000]);
+
+    // 5. Closed signals older than 90 days — terminal outcomes, keeping for
+    //    learning window but trimming tail
+    db.run(`DELETE FROM signals
+            WHERE outcome IN ('WIN','LOSS','EXPIRED','IGNORED','ARCHIVED')
+              AND ts < ?`, [now - 90 * 86400000]);
+    db.run(`DELETE FROM abc_signals
+            WHERE outcome IN ('WIN','LOSS','EXPIRED','IGNORED','ARCHIVED')
+              AND ts < ?`, [now - 90 * 86400000]);
+
+    // Get AFTER counts
+    for (const t of tables) {
+      try {
+        stats.after[t] = db.exec(`SELECT COUNT(*) FROM ${t}`)[0]?.values?.[0]?.[0] || 0;
+        if (typeof stats.before[t] === 'number' && typeof stats.after[t] === 'number') {
+          stats.deleted[t] = stats.before[t] - stats.after[t];
+        }
+      } catch(e) {}
+    }
+
+    console.log('[Retention] Cleanup complete:', JSON.stringify(stats.deleted));
+
+    // VACUUM — reclaim pages from freed rows. IMPORTANT: this runs inside
+    // sql.js in-memory; the benefit is realized on next db.export() which
+    // produces a smaller buffer.
+    try {
+      db.exec('VACUUM');
+      console.log('[Retention] VACUUM complete');
+    } catch(e) { console.error('[Retention] VACUUM error:', e.message); }
+
+    persist(); // mark dirty — next flush writes the shrunken DB
+    return stats;
+  } catch(e) {
+    console.error('[Retention] cleanup error:', e.message);
+    return { error: e.message };
+  }
+}
+
 module.exports = {
   init, isReady, persist, persistNow, run, all, insertJournalEntry, getJournalEntries, snapshotMarketData, snapshotAllMarketData, getMarketDataHistory,
   upsertMercatoContext, getMercatoContext, getAllActiveMercatoContexts, getRecentMarketHistory,
@@ -1828,5 +1904,6 @@ module.exports = {
   upsertDailyBias, getDailyBias, insertClassCSignal, getOpenClassCSignals, getClassCSignals,
   activateClassCSignal, updateClassCActive, updateClassCOutcome,
   isAbcRecSent, markAbcRecSent, isAbcInfoRecSentRecently,
-  insertAbcSkip, countSkips, topSkipSymbols, getAbcSkips
+  insertAbcSkip, countSkips, topSkipSymbols, getAbcSkips,
+  runRetentionCleanup
 };

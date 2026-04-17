@@ -3027,6 +3027,18 @@ app.get('/api/db-status', (req, res) => {
   }
 });
 
+// Manual DB prune — emergency use and verification
+app.post('/api/db-prune', (req, res) => {
+  try {
+    const stats = db.runRetentionCleanup();
+    const dbPath = process.env.DB_PATH || path.join(__dirname, '../data/atlas.db');
+    const dbSize = fs.existsSync(dbPath) ? fs.statSync(dbPath).size : 0;
+    res.json({ ok: true, stats, dbSizeBytes: dbSize, dbSizeMB: Math.round(dbSize / 1024 / 1024) });
+  } catch(e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // DXY reference
 app.get('/api/dxy-status', (req, res) => {
   res.json(db.getLatestDXY() || { error: 'No DXY data yet' });
@@ -3518,6 +3530,32 @@ cron.schedule('*/5 * * * *', async () => {
     console.error('[FXSSI Cron] Error:', e.message);
   }
 });
+
+// Retention cleanup — runs nightly at 03:00 UTC to prune unbounded tables.
+// Critical for preventing db.export() from blocking the event loop as DB grows.
+cron.schedule('0 3 * * *', () => {
+  if (!dbReady) return;
+  console.log('[Retention] Starting nightly cleanup...');
+  try {
+    const result = db.runRetentionCleanup();
+    console.log('[Retention] Done:', JSON.stringify(result));
+  } catch(e) {
+    console.error('[Retention] cron error:', e.message);
+  }
+});
+
+// Run once 60 seconds after startup to clean any accumulated data
+setTimeout(() => {
+  if (dbReady) {
+    console.log('[Retention] Running startup cleanup...');
+    try {
+      const result = db.runRetentionCleanup();
+      console.log('[Retention] Startup cleanup done:', JSON.stringify(result));
+    } catch(e) {
+      console.error('[Retention] startup cleanup error:', e.message);
+    }
+  }
+}, 60000);
 
 // FXSSI watchdog — every 15min, force a rescrape if >10 symbols are stale >60min
 cron.schedule('*/15 * * * *', async () => {

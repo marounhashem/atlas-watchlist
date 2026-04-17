@@ -173,6 +173,7 @@ Pushed to `TELEGRAM_SWING_BOT_TOKEN` channel when all met:
 | GET | /api/journal | Trade journal — last 100 auto-generated entries |
 | GET | /api/backtest | Backtest signals with filters — win rate, P&L, breakdowns |
 | GET | /api/db-status | DB file sizes + signal count |
+| POST | /api/db-prune | Manual retention cleanup + VACUUM (returns before/after counts + DB size) |
 | GET | /api/db-recover | Restore from .bak if needed |
 | GET | /api/db-verify | Test persist protection |
 | GET | /api/telegram-test | Send test message |

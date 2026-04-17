@@ -31,6 +31,7 @@
 | Time | Action |
 |------|--------|
 | 00:00 | Daily DB backup (3 rolling) |
+| 03:00 | Retention cleanup — prune fxssi_history/market_data/abc_skips/market_data_history (+ VACUUM) |
 | 05:00 | Morning brief → Telegram (includes forecast signals section) |
 | :05 hourly | Market intel cleanup (expired) |
 | :05 hourly | Mark past events as fired |
