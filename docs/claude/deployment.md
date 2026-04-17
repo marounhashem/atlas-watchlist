@@ -41,7 +41,7 @@
 | Every min | Outcome check + PARTIAL_CLOSE + TIME_STOP + MOVE_SL |
 | :03/:08/:13/… | market_data_history snapshot (every 5min, offset from FXSSI) |
 | */5 min | Economic calendar poll (4 feeds) + fire detection + forecast alerts |
-| */5 min | FXSSI 20-min order book scrape (interval-based shouldFetch gate) |
+| :02/:22/:42 | FXSSI 20-min order book scrape (forceWrite, _scrapeInProgress overlap guard) |
 | :02/:22/:42 | Signal retirement cycle |
 | Hourly | Learning cycle (if thresholds met) |
 | Friday 20:45 | COT weekly fetch (CFTC) |

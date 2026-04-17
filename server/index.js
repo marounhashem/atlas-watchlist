@@ -16,7 +16,7 @@ const { checkAndFireMercatoSignal } = require('./mercato');
 const { checkOutcomes } = require('./outcome');
 const { runLearningCycle } = require('./learner');
 const claudeLearner = require('./claudeLearner');
-const { runFXSSIScrape, processBridgePayload, getFxssiCacheAge, shouldFetch } = require('./fxssiScraper');
+const { runFXSSIScrape, processBridgePayload, getFxssiCacheAge } = require('./fxssiScraper');
 const { runCOTFetch, getLatestCOT, getCOTSummary, getCOTCurrencies } = require('./cotFetcher');
 const { runRateFetch, loadRatesFromDB, getLatestRates, getRateDifferential } = require('./rateFetcher');
 const { getUpcomingMeetings, isPairEventRisk, getMeetingContext } = require('./centralBankCalendar');
@@ -3514,18 +3514,15 @@ cron.schedule('* * * * *', () => {
   try { checkAbcOutcomes(broadcast); } catch(e) { console.error('[ABC Outcome] Error:', e.message); }
 });
 
-// FXSSI auto-scrape — interval-based (every 20min), cron checks every 5min
+// FXSSI auto-scrape — fires at :02/:22/:42, aligned with 20-min FXSSI refresh cycle
 // Runs 24/7 regardless of market hours — FXSSI data is live trader positioning,
 // valid at all times. Stopping during market close caused stale data at open.
-cron.schedule('*/5 * * * *', async () => {
+// forceWrite=true ensures data is always written to DB (no shouldFetch gate).
+// _scrapeInProgress guard inside runFXSSIScrape prevents overlap if a scrape runs long.
+cron.schedule('2,22,42 * * * *', async () => {
   if (!dbReady) return;
-  const willFetch = shouldFetch();
-  const { lastFxssiFetch } = require('./fxssiScraper');
-  const ageMins = lastFxssiFetch ? Math.round((Date.now() - lastFxssiFetch) / 60000) : 'never';
-  console.log(`[FXSSI] Cron tick — shouldFetch: ${willFetch}, lastFetch: ${ageMins}m ago`);
-  if (!willFetch) return;
   try {
-    await runFXSSIScrape(broadcast);
+    await runFXSSIScrape(broadcast, true);
   } catch(e) {
     console.error('[FXSSI Cron] Error:', e.message);
   }
