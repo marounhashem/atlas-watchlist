@@ -1,6 +1,8 @@
 const { getOpenSignals, updateOutcome, updatePaperOutcome, getLatestMarketData, updateMFE, run, addRecommendation, getRecommendations, markRecommendationFollowed, dismissRecommendation, resolveStaleRecommendations, persist } = require('./db');
 let _sendRecAlert = null;
 try { _sendRecAlert = require('./telegram').sendRecAlert; } catch(e) {}
+let _sendEntryTouchAlert = null;
+try { _sendEntryTouchAlert = require('./telegram').sendEntryTouchAlert; } catch(e) {}
 const claudeLearner = require('./claudeLearner');
 let _SYMBOLS = null;
 function getSymbols() { return _SYMBOLS || (_SYMBOLS = require('./config').SYMBOLS); }
@@ -158,6 +160,11 @@ function checkOutcomes(broadcast) {
       updateOutcome(id, 'ACTIVE', null);
       console.log(`[Outcome] ${sig.symbol} ${direction} → ACTIVE (entry touched @ ${price})`);
       if (broadcast) broadcast({ type: 'OUTCOME', signalId: id, symbol: sig.symbol, direction, outcome: 'ACTIVE', ts: Date.now() });
+
+      // Telegram push — only for PROCEED signals, not WATCH
+      if (sig.verdict === 'PROCEED' && _sendEntryTouchAlert) {
+        _sendEntryTouchAlert(sig, price).catch(e => console.error('[Telegram] Entry touch alert error:', e.message));
+      }
 
       // Only expire opposite OPEN signals — ACTIVE signals are real trades, don't auto-close
       // IMPORTANT: query OPEN-only, NOT getLatestOpenSignal which returns ACTIVE first

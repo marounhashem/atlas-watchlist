@@ -2,6 +2,8 @@
 
 const db = require('./db');
 const { getAbcDp } = require('./abcProcessor');
+let _sendAbcEntryTouchAlert = null;
+try { _sendAbcEntryTouchAlert = require('./telegram').sendAbcEntryTouchAlert; } catch(e) {}
 
 // RSI history — in-memory, resets on deploy (rebuilds within 5 min)
 const rsiHistory = {};
@@ -97,6 +99,12 @@ function checkAbcOutcomes(broadcast) {
         db.activateAbcSignal(id, atp1, atp2, atp3, rsiNow);
         console.log(`[ABC Outcome] ${sig.symbol} ${direction} id:${id} → ACTIVE (RSI: ${rsiNow})`);
         if (broadcast) broadcast({ type: 'ABC_OUTCOME', signalId: id, outcome: 'ACTIVE', ts: Date.now() });
+
+        // Telegram push — only for Class A/B PROCEED (these went to swing channel)
+        // Class C is observation-only, never got a Telegram alert, don't start now
+        if ((sig.pine_class === 'A' || sig.pine_class === 'B') && sig.verdict === 'PROCEED' && _sendAbcEntryTouchAlert) {
+          _sendAbcEntryTouchAlert(sig, price).catch(e => console.error('[Telegram] ABC entry touch alert error:', e.message));
+        }
       }
       continue;
     }

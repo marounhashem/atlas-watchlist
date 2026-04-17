@@ -248,9 +248,51 @@ async function sendAbcSignalAlert(sig) {
   return sendSwingMessage(msg);
 }
 
+// Entry touch alert — fires when a PROCEED signal transitions OPEN → ACTIVE
+async function sendEntryTouchAlert(signal, touchPrice) {
+  const dir  = signal.direction === 'LONG' ? '🟢 LONG' : '🔴 SHORT';
+  const slPct = Math.round(Math.abs(signal.entry - signal.sl) / signal.entry * 1000) / 10;
+  const tpPct = Math.round(Math.abs(signal.tp - signal.entry) / signal.entry * 1000) / 10;
+  const text = [
+    `🎯 <b>ATLAS // ENTRY TOUCHED</b>`,
+    `${dir} ${signal.symbol} — now ACTIVE`,
+    ``,
+    `Touched @ <b>${touchPrice}</b>`,
+    `Entry: ${signal.entry}`,
+    `SL: ${signal.sl} (${slPct}%)`,
+    `TP: ${signal.tp} (${tpPct}%)`,
+    `R:R: ${signal.rr}`,
+    ``,
+    `Manage from here — partials at 1:1, trail as progress grows.`
+  ].join('\n');
+  return sendMessage(text);
+}
+
+// ABC entry touch alert → swing Telegram channel
+async function sendAbcEntryTouchAlert(sig, touchPrice) {
+  const dir = sig.direction === 'LONG' ? '🟢 LONG' : '🔴 SHORT';
+  const pClass = sig.pineClass || sig.pine_class;
+  const cls = pClass === 'A' ? '⭐ Class A' : pClass === 'B' ? '🔷 Class B' : '🔹 Class C';
+  const slPct = Math.round(Math.abs(sig.entry - sig.sl) / sig.entry * 1000) / 10;
+  const msg = [
+    `🎯 <b>ATLAS SWING // ENTRY TOUCHED</b>`,
+    `${cls} ${dir} ${sig.symbol} — now ACTIVE`,
+    ``,
+    `Touched @ <b>${touchPrice}</b>`,
+    `Entry: ${sig.entry}`,
+    `SL: ${sig.sl} (${slPct}%)`,
+    sig.tp1 ? `TP1: ${sig.tp1} (partial)` : '',
+    sig.tp2 ? `TP2: ${sig.tp2} (main)` : '',
+    sig.tp3 ? `TP3: ${sig.tp3} (runner)` : '',
+    ``,
+    `Manage from here — close 40% at TP1, breakeven SL.`
+  ].filter(Boolean).join('\n');
+  return sendSwingMessage(msg);
+}
+
 // Test message
 async function sendTest() {
   return sendMessage('✅ <b>ATLAS // WATCHLIST</b>\nTelegram connected successfully.');
 }
 
-module.exports = { sendMessage, sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendEventFiredAlert, sendSwingSignalAlert, sendAbcSignalAlert, sendTest };
+module.exports = { sendMessage, sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendEventFiredAlert, sendSwingSignalAlert, sendAbcSignalAlert, sendEntryTouchAlert, sendAbcEntryTouchAlert, sendTest };
