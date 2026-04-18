@@ -18,7 +18,8 @@
       "Bash(curl -s 'https://atlas-watchlist-production.up.railway.app/api/macro-context')",
       "Bash(curl -s 'https://atlas-watchlist-production.up.railway.app/api/db-status')",
       "Bash(Ignore timestamps, disclaimers, source attribution.\":*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(claude mcp *)"
     ]
   }
 }
