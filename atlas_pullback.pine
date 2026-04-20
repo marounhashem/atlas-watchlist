@@ -1,0 +1,539 @@
+//@version=6
+indicator("ATLAS // PULLBACK EMA20", overlay=true, max_lines_count=500, max_labels_count=500)
+
+// ============================================================================
+// ATLAS // PULLBACK EMA20 — trend-pullback-continuation emitter
+// ----------------------------------------------------------------------------
+// Ships: 2026-04-21
+// Replaces atlas_abc_live.pine on priority symbols.
+// HARDCODED 1h timeframe. Tested 30m (failed) and 4h (n too small).
+//
+// Pattern: trend-pullback-continuation
+//   1. Price in trend (higher-TF)
+//   2. Pulls back to 4H EMA20 (within 0.5*ATR of 1h)
+//   3. Prior excursion proof — within last 20 bars, a bar existed where close
+//      was beyond EMA20 by >0.5*ATR in the trade direction
+//   4. Strict rejection candle at bar t (50% wick + 67% close fraction)
+//   5. Alert fires at close of bar t+1 (C-confirmation bar). Server handles
+//      limit order lifecycle.
+//
+// ----------------------------------------------------------------------------
+// SHIM: this Pine emits ABC-shaped JSON so the existing /webhook/pine-abc
+// server pipeline (abcProcessor, abcManagement, abcReasoning, telegram,
+// dashboard, outcome tracking, FXSSI gates, macro context) runs unchanged.
+//
+// Shim mapping (Pullback field -> ABC field):
+//   grade >= 3  -> class = "A", score = 88
+//   grade == 2  -> class = "B", score = 75
+//   grade == 1  -> class = "C", score = 62
+//   grade == 0  -> skip (no alert)
+//   ema20_4h                        -> obMid (entry anchor)
+//   ema20_4h +/- 0.3*ATR            -> obTop / obBot (synthetic OB zone)
+//   structural_sl_ref (lowest/highest since zone entry) -> preBosSwing
+//     (server applies 0.25*ATR buffer via existing abcProcessor logic)
+//   pivot_tp1 (nearest valid pivot) -> swing1
+//   pivot_tp2 (next valid pivot)    -> swing2
+//   S filter (daily EMA50 extension)-> cloudPass
+//   R filter (3-bar daily momentum) -> rsiDiv
+//   V filter (1h ATR > SMA100)      -> volConfirmed
+//   C filter (two-bar confirmation) -> rejStrong
+//   obPresent                       -> true when grade >= 2
+//   pullbackIn                      -> true (we are in pullback zone by construction)
+//   rsi / rsiPrev                   -> standard RSI(14) of 1h close
+//
+// Semantic drift warning: "cloudPass" in downstream reasoning/Telegram will
+// now mean "strong daily-trend extension," not Ichimoku cloud. Document this
+// in any live-monitoring runbook.
+// ============================================================================
+
+// ---- TIMEFRAME GUARD ----
+// Hardcoded 1h. Tested 30m (failed criteria) and 4h (n too small). Any other
+// TF is shipping unvalidated. We warn visually instead of throwing, so the
+// user can adjust the chart TF without Pine refusing to compile.
+wrongTf = timeframe.period != "60"
+if wrongTf and barstate.islast
+    var label warnLabel = na
+    label.delete(warnLabel)
+    warnLabel := label.new(bar_index, high,
+        "ATLAS PULLBACK: switch chart to 1h\nCurrent TF: " + timeframe.period,
+        color = color.red, textcolor = color.white,
+        style = label.style_label_down, size = size.large)
+
+// ---- VERSION ----
+PULLBACK_VERSION = "20260421.1"
+
+// ---- INPUTS (minimal) ----
+show_debug     = input.bool(true,  "Show debug table")
+show_markers   = input.bool(true,  "Show signal markers")
+show_zone      = input.bool(true,  "Show pullback zone")
+
+// ============================================================================
+// INDICATORS & HIGHER-TF FEEDS
+// ============================================================================
+
+atr14 = ta.atr(14)
+rsi14 = ta.rsi(close, 14)
+
+// 4H EMA20 — the anchor
+ema20_4h = request.security(syminfo.tickerid, "240",
+    ta.ema(close, 20),
+    barmerge.gaps_off, barmerge.lookahead_off)
+
+// Daily EMA50 — S filter
+ema50_daily = request.security(syminfo.tickerid, "D",
+    ta.ema(close, 50),
+    barmerge.gaps_off, barmerge.lookahead_off)
+
+// Daily 3-bar momentum — R filter. Fetch last 3 closed daily open/close pairs.
+[do1, dc1, do2, dc2, do3, dc3] = request.security(syminfo.tickerid, "D",
+    [open[1], close[1], open[2], close[2], open[3], close[3]],
+    barmerge.gaps_off, barmerge.lookahead_off)
+
+rBullDaily = dc1 > do1 and dc2 > do2 and dc3 > do3
+rBearDaily = dc1 < do1 and dc2 < do2 and dc3 < do3
+
+// ============================================================================
+// ASSET CLASS DETECTION
+// ============================================================================
+
+tickerUp = str.upper(syminfo.ticker)
+isForex   = syminfo.type == "forex"
+isCrypto  = syminfo.type == "crypto" or (str.endswith(tickerUp, "USD") and close > 100 and not isForex)
+isMetalsA = str.contains(tickerUp, "XAU")  or str.contains(tickerUp, "XAG")
+isMetalsB = str.contains(tickerUp, "GOLD") or str.contains(tickerUp, "SILVER")
+isMetalsC = str.contains(tickerUp, "XPT")  or str.contains(tickerUp, "PLATINUM")
+isMetalsD = str.contains(tickerUp, "COPPER") or str.contains(tickerUp, "XCU")
+isMetals  = isMetalsA or isMetalsB or isMetalsC or isMetalsD
+isEnergyA = str.contains(tickerUp, "OIL")   or str.contains(tickerUp, "CRUDE")
+isEnergyB = str.contains(tickerUp, "WTI")   or str.contains(tickerUp, "BRENT")
+isEnergyC = str.contains(tickerUp, "NATGAS")
+isEnergy  = isEnergyA or isEnergyB or isEnergyC
+isIdxType = syminfo.type == "index"
+isIdxA    = str.contains(tickerUp, "UK100")  or str.contains(tickerUp, "US500")
+isIdxB    = str.contains(tickerUp, "US100")  or str.contains(tickerUp, "US30")
+isIdxC    = str.contains(tickerUp, "DE40")   or str.contains(tickerUp, "J225")
+isIdxD    = str.contains(tickerUp, "HK50")   or str.contains(tickerUp, "CN50")
+isIdxE    = str.contains(tickerUp, "NAS100") or str.contains(tickerUp, "SPX500")
+isIndices = isIdxType or isIdxA or isIdxB or isIdxC or isIdxD or isIdxE
+
+classStr = isMetals ? "metals" : isEnergy ? "energy" : isCrypto ? "crypto" :
+           isIndices ? "indices" : isForex ? "forex" : "other"
+
+isJpyPair = isForex and str.contains(tickerUp, "JPY")
+
+// Per-class absolute-price floors (applied AFTER ATR floor)
+minSlFloor = isForex   ? (isJpyPair ? 0.10 : 0.0010) :
+             isMetals  ? 0.50 :
+             isEnergy  ? 0.50 :
+             isIndices ? 2.0  :
+             isCrypto  ? close * 0.002 :
+             math.max(close * 0.001, syminfo.mintick * 10)
+
+minTpFloor = isForex   ? (isJpyPair ? 0.15 : 0.0015) :
+             isMetals  ? 0.75 :
+             isEnergy  ? 0.75 :
+             isIndices ? 3.0  :
+             isCrypto  ? close * 0.003 :
+             math.max(close * 0.0015, syminfo.mintick * 15)
+
+slCapAtr = isCrypto ? 4.0 : 3.0
+
+// ============================================================================
+// PATTERN PRIMITIVES
+// ============================================================================
+
+// ---- Pullback zone: current 1h bar within +-0.5 ATR of 4H EMA20 ----
+inZone = not na(ema20_4h) and math.abs(close - ema20_4h) <= 0.5 * atr14
+
+// ---- Zone entry tracking (for structural SL) ----
+inZonePrior = not na(ema20_4h[1]) and math.abs(close[1] - ema20_4h[1]) <= 0.5 * atr14[1]
+enteredZone = inZone and not inZonePrior
+
+// Track lowest low / highest high since entering current zone visit
+var float zoneLow  = na
+var float zoneHigh = na
+if enteredZone
+    zoneLow  := low
+    zoneHigh := high
+else if inZone and not na(zoneLow)
+    zoneLow  := math.min(zoneLow,  low)
+    zoneHigh := math.max(zoneHigh, high)
+else if not inZone
+    // leave zoneLow/zoneHigh in place; we only overwrite on next re-entry
+    na
+
+// ---- Prior excursion: within last 20 bars, was there a bar outside the zone
+//      in the trade direction? ----
+hadExcursionLong  = false
+hadExcursionShort = false
+for i = 1 to 20
+    if not na(ema20_4h[i]) and not na(atr14[i])
+        if close[i] > ema20_4h[i] + 0.5 * atr14[i]
+            hadExcursionLong := true
+        if close[i] < ema20_4h[i] - 0.5 * atr14[i]
+            hadExcursionShort := true
+
+// ---- Strict rejection candle (stricter than ABC's bullRej) ----
+barRange = high - low
+lowerWk  = math.min(open, close) - low
+upperWk  = high - math.max(open, close)
+strictBullRej = barRange > 0 and lowerWk >= 0.5 * barRange and close >= (low  + 0.67 * barRange)
+strictBearRej = barRange > 0 and upperWk >= 0.5 * barRange and close <= (high - 0.67 * barRange)
+
+// ---- Trigger conditions ----
+triggerLong  = inZone and hadExcursionLong  and strictBullRej
+triggerShort = inZone and hadExcursionShort and strictBearRej
+
+// ============================================================================
+// PIVOT TRACKING FOR STRUCTURAL TP
+// ============================================================================
+
+ph = ta.pivothigh(high, 5, 5)
+pl = ta.pivotlow(low,  5, 5)
+
+// Three most recent confirmed pivot highs / lows
+var float ph1 = na
+var float ph2 = na
+var float ph3 = na
+var float pl1 = na
+var float pl2 = na
+var float pl3 = na
+
+if not na(ph)
+    ph3 := ph2
+    ph2 := ph1
+    ph1 := ph
+if not na(pl)
+    pl3 := pl2
+    pl2 := pl1
+    pl1 := pl
+
+// ---- TP scan: return (primary_tp, secondary_tp) for a given direction ----
+// For LONG: pick nearest pivot high above entry satisfying dist>=1*ATR AND RR>=1.5.
+//           secondary = next valid pivot further above (for payload swing2).
+// For SHORT: mirror.
+f_scan_tp_long(_entry, _slDist, _atr) =>
+    candidates = array.new_float()
+    if not na(ph1) and ph1 > _entry
+        array.push(candidates, ph1)
+    if not na(ph2) and ph2 > _entry
+        array.push(candidates, ph2)
+    if not na(ph3) and ph3 > _entry
+        array.push(candidates, ph3)
+    array.sort(candidates, order.ascending)
+    float tp1 = na
+    float tp2 = na
+    if array.size(candidates) > 0
+        for k = 0 to array.size(candidates) - 1
+            p = array.get(candidates, k)
+            d = p - _entry
+            if d >= 1.0 * _atr and _slDist > 0 and (d / _slDist) >= 1.5
+                if na(tp1)
+                    tp1 := p
+                else if na(tp2)
+                    tp2 := p
+                    break
+    [tp1, tp2]
+
+f_scan_tp_short(_entry, _slDist, _atr) =>
+    candidates = array.new_float()
+    if not na(pl1) and pl1 < _entry
+        array.push(candidates, pl1)
+    if not na(pl2) and pl2 < _entry
+        array.push(candidates, pl2)
+    if not na(pl3) and pl3 < _entry
+        array.push(candidates, pl3)
+    array.sort(candidates, order.descending)
+    float tp1 = na
+    float tp2 = na
+    if array.size(candidates) > 0
+        for k = 0 to array.size(candidates) - 1
+            p = array.get(candidates, k)
+            d = _entry - p
+            if d >= 1.0 * _atr and _slDist > 0 and (d / _slDist) >= 1.5
+                if na(tp1)
+                    tp1 := p
+                else if na(tp2)
+                    tp2 := p
+                    break
+    [tp1, tp2]
+
+// ============================================================================
+// S / V FILTERS (evaluated at trigger bar t)
+// R uses the rBullDaily / rBearDaily booleans from above.
+// C is evaluated at bar t+1 (inside the deferred block below).
+// ============================================================================
+
+sLong  = close > ema50_daily + 1.5 * atr14
+sShort = close < ema50_daily - 1.5 * atr14
+atrSma100 = ta.sma(atr14, 100)
+vFlag  = not na(atrSma100) and atr14 > atrSma100
+
+// ============================================================================
+// TRIGGER EVALUATION AT BAR t
+// If a valid trigger fires, cache all state for emission at bar t+1 (C bar).
+// ============================================================================
+
+var int   trigBar        = na
+var int   trigDir        = 0
+var float trigClose      = na
+var float trigEntry      = na
+var float trigSl         = na
+var float trigSlDist     = na
+var float trigTp         = na
+var float trigTpDist     = na
+var float trigRR         = na
+var float trigSwing1     = na
+var float trigSwing2     = na
+var float trigAtr        = na
+var float trigObTop      = na
+var float trigObBot      = na
+var float trigPreBos     = na
+var float trigEma20_4h   = na
+var float trigEma50_d    = na
+var float trigRsi        = na
+var float trigRsiPrev    = na
+var bool  trigS          = false
+var bool  trigR          = false
+var bool  trigV          = false
+
+// Reset triggerDir each bar; only set when a new trigger fires
+newTrigger = false
+
+if triggerLong and not na(zoneLow)
+    slRaw   = zoneLow - 0.25 * atr14
+    _entry  = ema20_4h
+    slDist  = _entry - slRaw
+    if slDist < 0.8 * atr14
+        slDist := 0.8 * atr14
+    if slDist < minSlFloor
+        slDist := minSlFloor
+    slFinal = _entry - slDist
+    if slDist > 0 and slDist <= slCapAtr * atr14
+        [tp1, tp2] = f_scan_tp_long(_entry, slDist, atr14)
+        if not na(tp1) and (tp1 - _entry) >= minTpFloor
+            trigBar       := bar_index
+            trigDir       := 1
+            trigClose     := close
+            trigEntry     := _entry
+            trigSl        := slFinal
+            trigSlDist    := slDist
+            trigTp        := tp1
+            trigTpDist    := tp1 - _entry
+            trigRR        := (tp1 - _entry) / slDist
+            trigSwing1    := tp1
+            trigSwing2    := tp2
+            trigAtr       := atr14
+            trigObTop     := _entry + 0.3 * atr14
+            trigObBot     := _entry - 0.3 * atr14
+            trigPreBos    := zoneLow
+            trigEma20_4h  := ema20_4h
+            trigEma50_d   := ema50_daily
+            trigRsi       := rsi14
+            trigRsiPrev   := rsi14[1]
+            trigS         := sLong
+            trigR         := rBullDaily
+            trigV         := vFlag
+            newTrigger := true
+
+if triggerShort and not na(zoneHigh) and not newTrigger
+    slRaw   = zoneHigh + 0.25 * atr14
+    _entry  = ema20_4h
+    slDist  = slRaw - _entry
+    if slDist < 0.8 * atr14
+        slDist := 0.8 * atr14
+    if slDist < minSlFloor
+        slDist := minSlFloor
+    slFinal = _entry + slDist
+    if slDist > 0 and slDist <= slCapAtr * atr14
+        [tp1, tp2] = f_scan_tp_short(_entry, slDist, atr14)
+        if not na(tp1) and (_entry - tp1) >= minTpFloor
+            trigBar       := bar_index
+            trigDir       := -1
+            trigClose     := close
+            trigEntry     := _entry
+            trigSl        := slFinal
+            trigSlDist    := slDist
+            trigTp        := tp1
+            trigTpDist    := _entry - tp1
+            trigRR        := (_entry - tp1) / slDist
+            trigSwing1    := tp1
+            trigSwing2    := tp2
+            trigAtr       := atr14
+            trigObTop     := _entry + 0.3 * atr14
+            trigObBot     := _entry - 0.3 * atr14
+            trigPreBos    := zoneHigh
+            trigEma20_4h  := ema20_4h
+            trigEma50_d   := ema50_daily
+            trigRsi       := rsi14
+            trigRsiPrev   := rsi14[1]
+            trigS         := sShort
+            trigR         := rBearDaily
+            trigV         := vFlag
+            newTrigger := true
+
+// ============================================================================
+// EMISSION AT BAR t+1 (C BAR)
+// ============================================================================
+
+isCBar = not na(trigBar) and bar_index == trigBar + 1 and trigDir != 0
+
+cFlag = false
+if isCBar
+    cFlag := trigDir == 1 ? close > trigClose : close < trigClose
+
+grade = 0
+tier  = 3
+abcClass = "C"
+score = 0
+emitSignal = false
+if isCBar
+    grade := (trigS ? 1 : 0) + (trigR ? 1 : 0) + (trigV ? 1 : 0) + (cFlag ? 1 : 0)
+    tier  := grade >= 2 ? 1 : grade == 1 ? 2 : 3
+    abcClass := grade >= 3 ? "A" : grade == 2 ? "B" : "C"
+    score := grade >= 3 ? 88 : grade == 2 ? 75 : 62
+    // Skip Tier 3 (grade 0) — no alert
+    emitSignal := grade >= 1
+
+// ============================================================================
+// ALERT (ABC-SHIM PAYLOAD)
+// ============================================================================
+
+if emitSignal
+    _dir      = trigDir == 1 ? "LONG" : "SHORT"
+    _cloud    = trigS ? "true" : "false"     // S filter -> cloudPass
+    _rsiDiv   = trigR ? "true" : "false"     // R filter -> rsiDiv
+    _vol      = trigV ? "true" : "false"     // V filter -> volConfirmed
+    _rej      = cFlag ? "true" : "false"     // C filter -> rejStrong
+    _ob       = grade >= 2 ? "true" : "false"
+    _pb       = "true"                       // pullbackIn always true by construction
+    _obTop    = str.tostring(trigObTop)
+    _obBot    = str.tostring(trigObBot)
+    _obMid    = str.tostring(trigEntry)
+    _preBos   = str.tostring(trigPreBos)
+    _sw1      = not na(trigSwing1) ? str.tostring(trigSwing1) : "null"
+    _sw2      = not na(trigSwing2) ? str.tostring(trigSwing2) : "null"
+    _atr      = str.tostring(trigAtr)
+    _rsi      = str.tostring(trigRsi)
+    _rsiPrev  = str.tostring(trigRsiPrev)
+    _entry    = str.tostring(trigEntry)
+    _sl       = str.tostring(trigSl)
+    _tp       = str.tostring(trigTp)
+    _rr       = str.tostring(trigRR, "#.##")
+    _time     = str.format_time(time, "yyyy-MM-dd'T'HH:mm:ss")
+    alert('{"symbol":"' + syminfo.ticker +
+          '","direction":"'   + _dir +
+          '","class":"'       + abcClass +
+          '","score":'        + str.tostring(score) +
+          ',"source":"atlas_pullback"' +
+          ',"version":"'      + PULLBACK_VERSION + '"' +
+          ',"assetClass":"'   + classStr + '"' +
+          ',"tier":'          + str.tostring(tier) +
+          ',"grade":'         + str.tostring(grade) +
+          ',"filters":{"S":'  + _cloud + ',"R":' + _rsiDiv +
+          ',"V":'             + _vol   + ',"C":' + _rej   + '}' +
+          ',"cloudPass":'     + _cloud +
+          ',"obPresent":'     + _ob    +
+          ',"pullbackIn":'    + _pb    +
+          ',"rsiDiv":'        + _rsiDiv +
+          ',"volConfirmed":'  + _vol   +
+          ',"rejStrong":'     + _rej   +
+          ',"obTop":'         + _obTop +
+          ',"obBot":'         + _obBot +
+          ',"obMid":'         + _obMid +
+          ',"preBosSwing":'   + _preBos +
+          ',"swing1":'        + _sw1   +
+          ',"swing2":'        + _sw2   +
+          ',"entry":'         + _entry +
+          ',"sl":'            + _sl    +
+          ',"tp":'            + _tp    +
+          ',"rr":'            + _rr    +
+          ',"atr":'           + _atr   +
+          ',"rsi":'           + _rsi   +
+          ',"rsiPrev":'       + _rsiPrev +
+          ',"time":"'         + _time  + '"}',
+          alert.freq_once_per_bar)
+
+// Alert conditions for TradingView UI (match ABC naming so existing alert
+// templates work without change)
+alertcondition(emitSignal and trigDir == 1  and abcClass == "A", "Class A Long",  "CLASS A LONG")
+alertcondition(emitSignal and trigDir == 1  and abcClass == "B", "Class B Long",  "CLASS B LONG")
+alertcondition(emitSignal and trigDir == 1  and abcClass == "C", "Class C Long",  "CLASS C LONG")
+alertcondition(emitSignal and trigDir == -1 and abcClass == "A", "Class A Short", "CLASS A SHORT")
+alertcondition(emitSignal and trigDir == -1 and abcClass == "B", "Class B Short", "CLASS B SHORT")
+alertcondition(emitSignal and trigDir == -1 and abcClass == "C", "Class C Short", "CLASS C SHORT")
+
+// ============================================================================
+// PLOTS
+// ============================================================================
+
+plot(ema20_4h,    "4H EMA20",    color=color.new(color.orange, 0), linewidth=2)
+plot(ema50_daily, "Daily EMA50", color=color.new(color.blue,   0), linewidth=1)
+
+// Pullback zone band
+zoneTop = show_zone ? ema20_4h + 0.5 * atr14 : na
+zoneBot = show_zone ? ema20_4h - 0.5 * atr14 : na
+pZoneT = plot(zoneTop, "Zone Top", color=color.new(color.orange, 80))
+pZoneB = plot(zoneBot, "Zone Bot", color=color.new(color.orange, 80))
+fill(pZoneT, pZoneB, color=color.new(color.orange, 92))
+
+// Signal markers on C bar (the emission bar)
+if show_markers and emitSignal and trigDir == 1
+    label.new(bar_index, low - atr14,
+              abcClass + " L",
+              color = abcClass == "A" ? color.green : abcClass == "B" ? color.new(color.green, 30) : color.new(color.green, 50),
+              textcolor = color.white, size = size.small, style = label.style_label_up)
+if show_markers and emitSignal and trigDir == -1
+    label.new(bar_index, high + atr14,
+              abcClass + " S",
+              color = abcClass == "A" ? color.red : abcClass == "B" ? color.new(color.red, 30) : color.new(color.red, 50),
+              textcolor = color.white, size = size.small, style = label.style_label_down)
+
+// Trigger marker (rejection bar itself, one bar behind emission)
+plotshape(show_markers and newTrigger and trigDir == 1,  "Trigger Long",  shape.triangleup,   location.belowbar, color.new(color.green, 30), size=size.tiny)
+plotshape(show_markers and newTrigger and trigDir == -1, "Trigger Short", shape.triangledown, location.abovebar, color.new(color.red,   30), size=size.tiny)
+
+// ============================================================================
+// DEBUG TABLE
+// ============================================================================
+
+if show_debug and barstate.islast
+    var table dbg = table.new(position.top_right, 2, 13,
+        bgcolor = color.new(color.black, 70), border_width = 1)
+    table.cell(dbg, 0, 0,  "Class",     text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 0,  classStr,    text_color=color.aqua,  text_size=size.small)
+    table.cell(dbg, 0, 1,  "In Zone",   text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 1,  inZone ? "YES" : "no",
+               text_color = inZone ? color.green : color.gray, text_size=size.small)
+    table.cell(dbg, 0, 2,  "Exc Long",  text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 2,  hadExcursionLong ? "YES" : "no",
+               text_color = hadExcursionLong ? color.green : color.gray, text_size=size.small)
+    table.cell(dbg, 0, 3,  "Exc Short", text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 3,  hadExcursionShort ? "YES" : "no",
+               text_color = hadExcursionShort ? color.red : color.gray, text_size=size.small)
+    table.cell(dbg, 0, 4,  "S trend",   text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 4,  sLong ? "L" : sShort ? "S" : "-",
+               text_color = sLong ? color.green : sShort ? color.red : color.gray, text_size=size.small)
+    table.cell(dbg, 0, 5,  "R momen",   text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 5,  rBullDaily ? "L" : rBearDaily ? "S" : "-",
+               text_color = rBullDaily ? color.green : rBearDaily ? color.red : color.gray, text_size=size.small)
+    table.cell(dbg, 0, 6,  "V vol",     text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 6,  vFlag ? "YES" : "no",
+               text_color = vFlag ? color.green : color.gray, text_size=size.small)
+    table.cell(dbg, 0, 7,  "Zone Low",  text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 7,  not na(zoneLow)  ? str.tostring(zoneLow,  "#.#####") : "-",
+               text_color = color.aqua, text_size=size.small)
+    table.cell(dbg, 0, 8,  "Zone High", text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 8,  not na(zoneHigh) ? str.tostring(zoneHigh, "#.#####") : "-",
+               text_color = color.aqua, text_size=size.small)
+    table.cell(dbg, 0, 9,  "EMA20 4H",  text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 9,  not na(ema20_4h) ? str.tostring(ema20_4h, "#.#####") : "-",
+               text_color = color.orange, text_size=size.small)
+    table.cell(dbg, 0, 10, "Last Grade",text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 10, isCBar ? (str.tostring(grade) + "/4") : "-",
+               text_color = color.yellow, text_size=size.small)
+    table.cell(dbg, 0, 11, "Last Tier", text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 11, isCBar ? ("T" + str.tostring(tier)) : "-",
+               text_color = tier == 1 ? color.green : tier == 2 ? color.yellow : color.gray, text_size=size.small)
+    table.cell(dbg, 0, 12, "Version",   text_color=color.white, text_size=size.small)
+    table.cell(dbg, 1, 12, PULLBACK_VERSION, text_color=color.gray, text_size=size.small)

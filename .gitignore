@@ -1,2 +1,20 @@
 node_modules/
 .claude/worktrees/
+
+# Research / study output — not shipped to Railway
+abc_analyzer/
+abc_logger_out/
+abc_logger_out_v2/
+failed_breakout_refinement/
+max_pips_search/
+pip_yield_study/
+signal_quality_system/
+smc_sweep_study/
+timeframe_exit_ceb_study/
+validation/
+validation_per_class/
+volume_profile_study/
+
+# Local data dumps
+histdata_forex/
+histdata_forex.zip
