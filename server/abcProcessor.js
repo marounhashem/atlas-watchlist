@@ -75,7 +75,7 @@ function processAbcWebhook(data, deps) {
 
   if (!SYMBOLS[sym]) { console.log('[ABC] Not in priority list:', sym); return; }
 
-  const pineClass = data.class;
+  let pineClass = data.class;  // mutable — may be demoted by noOrderBook gate below
   if (!['A','B','C'].includes(pineClass)) {
     console.log(`[ABC] ${sym} — missing or invalid class field: ${pineClass}`); return;
   }
@@ -394,37 +394,30 @@ function processAbcWebhook(data, deps) {
   // Session
   const session = getSessionNow ? getSessionNow() : 'unknown';
 
-  // ── noOrderBook ROUTING — route to class_c_signals with real levels ────────
+  // ── noOrderBook DEMOTION — drop by one class instead of routing all to C ──
+  // Previous behavior: any class on a noOrderBook symbol → class_c_signals (OBSERVE only)
+  // New behavior (2026-04-21): demote by one tier, then let normal routing apply:
+  //   A → B  (still routes to abc_signals + swing Telegram, but at B score/RR)
+  //   B → C  (routes to class_c_signals as OBSERVE, same as native C)
+  //   C → C  (unchanged)
+  // Rationale: Pullback's grade-based Class A has meaningful structural conviction
+  // even without FXSSI. Full demotion to C was throwing away signal. One-class drop
+  // preserves some signal strength while still discounting for missing crowd data.
   if (cfg?.noOrderBook) {
-    const score = buildAbcScore(pineClass, conditions, 'NO_DATA', dailyAligned, null, direction);
-    const breakdown = buildAbcBreakdown(conditions, 'NO_DATA', dailyAligned, null, direction);
-    const reasoning = 'No contrarian data available for this class of symbols — observation only';
-    const expiryHours = cfg?.type?.includes('forex') ? 4 : cfg?.type?.includes('crypto') ? 8 : 6;
-    const expiresAt = Date.now() + expiryHours * 3600000;
-
-    const cId = db.insertClassCSignal({
-      symbol: sym, direction, score, verdict: 'OBSERVE',
-      entry, sl, tp1, tp2, tp3, rr,
-      session, reasoning,
-      breakdown: JSON.stringify(breakdown),
-      crowdGate: 'NO_DATA', abcVersion: ABC_VERSION,
-      obTop: obTop || null, obBot: obBot || null, preBosSwing,
-      expiresAt,
-      rawPayload: JSON.stringify(data)
-    });
-
-    try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'NOORDERBOOK',
-      skipReason: 'noOrderBook symbol routed to class_c_signals',
-      detail: `entry=${entry} sl=${sl} tp=${tp2}`, abcVersion: ABC_VERSION,
+    const originalPineClass = pineClass;
+    if (pineClass === 'A') {
+      pineClass = 'B';
+    } else if (pineClass === 'B') {
+      pineClass = 'C';
+    }
+    // pineClass === 'C' stays 'C'
+    try { db.insertAbcSkip({ symbol: sym, direction, pineClass: originalPineClass,
+      gate: 'NOORDERBOOK_DEMOTE',
+      skipReason: `noOrderBook — demoted Class${originalPineClass} to Class${pineClass}`,
+      detail: `entry=${entry} sl=${sl}`, abcVersion: ABC_VERSION,
       session, ts: Date.now() }); } catch(e) {}
-
-    console.log(`[ABC] ${sym} Class${pineClass} — noOrderBook → class_c_signals id:${cId}`);
-    if (broadcast) broadcast({
-      type: 'CLASS_C_SIGNAL', signalId: cId, symbol: sym, direction,
-      verdict: 'OBSERVE', entry, sl, tp: tp2,
-      rr, score, session, reasoning, ts: Date.now()
-    });
-    return;
+    console.log(`[ABC] ${sym} Class${originalPineClass} → Class${pineClass} (noOrderBook demotion)`);
+    // Fall through to normal routing with the demoted pineClass.
   }
 
   // ── CLASS C ROUTING ─────────────────────────────────────────────────────────
