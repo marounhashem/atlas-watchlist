@@ -15,6 +15,7 @@
 
 const express = require('express');
 const { runScan } = require('../stockScanner');
+const { sendSwingMessage } = require('../telegram');
 
 module.exports = function stocksRoutes(db) {
   const router = express.Router();
@@ -60,6 +61,31 @@ module.exports = function stocksRoutes(db) {
       LIMIT ?
     `).all(limit);
     res.json({ scans });
+  });
+
+  // -------------------- push today's picks to swing Telegram --------------------
+
+  // POST /api/stocks/push-swing — fetch today's latest scan + picks and push
+  // to the swing channel (TELEGRAM_SWING_BOT_TOKEN / TELEGRAM_SWING_CHAT_ID).
+  // Manual one-shot — stocks notifier still targets the spot channel on scan.
+  router.post('/push-swing', async (req, res) => {
+    const latestScan = db.prepare(`
+      SELECT * FROM stock_scans
+      WHERE date(started_at) = date('now')
+      ORDER BY started_at DESC
+      LIMIT 1
+    `).get();
+    if (!latestScan) {
+      return res.status(404).json({ ok: false, error: 'no scan today' });
+    }
+    const picks = db.prepare(`
+      SELECT * FROM stock_watchlist WHERE scan_id = ? ORDER BY rank ASC
+    `).all(latestScan.id).map(hydrate);
+
+    const text = formatSwing(latestScan, picks);
+    const ok = await sendSwingMessage(text, 'HTML');
+    if (!ok) return res.status(502).json({ ok: false, error: 'telegram send failed' });
+    res.json({ ok: true, scanId: latestScan.id, pickCount: picks.length });
   });
 
   // -------------------- manual trigger --------------------
@@ -228,4 +254,39 @@ function round(n, d) {
   if (!Number.isFinite(n)) return null;
   const m = 10 ** d;
   return Math.round(n * m) / m;
+}
+
+function formatSwing(scan, picks) {
+  const when = new Date(scan.started_at).toLocaleString('en-GB', {
+    timeZone: 'Asia/Dubai', hour12: false,
+  });
+  const header =
+    `📈 <b>ATLAS // STOCKS — pre-market</b>\n` +
+    `<i>${when} UAE · v${scan.version || ''}</i>\n` +
+    `universe ${scan.universe_size ?? '—'} · accepted ${scan.accepted ?? picks.length}\n`;
+
+  if (!picks.length) {
+    return header + '\n<i>No candidates cleared the gates today.</i>';
+  }
+
+  const lines = picks.map((p, i) => {
+    const dir = p.levels?.direction === 'LONG' ? '🟢' : '🔴';
+    const gap = p.gap_pct != null
+      ? (p.gap_pct >= 0 ? '+' : '') + Number(p.gap_pct).toFixed(1)
+      : '—';
+    const rvol = p.rvol != null ? Number(p.rvol).toFixed(1) : '—';
+    const atrPct = p.atr_pct != null ? Number(p.atr_pct).toFixed(1) : '—';
+    const cat = p.top_catalyst ? ` · ${p.top_catalyst.replace(/_/g, ' ')}` : '';
+    const pri = p.levels?.primary;
+    const levelLine = pri
+      ? `${pri.name}: entry <code>$${pri.entry}</code> · stop <code>$${pri.stop}</code> · t1 <code>$${pri.target1}</code>`
+      : 'levels unavailable';
+    return (
+      `\n<b>${i + 1}. ${dir} ${p.symbol}</b> — score ${p.score}\n` +
+      `   gap ${gap}% · rvol ${rvol}x · atr ${atrPct}%${cat}\n` +
+      `   ${levelLine}`
+    );
+  });
+
+  return header + lines.join('');
 }
