@@ -69,23 +69,37 @@ module.exports = function stocksRoutes(db) {
   // to the swing channel (TELEGRAM_SWING_BOT_TOKEN / TELEGRAM_SWING_CHAT_ID).
   // Manual one-shot — stocks notifier still targets the spot channel on scan.
   router.post('/push-swing', async (req, res) => {
-    const latestScan = db.prepare(`
-      SELECT * FROM stock_scans
-      WHERE date(started_at) = date('now')
-      ORDER BY started_at DESC
-      LIMIT 1
-    `).get();
-    if (!latestScan) {
-      return res.status(404).json({ ok: false, error: 'no scan today' });
-    }
-    const picks = db.prepare(`
-      SELECT * FROM stock_watchlist WHERE scan_id = ? ORDER BY rank ASC
-    `).all(latestScan.id).map(hydrate);
+    try {
+      const latestScan = db.prepare(`
+        SELECT * FROM stock_scans
+        WHERE date(started_at) = date('now')
+        ORDER BY started_at DESC
+        LIMIT 1
+      `).get();
+      if (!latestScan) {
+        return res.status(404).json({ ok: false, error: 'no scan today' });
+      }
+      const picks = db.prepare(`
+        SELECT * FROM stock_watchlist WHERE scan_id = ? ORDER BY rank ASC
+      `).all(latestScan.id).map(hydrate);
 
-    const text = formatSwing(latestScan, picks);
-    const ok = await sendSwingMessage(text, 'HTML');
-    if (!ok) return res.status(502).json({ ok: false, error: 'telegram send failed' });
-    res.json({ ok: true, scanId: latestScan.id, pickCount: picks.length });
+      const text = formatSwing(latestScan, picks);
+      const hasToken = !!process.env.TELEGRAM_SWING_BOT_TOKEN;
+      const hasChat = !!process.env.TELEGRAM_SWING_CHAT_ID;
+      if (!hasToken || !hasChat) {
+        return res.status(503).json({
+          ok: false,
+          error: 'swing Telegram env vars missing',
+          hasToken, hasChat,
+        });
+      }
+      const ok = await sendSwingMessage(text, 'HTML');
+      if (!ok) return res.status(502).json({ ok: false, error: 'telegram send failed' });
+      res.json({ ok: true, scanId: latestScan.id, pickCount: picks.length });
+    } catch (err) {
+      console.error('[stocks] push-swing failed', err);
+      res.status(500).json({ ok: false, error: err.message, stack: err.stack });
+    }
   });
 
   // -------------------- manual trigger --------------------
