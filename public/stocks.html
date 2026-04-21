@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ATLAS // STOCKS — Pre-Market Watchlist</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Syne:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0b0d;
+  --bg-elev: #121418;
+  --bg-elev-2: #1a1d23;
+  --border: #25282e;
+  --border-hot: #3a3e46;
+  --text: #e8e8e8;
+  --text-dim: #888b92;
+  --text-faint: #555861;
+  --accent: #e7f000;
+  --accent-dim: #8a9100;
+  --green: #4ade80;
+  --red: #f87171;
+  --blue: #60a5fa;
+  --amber: #fbbf24;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  --display: 'Syne', system-ui, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(231, 240, 0, 0.04), transparent 40%),
+    linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.4) 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+.shell { position: relative; z-index: 1; max-width: 1400px; margin: 0 auto; padding: 24px 28px 80px; }
+
+.hdr {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+}
+.brand {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: 0.01em;
+}
+.brand .slash { color: var(--accent); margin: 0 6px; }
+.brand .sub { color: var(--text-dim); font-weight: 500; font-size: 16px; margin-left: 8px; }
+.hdr-meta { text-align: right; color: var(--text-dim); font-size: 11px; }
+.hdr-meta .v { color: var(--text-faint); }
+.hdr-meta .status {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--green);
+  margin-top: 4px;
+}
+.hdr-meta .dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 50% { opacity: 0.4; } }
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+.stat { background: var(--bg-elev); padding: 14px 16px; }
+.stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+.stat-val { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat-val.accent { color: var(--accent); }
+.stat-val.warn   { color: var(--amber); }
+.stat-val.good   { color: var(--green); }
+.stat-val.bad    { color: var(--red); }
+
+/* Performance ribbon — appears below scan stats once outcomes logged */
+.perf {
+  display: flex;
+  gap: 20px;
+  padding: 12px 16px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-top: none;
+  margin-top: -24px;
+  margin-bottom: 24px;
+  font-size: 11px;
+}
+.perf .k { color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.08em; }
+.perf .v { color: var(--text); margin-left: 6px; font-weight: 500; }
+
+.sec-hdr {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  margin-top: 28px;
+}
+.sec-hdr h2 {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.sec-hdr .count { color: var(--text-faint); font-size: 11px; }
+
+.wl { display: grid; gap: 14px; }
+.card {
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border-hot);
+  transition: border-color 0.15s ease;
+  position: relative;
+}
+.card.long  { border-left-color: var(--green); }
+.card.short { border-left-color: var(--red); }
+.card:hover { border-color: var(--border-hot); }
+.card.outcome-win  { box-shadow: inset 3px 0 0 0 rgba(74, 222, 128, 0.2); }
+.card.outcome-loss { box-shadow: inset 3px 0 0 0 rgba(248, 113, 113, 0.2); }
+.card.outcome-skip { opacity: 0.55; }
+
+.outcome-stamp {
+  position: absolute;
+  top: 12px; right: 14px;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  font-weight: 700;
+  padding: 3px 8px;
+  z-index: 1;
+}
+.outcome-stamp.win  { background: rgba(74, 222, 128, 0.15); color: var(--green); }
+.outcome-stamp.loss { background: rgba(248, 113, 113, 0.15); color: var(--red); }
+.outcome-stamp.skip { background: rgba(136, 139, 146, 0.15); color: var(--text-dim); }
+
+.card-top {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 20px;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.rank {
+  font-family: var(--display);
+  font-size: 34px;
+  font-weight: 800;
+  color: var(--text-faint);
+  width: 44px;
+  text-align: center;
+}
+.sym-block .sym {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: 22px;
+}
+.sym-block .sym .dir {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  padding: 2px 8px;
+  margin-left: 10px;
+  vertical-align: middle;
+}
+.dir.long  { background: rgba(74, 222, 128, 0.15); color: var(--green); }
+.dir.short { background: rgba(248, 113, 113, 0.15); color: var(--red); }
+.sym-block .name { color: var(--text-dim); font-size: 11px; margin-top: 2px; }
+
+.score-block { text-align: right; margin-right: 50px; }
+.score-val {
+  font-size: 30px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.score-label { font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.1em; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 1px;
+  background: var(--border);
+}
+.cell { background: var(--bg-elev); padding: 10px 16px; }
+.cell-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+.cell-val { font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.cell-val.pos { color: var(--green); }
+.cell-val.neg { color: var(--red); }
+
+.levels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: var(--border);
+  border-top: 1px solid var(--border);
+}
+.setup { background: var(--bg-elev); padding: 14px 20px; }
+.setup h3 {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  display: flex; justify-content: space-between;
+}
+.setup h3 .r { color: var(--accent-dim); }
+.setup .trigger {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  font-style: italic;
+}
+.setup table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.setup td { padding: 3px 0; font-variant-numeric: tabular-nums; }
+.setup td:first-child { color: var(--text-faint); width: 60px; text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; }
+.setup td:last-child  { text-align: right; font-weight: 500; }
+.setup td .entry  { color: var(--blue); }
+.setup td .stop   { color: var(--red); }
+.setup td .target { color: var(--green); }
+
+.catalyst {
+  padding: 14px 20px;
+  background: var(--bg-elev-2);
+  border-top: 1px solid var(--border);
+}
+.cat-tag {
+  display: inline-block;
+  padding: 3px 9px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-weight: 500;
+  border: 1px solid;
+  margin-right: 8px;
+}
+.cat-tag.bull { border-color: var(--green); color: var(--green); }
+.cat-tag.bear { border-color: var(--red); color: var(--red); }
+.cat-tag.neu  { border-color: var(--text-dim); color: var(--text-dim); }
+.cat-tag.none { border-color: var(--amber); color: var(--amber); }
+.cat-sent { font-size: 11px; color: var(--text-dim); }
+.headlines { margin-top: 10px; }
+.headlines li {
+  list-style: none;
+  font-size: 12px;
+  padding: 5px 0;
+  border-top: 1px dashed var(--border);
+  color: var(--text-dim);
+}
+.headlines li:first-child { border-top: none; }
+.headlines a { color: var(--text); text-decoration: none; }
+.headlines a:hover { color: var(--accent); }
+.headlines time { color: var(--text-faint); font-size: 10px; margin-left: 6px; }
+
+/* Outcome row */
+.outcome-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  background: var(--bg-elev);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.outcome-row .label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+  margin-right: 6px;
+}
+.out-btn {
+  background: transparent;
+  border: 1px solid var(--border-hot);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 5px 12px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.out-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.out-btn.win.active  { background: rgba(74, 222, 128, 0.15); color: var(--green); border-color: var(--green); }
+.out-btn.loss.active { background: rgba(248, 113, 113, 0.15); color: var(--red); border-color: var(--red); }
+.out-btn.skip.active { background: rgba(136, 139, 146, 0.15); color: var(--text-dim); border-color: var(--text-dim); }
+.out-btn.clear.active { border-color: var(--text-faint); color: var(--text-faint); }
+
+.pnl-input {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-hot);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 5px 10px;
+  width: 90px;
+  font-variant-numeric: tabular-nums;
+}
+.pnl-input:focus { outline: none; border-color: var(--accent); }
+.pnl-input::placeholder { color: var(--text-faint); }
+
+.empty, .loading {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--text-dim);
+  border: 1px dashed var(--border);
+}
+.empty h3 { font-family: var(--display); font-size: 18px; margin-bottom: 8px; color: var(--text); }
+.empty .hint { margin-top: 10px; font-size: 11px; color: var(--text-faint); }
+
+.btn {
+  background: transparent;
+  border: 1px solid var(--border-hot);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.toast {
+  position: fixed;
+  bottom: 20px; right: 20px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border-hot);
+  padding: 10px 16px;
+  font-size: 11px;
+  color: var(--text);
+  z-index: 10;
+  animation: slideIn 0.2s ease, slideOut 0.2s ease 2.8s forwards;
+}
+@keyframes slideIn { from { transform: translateX(20px); opacity: 0; } }
+@keyframes slideOut { to { transform: translateX(20px); opacity: 0; } }
+
+footer {
+  margin-top: 60px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 10px;
+  display: flex;
+  justify-content: space-between;
+}
+
+@media (max-width: 900px) {
+  .stats { grid-template-columns: repeat(3, 1fr); }
+  .grid { grid-template-columns: repeat(2, 1fr); }
+  .levels { grid-template-columns: 1fr; }
+  .card-top { grid-template-columns: auto 1fr; }
+  .score-block { grid-column: span 2; text-align: left; margin-top: 8px; margin-right: 0; }
+  .outcome-stamp { top: auto; bottom: 12px; right: 12px; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="hdr">
+    <div>
+      <div class="brand">ATLAS<span class="slash">//</span>STOCKS<span class="sub">pre-market watchlist</span></div>
+    </div>
+    <div class="hdr-meta">
+      <div id="scan-time">—</div>
+      <div class="v" id="scorer-v">—</div>
+      <div class="status"><span class="dot"></span> <span id="status-text">loading</span></div>
+    </div>
+  </header>
+
+  <section class="stats" id="stats"></section>
+  <div class="perf" id="perf" style="display:none"></div>
+
+  <div class="sec-hdr">
+    <h2>Today's Watchlist</h2>
+    <div class="count"><button class="btn" id="refresh-btn">Refresh</button></div>
+  </div>
+
+  <div class="wl" id="watchlist">
+    <div class="loading">Loading watchlist…</div>
+  </div>
+
+  <footer>
+    <div>ATLAS // STOCKS · data: yahoo-finance2 · news: finnhub + yahoo · sentiment: VADER</div>
+    <div>scheduled 16:00 Asia/Dubai Mon–Fri</div>
+  </footer>
+</div>
+
+<script>
+const API = '/api/stocks';
+const CATALYST_LABELS = {
+  earnings_beat: 'Earnings Beat',
+  earnings_miss: 'Earnings Miss',
+  fda_approval: 'FDA Approval',
+  fda_rejection: 'FDA Rejection',
+  ma_acquirer_rumor: 'M&A Rumor',
+  ma_target: 'Acquisition Target',
+  dilutive_offering: 'Dilutive Offering',
+  buyback: 'Buyback',
+  analyst_upgrade: 'Analyst Upgrade',
+  analyst_downgrade: 'Analyst Downgrade',
+  partnership: 'Partnership',
+  legal_negative: 'Legal / Regulatory',
+  ceo_departure: 'CEO Departure',
+  reverse_split: 'Reverse Split',
+};
+
+async function load() {
+  try {
+    const [wlRes, statsRes] = await Promise.all([
+      fetch(`${API}/watchlist/today`).then(r => r.json()),
+      fetch(`${API}/stats`).then(r => r.json()).catch(() => null),
+    ]);
+    render(wlRes, statsRes);
+  } catch (err) {
+    document.getElementById('watchlist').innerHTML =
+      `<div class="empty"><h3>Connection error</h3><div>${err.message}</div></div>`;
+    document.getElementById('status-text').textContent = 'offline';
+  }
+}
+
+function render(data, stats) {
+  renderHeader(data.scan);
+  renderStats(data.scan);
+  renderPerf(stats);
+  renderWatchlist(data.picks || []);
+}
+
+function renderHeader(scan) {
+  if (!scan) {
+    document.getElementById('scan-time').textContent = 'no scan yet today';
+    document.getElementById('scorer-v').textContent = '';
+    document.getElementById('status-text').textContent = 'awaiting 16:00 scan';
+    return;
+  }
+  const t = new Date(scan.started_at);
+  document.getElementById('scan-time').textContent =
+    `scan ${t.toLocaleString('en-GB', { timeZone: 'Asia/Dubai', hour12: false })} UAE`;
+  document.getElementById('scorer-v').textContent = `v${scan.scorer_version}`;
+  document.getElementById('status-text').textContent = 'live';
+}
+
+function renderStats(scan) {
+  const el = document.getElementById('stats');
+  if (!scan) { el.innerHTML = ''; return; }
+  const cells = [
+    ['universe',    scan.universe_size],
+    ['fetched',     scan.fetched],
+    ['failed',      scan.failed, scan.failed > 20 ? 'warn' : ''],
+    ['pre-filtered', scan.prefiltered],
+    ['accepted',    scan.accepted, 'accent'],
+    ['runtime',     `${Math.round((new Date(scan.finished_at) - new Date(scan.started_at)) / 1000)}s`],
+  ];
+  el.innerHTML = cells.map(([label, val, cls]) => `
+    <div class="stat">
+      <div class="stat-label">${label}</div>
+      <div class="stat-val ${cls || ''}">${val}</div>
+    </div>
+  `).join('');
+}
+
+function renderPerf(stats) {
+  const el = document.getElementById('perf');
+  if (!stats?.totals?.total_closed) {
+    el.style.display = 'none';
+    return;
+  }
+  const t = stats.totals;
+  const wrCls = t.win_rate_pct >= 55 ? 'good' : t.win_rate_pct < 45 ? 'bad' : '';
+  const pfCls = t.profit_factor >= 1.5 ? 'good' : t.profit_factor < 1.0 ? 'bad' : '';
+  el.style.display = 'flex';
+  el.innerHTML = `
+    <div><span class="k">lifetime</span><span class="v">${t.total_closed} closed</span></div>
+    <div><span class="k">win rate</span><span class="v ${wrCls}">${t.win_rate_pct ?? '—'}%</span></div>
+    <div><span class="k">profit factor</span><span class="v ${pfCls}">${t.profit_factor ?? '—'}</span></div>
+    <div><span class="k">avg win</span><span class="v">${fmt(t.avg_win_pct, 2)}%</span></div>
+    <div><span class="k">avg loss</span><span class="v">${fmt(t.avg_loss_pct, 2)}%</span></div>
+  `;
+}
+
+function renderWatchlist(picks) {
+  const el = document.getElementById('watchlist');
+  if (!picks.length) {
+    el.innerHTML = `
+      <div class="empty">
+        <h3>No picks today</h3>
+        <div>No candidates cleared the gap + RVOL + liquidity gates.</div>
+        <div class="hint">Normal on quiet mornings. Check back tomorrow.</div>
+      </div>`;
+    return;
+  }
+  el.innerHTML = picks.map(p => card(p)).join('');
+  attachOutcomeHandlers();
+}
+
+function card(p) {
+  const dir = (p.direction || 'LONG').toLowerCase();
+  const gapCls = p.gap_pct >= 0 ? 'pos' : 'neg';
+  const gapSign = p.gap_pct >= 0 ? '+' : '';
+  const levels = p.levels || {};
+  const pri = levels.primary || {};
+  const alt = levels.alternative || {};
+  const headlines = p.headlines || [];
+  const outcomeClass = p.outcome ? `outcome-${p.outcome.toLowerCase()}` : '';
+
+  return `
+    <article class="card ${dir} ${outcomeClass}" data-id="${p.id}">
+      ${p.outcome ? `<span class="outcome-stamp ${p.outcome.toLowerCase()}">${p.outcome}</span>` : ''}
+
+      <div class="card-top">
+        <div class="rank">${String(p.rank).padStart(2, '0')}</div>
+        <div class="sym-block">
+          <div class="sym">${p.symbol}<span class="dir ${dir}">${p.direction}</span></div>
+          <div class="name">${escape(p.name || '')}</div>
+        </div>
+        <div class="score-block">
+          <div class="score-val">${p.score}</div>
+          <div class="score-label">score</div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="cell"><div class="cell-label">gap</div>
+          <div class="cell-val ${gapCls}">${gapSign}${fmt(p.gap_pct, 2)}%</div></div>
+        <div class="cell"><div class="cell-label">rvol</div>
+          <div class="cell-val accent">${fmt(p.rvol, 2)}x</div></div>
+        <div class="cell"><div class="cell-label">atr%</div>
+          <div class="cell-val">${fmt(p.atr_pct, 2)}%</div></div>
+        <div class="cell"><div class="cell-label">price</div>
+          <div class="cell-val">$${fmt(p.pre_market_price, 2)}</div></div>
+        <div class="cell"><div class="cell-label">avg vol</div>
+          <div class="cell-val">${volFmt(p.avg_volume)}</div></div>
+      </div>
+
+      ${pri.entry ? `
+      <div class="levels">
+        <div class="setup">
+          <h3>${pri.name || 'Primary'} <span class="r">${pri.rMultiple2 || pri.rMultiple1 || ''}R</span></h3>
+          <div class="trigger">${pri.trigger || ''}</div>
+          <table>
+            <tr><td>entry</td><td><span class="entry">$${fmt(pri.entry,2)}</span></td></tr>
+            <tr><td>stop</td><td><span class="stop">$${fmt(pri.stop,2)}</span></td></tr>
+            <tr><td>t1</td><td><span class="target">$${fmt(pri.target1,2)}</span></td></tr>
+            <tr><td>t2</td><td><span class="target">$${fmt(pri.target2,2)}</span></td></tr>
+            <tr><td>risk/sh</td><td>$${fmt(pri.riskPerShare,2)}</td></tr>
+          </table>
+        </div>
+        <div class="setup">
+          <h3>${alt.name || 'Alternative'} <span class="r">${alt.rMultiple || ''}R</span></h3>
+          <div class="trigger">${alt.trigger || ''}</div>
+          <table>
+            <tr><td>entry</td><td><span class="entry">$${fmt(alt.entry,2)}</span></td></tr>
+            <tr><td>stop</td><td><span class="stop">$${fmt(alt.stop,2)}</span></td></tr>
+            <tr><td>target</td><td><span class="target">$${fmt(alt.target,2)}</span></td></tr>
+            <tr><td>risk/sh</td><td>$${fmt(alt.riskPerShare,2)}</td></tr>
+          </table>
+        </div>
+      </div>` : ''}
+
+      <div class="catalyst">
+        ${catalystTag(p)}
+        <span class="cat-sent">sentiment ${sentimentArrow(p.sentiment)} ${fmt(p.sentiment,2)}</span>
+        ${headlines.length ? `
+          <ul class="headlines">
+            ${headlines.slice(0,4).map(h => `
+              <li><a href="${h.url}" target="_blank" rel="noopener">${escape(h.headline)}</a>
+                <time>${timeAgo(h.publishedAt)}</time></li>
+            `).join('')}
+          </ul>` : '<div style="margin-top:8px;color:var(--text-faint);font-size:11px">No recent headlines found.</div>'}
+      </div>
+
+      <div class="outcome-row">
+        <span class="label">outcome</span>
+        <button class="out-btn win  ${p.outcome === 'WIN'  ? 'active' : ''}" data-outcome="WIN">Win</button>
+        <button class="out-btn loss ${p.outcome === 'LOSS' ? 'active' : ''}" data-outcome="LOSS">Loss</button>
+        <button class="out-btn skip ${p.outcome === 'SKIP' ? 'active' : ''}" data-outcome="SKIP">Skip</button>
+        <button class="out-btn clear" data-outcome="">Clear</button>
+        <span class="label" style="margin-left:10px">P/L %</span>
+        <input class="pnl-input" type="number" step="0.1" placeholder="±0.00"
+               value="${p.pnl_pct ?? ''}" data-pnl="${p.id}" />
+      </div>
+    </article>
+  `;
+}
+
+function attachOutcomeHandlers() {
+  document.querySelectorAll('.card').forEach(card => {
+    const id = card.dataset.id;
+    card.querySelectorAll('.out-btn').forEach(btn => {
+      btn.addEventListener('click', () => setOutcome(id, btn.dataset.outcome, card));
+    });
+    const pnlInput = card.querySelector('.pnl-input');
+    pnlInput?.addEventListener('blur', () => {
+      const v = parseFloat(pnlInput.value);
+      if (Number.isFinite(v)) setPnl(id, v);
+    });
+  });
+}
+
+async function setOutcome(id, outcome, cardEl) {
+  const pnlEl = cardEl.querySelector('.pnl-input');
+  const pnlPct = parseFloat(pnlEl?.value);
+  const body = {
+    outcome: outcome || null,
+    pnlPct: Number.isFinite(pnlPct) ? pnlPct : null,
+  };
+  try {
+    const res = await fetch(`${API}/pick/${id}/outcome`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(`${res.status}`);
+    toast(outcome ? `Marked ${outcome}` : 'Cleared outcome');
+    // Re-fetch stats and patch the card in place to avoid a full refresh
+    const [fresh, stats] = await Promise.all([
+      fetch(`${API}/watchlist/today`).then(r => r.json()),
+      fetch(`${API}/stats`).then(r => r.json()).catch(() => null),
+    ]);
+    render(fresh, stats);
+  } catch (err) {
+    toast(`Save failed: ${err.message}`, true);
+  }
+}
+
+async function setPnl(id, pnlPct) {
+  try {
+    await fetch(`${API}/pick/${id}/outcome`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pnlPct }),
+    });
+    toast(`Saved P/L ${pnlPct}%`);
+    const stats = await fetch(`${API}/stats`).then(r => r.json()).catch(() => null);
+    renderPerf(stats);
+  } catch (err) {
+    toast(`Save failed: ${err.message}`, true);
+  }
+}
+
+function toast(msg, isErr = false) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  if (isErr) t.style.borderColor = 'var(--red)';
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3100);
+}
+
+function catalystTag(p) {
+  if (!p.top_catalyst) return `<span class="cat-tag none">No clear catalyst</span>`;
+  const label = CATALYST_LABELS[p.top_catalyst] || p.top_catalyst;
+  const cls = p.catalyst_bias > 0 ? 'bull' : p.catalyst_bias < 0 ? 'bear' : 'neu';
+  return `<span class="cat-tag ${cls}">${label}</span>`;
+}
+function sentimentArrow(s) { return s > 0.2 ? '▲' : s < -0.2 ? '▼' : '·'; }
+function fmt(n, d) {
+  if (n === null || n === undefined || !Number.isFinite(+n)) return '—';
+  return (+n).toFixed(d);
+}
+function volFmt(v) {
+  if (!v) return '—';
+  if (v >= 1e9) return (v / 1e9).toFixed(1) + 'B';
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+  return v;
+}
+function timeAgo(ts) {
+  const diff = Date.now() - ts;
+  const h = Math.floor(diff / 3600000);
+  if (h < 1) return `${Math.floor(diff / 60000)}m ago`;
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+function escape(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+document.getElementById('refresh-btn').addEventListener('click', () => {
+  const btn = document.getElementById('refresh-btn');
+  btn.disabled = true;
+  load().finally(() => btn.disabled = false);
+});
+
+load();
+setInterval(load, 120_000);
+</script>
+</body>
+</html>

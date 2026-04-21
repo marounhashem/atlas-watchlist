@@ -147,6 +147,30 @@ app.use(express.static(path.join(__dirname, '../client'), {
   etag: true
 }));
 
+// ── STOCKS MODULE ────────────────────────────────────────────────────────────
+// Isolated better-sqlite3 DB for the pre-market stocks scanner. Atlas's own
+// sql.js DB is untouched. The stocks feature (routes/stocks.js,
+// stockScanner/*) was built against better-sqlite3's prepare/get/all/run
+// API; giving it its own handle keeps the APIs cleanly separated.
+const Database = require('better-sqlite3');
+const stockDb = new Database(path.join(__dirname, '../data/stocks.sqlite'));
+
+function runStockMigration(file) {
+  const sql = fs.readFileSync(path.join(__dirname, '../migrations', file), 'utf8');
+  for (const stmt of sql.split(/;\s*$/m).map(s => s.trim()).filter(Boolean)) {
+    try { stockDb.exec(stmt); }
+    catch (err) {
+      if (!/duplicate column|already exists/i.test(err.message)) throw err;
+    }
+  }
+}
+runStockMigration('20260421_stock_watchlist.sql');
+runStockMigration('20260421_stock_outcomes.sql');
+
+app.use('/api/stocks', require('./routes/stocks')(stockDb));
+app.use(express.static(path.join(__dirname, '../public')));
+require('./stockScanner/schedule').installSchedule({ db: stockDb });
+
 console.log('[Startup] 3 — Express + WS ready', Date.now());
 
 // Fast health endpoint — no DB calls, responds in <5ms
