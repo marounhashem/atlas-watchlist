@@ -295,4 +295,4 @@ async function sendTest() {
   return sendMessage('✅ <b>ATLAS // WATCHLIST</b>\nTelegram connected successfully.');
 }
 
-module.exports = { sendMessage, sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendEventFiredAlert, sendSwingSignalAlert, sendAbcSignalAlert, sendEntryTouchAlert, sendAbcEntryTouchAlert, sendTest };
+module.exports = { sendMessage, sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendEventFiredAlert, sendSwingMessage, sendSwingSignalAlert, sendAbcSignalAlert, sendEntryTouchAlert, sendAbcEntryTouchAlert, sendTest };
