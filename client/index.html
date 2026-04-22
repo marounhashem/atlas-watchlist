@@ -877,22 +877,18 @@
 <div class="layout">
 <div class="left">
   <div class="main-tabs">
-    <div class="mtab active" id="mtab-signals" onclick="switchMainTab('signals')">SIGNALS</div>
-    <div class="mtab" id="mtab-forex" onclick="switchMainTab('forex')">FOREX <span id="fx-count" style="font-size:9px;color:var(--dim);font-weight:400;"></span></div>
-    <div class="mtab" id="mtab-global" onclick="switchMainTab('global')" style="color:var(--teal)">🌐 GLOBAL</div>
+    <div class="mtab active" id="mtab-signals" onclick="switchMainTab('signals')">SPOT TRADING</div>
+    <div class="mtab" id="mtab-abc" onclick="switchMainTab('abc')" style="color:var(--teal)">⭐ SWING TRADING</div>
+    <div class="mtab" id="mtab-stocks" onclick="switchMainTab('stocks')">📊 STOCKS</div>
     <div class="mtab" id="mtab-bias" onclick="switchMainTab('bias')">📊 BIAS</div>
     <div class="mtab" id="mtab-idea" onclick="switchMainTab('idea')">💡 IDEA</div>
-    <div class="mtab" id="mtab-stats" onclick="switchMainTab('stats')">📈 STATS</div>
-    <div class="mtab" id="mtab-backtest" onclick="switchMainTab('backtest')">🔬 BACKTEST</div>
     <div class="mtab" id="mtab-intel" onclick="switchMainTab('intel')" style="color:var(--amber,var(--watch))">📡 INTEL</div>
-    <div class="mtab" id="mtab-abc" onclick="switchMainTab('abc')" style="color:var(--teal)">⭐ ABC</div>
-    <div class="mtab" id="mtab-stocks" onclick="switchMainTab('stocks')">📊 STOCKS</div>
   </div>
 
   <!-- Signals pane -->
   <div class="main-pane active" id="pane-signals">
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0 4px;">
-      <div class="sec" style="margin:0;">Spot signals</div>
+      <div class="sec" style="margin:0;">Spot trading</div>
       <div class="filters">
         <div class="fbtn on" onclick="setFilter('ALL')">ALL</div>
         <div class="fbtn" onclick="setFilter('PROCEED')">PROCEED</div>
@@ -905,59 +901,11 @@
     <div id="signals-container"><div class="empty">Waiting for signals...<br>Technical alerts will appear here.</div></div>
   </div>
 
-  <!-- Forex pane — shows FX-tagged signals from the main board -->
-  <div class="main-pane" id="pane-forex">
-    <div style="padding:8px 0 4px;display:flex;align-items:center;justify-content:space-between;">
-      <div class="sec" style="margin:0;">Forex signals</div>
-      <div class="filters" style="margin:0;">
-        <div class="fbtn on" onclick="setFxFilter('ALL')">ALL</div>
-        <div class="fbtn" onclick="setFxFilter('PROCEED')">PROCEED</div>
-        <div class="fbtn" onclick="setFxFilter('LONG')">LONG</div>
-        <div class="fbtn" onclick="setFxFilter('SHORT')">SHORT</div>
-      </div>
-    </div>
-    <div id="forex-signals-container"><div class="empty">Waiting for forex signals...<br>Add forex pairs to your TradingView alerts.</div></div>
-  </div>
-
-  <!-- Global pane -->
-  <div class="main-pane" id="pane-global">
-    <div style="padding:8px 0 4px;display:flex;align-items:center;justify-content:space-between;">
-      <div class="sec" style="margin:0;color:var(--teal);">🌐 Global indices &amp; commodities</div>
-      <div class="filters" style="margin:0;">
-        <div class="fbtn on" onclick="setGlobalFilter('ALL')">ALL</div>
-        <div class="fbtn" onclick="setGlobalFilter('PROCEED')">PROCEED</div>
-        <div class="fbtn" onclick="setGlobalFilter('WATCH')">WATCH</div>
-      </div>
-    </div>
-    <div id="global-container"><div class="empty">Waiting for global data...<br>Add US500, DE40, UK100, J225 to TradingView alerts.</div></div>
-  </div>
-
   <!-- Idea pane -->
   <!-- Bias pane -->
   <div class="main-pane" id="pane-bias">
     <div style="padding:8px 0 4px;"><div class="sec" style="margin:0;">📊 Multi-timeframe bias</div></div>
     <div id="bias-content"><div class="empty">Loading bias data...</div></div>
-  </div>
-
-  <!-- Backtest pane -->
-  <div class="main-pane" id="pane-backtest">
-    <div style="padding:8px 0 4px;"><div class="sec" style="margin:0;">🔬 Signal backtester</div></div>
-    <div style="display:grid;grid-template-columns:repeat(4,1fr) auto;gap:8px;margin-bottom:12px;align-items:end;">
-      <div><div style="font-size:9px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">SYMBOL</div><select id="bt-symbol" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text2);font-family:'Space Grotesk',sans-serif;font-size:11px;padding:6px 8px;outline:none;"><option value="ALL">All Symbols</option></select></div>
-      <div><div style="font-size:9px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">MIN SCORE: <span id="bt-score-label">80</span></div><input type="range" id="bt-minscore" min="70" max="95" value="80" step="1" style="width:100%;" oninput="document.getElementById('bt-score-label').textContent=this.value"></div>
-      <div><div style="font-size:9px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">SESSION</div><select id="bt-session" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text2);font-family:'Space Grotesk',sans-serif;font-size:11px;padding:6px 8px;outline:none;"><option value="ALL">All Sessions</option><option value="london">London</option><option value="newYork">New York</option><option value="asia">Asia</option></select></div>
-      <div><div style="font-size:9px;color:var(--dim);letter-spacing:.08em;margin-bottom:4px;">DIRECTION</div><select id="bt-dir" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text2);font-family:'Space Grotesk',sans-serif;font-size:11px;padding:6px 8px;outline:none;"><option value="ALL">Both</option><option value="LONG">LONG</option><option value="SHORT">SHORT</option></select></div>
-      <button onclick="runBacktest()" id="bt-run-btn" style="padding:8px 20px;background:transparent;border:1px solid var(--accent);border-radius:5px;color:var(--accent);font-size:11px;font-weight:600;letter-spacing:.07em;cursor:pointer;font-family:'Space Grotesk',sans-serif;white-space:nowrap;">▶ RUN</button>
-    </div>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;"><input type="checkbox" id="bt-followrecs"><label for="bt-followrecs" style="font-size:10px;color:var(--text2);cursor:pointer;">Simulate following HIGH urgency CLOSE recs</label></div>
-    <div id="bt-results" style="display:none;"></div>
-    <div id="bt-empty" style="color:var(--dim);font-size:12px;padding:20px 0;">Set filters and click RUN to simulate</div>
-  </div>
-
-  <!-- Stats pane -->
-  <div class="main-pane" id="pane-stats">
-    <div style="padding:8px 0 4px;"><div class="sec" style="margin:0;">📈 Performance analytics</div></div>
-    <div id="stats-content"><div class="empty">Need at least 3 closed trades</div></div>
   </div>
 
   <div class="main-pane" id="pane-idea">
@@ -982,7 +930,7 @@
     <div style="padding:12px 0;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
         <div style="display:flex;align-items:center;gap:8px;">
-          <div class="sec" style="margin:0;color:var(--teal);">⭐ ABC SIGNALS</div>
+          <div class="sec" style="margin:0;color:var(--teal);">⭐ SWING TRADING</div>
           <button onclick="archiveOldAbcSignals()" style="font-size:9px;padding:2px 8px;border:1px solid var(--border);border-radius:4px;background:transparent;color:var(--muted);cursor:pointer;" title="Archive signals from older versions">📦 Archive old</button>
         </div>
         <div id="abc-class-filters" style="display:flex;gap:4px;">
@@ -1115,36 +1063,8 @@
     <div id="stats-container"><div class="empty" style="padding:8px">Log WIN/LOSS on signals above</div></div>
   </div>
   <div class="panel">
-    <div class="ptitle">Learning log</div>
-    <div id="learning-container"><div class="empty" style="padding:8px">First cycle runs after 20 outcomes</div></div>
-  </div>
-  <div class="panel" id="regime-panel">
-    <div class="ptitle">Market regime — Claude</div>
-    <div id="regime-container"><div class="empty" style="padding:8px">Fires after 30 outcomes</div></div>
-  </div>
-  <div class="panel">
-    <div class="ptitle" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;" onclick="toggleWatchPanel()">
-      <span>Watch signals <span style="font-size:9px;color:var(--dim);font-weight:400;">monitoring only — not traded</span></span>
-      <span id="watch-toggle" style="font-size:9px;color:var(--dim);">▼ show</span>
-    </div>
-    <div id="watch-panel" style="display:none;">
-      <div id="watch-list" style="font-size:10px;color:var(--text2);font-family:monospace;line-height:1.8;"></div>
-    </div>
-  </div>
-  <div class="panel">
     <div class="ptitle">Signal heatmap</div>
     <div id="signal-heatmap" style="display:grid;grid-template-columns:repeat(3,1fr);gap:3px;padding:4px 0;"></div>
-  </div>
-  <div class="panel" id="corr-section" style="display:none;">
-    <div class="ptitle">Correlation risk</div>
-    <div id="correlation-panel"></div>
-  </div>
-  <div class="panel">
-    <div class="ptitle">Webhook</div>
-    <div style="font-size:9px;color:var(--muted);line-height:2;">
-      POST to:<br>
-      <span style="color:var(--accent);word-break:break-all;" id="webhook-url">loading...</span>
-    </div>
   </div>
 </div>
 </div>
@@ -1203,7 +1123,7 @@ function connect() {
     _wsBackoff = 1000;
     document.getElementById('conn-status').textContent = 'LIVE';
     document.getElementById('dot').style.background = 'var(--proceed)';
-    document.getElementById('webhook-url').textContent = location.origin+'/webhook/pine';
+    const _wh = document.getElementById('webhook-url'); if (_wh) _wh.textContent = location.origin+'/webhook/pine';
     // Only refetch on reconnect, not initial connect (WS INIT handles that)
     if (_initLoaded) {
       fetch('/api/signals').then(r=>r.json()).then(data=>{if(data?.length){allSignals=data;renderSignals();}}).catch(()=>{});
@@ -1446,8 +1366,6 @@ function renderSignals() {
     </div>`;
   }
   c.innerHTML=html;
-  // Keep forex pane in sync if visible
-  if (activeMainTab === 'forex') renderForexSignals();
   renderHeatmap();
   renderCorrelation();
 }
@@ -2260,26 +2178,33 @@ async function logOutcome(signalId, outcome) {
 }
 
 function fetchStats() {
-  const signals = allSignals || [];
-  const by={};
-  for(const s of signals){
-    if(s.outcome==='OPEN') continue;
-    if(!by[s.symbol]) by[s.symbol]={wins:0,losses:0};
-    if(s.outcome==='WIN') by[s.symbol].wins++;
-    else if(s.outcome==='LOSS') by[s.symbol].losses++;
-  }
-  const c=document.getElementById('stats-container');
-  const entries=Object.entries(by).filter(([,v])=>v.wins+v.losses>0);
-  if(!entries.length){c.innerHTML='<div class="empty" style="padding:8px">Log WIN/LOSS on signals above</div>';return;}
-  c.innerHTML=entries.map(([sym,s])=>{
-    const t=s.wins+s.losses,wr=Math.round(s.wins/t*100);
+  // Combined win-rate by symbol across spot (allSignals) and swing/ABC (abcSignals)
+  const by = {};
+  const tally = (arr) => {
+    for (const s of arr || []) {
+      if (!s || !s.symbol) continue;
+      if (s.outcome !== 'WIN' && s.outcome !== 'LOSS') continue;
+      if (!by[s.symbol]) by[s.symbol] = { wins:0, losses:0 };
+      if (s.outcome === 'WIN') by[s.symbol].wins++;
+      else by[s.symbol].losses++;
+    }
+  };
+  tally(allSignals);
+  tally(abcSignals);
+  const c = document.getElementById('stats-container');
+  if (!c) return;
+  const entries = Object.entries(by).filter(([,v]) => v.wins + v.losses > 0);
+  if (!entries.length) { c.innerHTML = '<div class="empty" style="padding:8px">Log WIN/LOSS on signals above</div>'; return; }
+  c.innerHTML = entries.map(([sym,s]) => {
+    const t = s.wins + s.losses, wr = Math.round(s.wins / t * 100);
     return `<div class="srow"><span style="font-weight:700">${sym}</span><span style="color:var(--muted);font-size:9px">${s.wins}W/${s.losses}L</span><span class="${wr>=60?'wr-g':wr>=45?'wr-m':'wr-b'}">${wr}%</span></div>`;
   }).join('');
 }
 
 async function fetchLearningLog() {
+  const c = document.getElementById('learning-container');
+  if (!c) return; // panel removed from UI
   const log=await fetch('/api/learning-log').then(r=>r.json()).catch(()=>[]);
-  const c=document.getElementById('learning-container');
   if(!log.length){c.innerHTML='<div class="empty" style="padding:8px">First cycle runs after 20 outcomes</div>';return;}
   c.innerHTML=log.slice(0,8).map(e=>{
     let changes=[];
@@ -2295,6 +2220,7 @@ async function fetchLearningLog() {
 }
 
 async function fetchRegime() {
+  if (!document.getElementById('regime-container')) return; // panel removed
   const regime = await fetch('/api/claude/regime').then(r=>r.json()).catch(()=>null);
   if (!regime || regime.regime === 'UNKNOWN') return;
   renderRegime(regime);
@@ -2330,6 +2256,7 @@ async function fetchMarketStatus() {
 function toggleWatchPanel() {
   const panel = document.getElementById('watch-panel');
   const toggle = document.getElementById('watch-toggle');
+  if (!panel || !toggle) return; // panel removed
   const hidden = panel.style.display === 'none';
   panel.style.display = hidden ? 'block' : 'none';
   toggle.textContent = hidden ? '▲ hide' : '▼ show';
@@ -2641,12 +2568,8 @@ function switchMainTab(tab) {
   if (mtab) mtab.classList.add('active');
   const pane = document.getElementById('pane-' + tab);
   if (pane) pane.classList.add('active');
-  if (tab === 'forex') renderForexSignals();
-  if (tab === 'global') renderGlobalSignals();
   if (tab === 'intel') { loadIntel(); fetchAndRenderMacroContext(); }
   if (tab === 'bias') renderBiasTab();
-  if (tab === 'stats') renderStatsTab();
-  if (tab === 'backtest') populateBtSymbols();
   if (tab === 'settings') loadSettings();
   if (tab === 'abc') { renderAbcSignals(); fetchAbcStats(); fetchPrimedSymbols(); }
   if (tab === 'stocks') {
