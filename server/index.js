@@ -2762,7 +2762,52 @@ app.get('/api/rate-status', (req, res) => {
 
 // ── Market intel API ──────────────────────────────────────────────────────────
 app.get('/api/market-intel', (req, res) => {
-  res.json(db.getActiveIntel());
+  // Merge market_intel rows AND active mercato_context rows into one feed so
+  // the Intel tab shows both ad-hoc injections and the daily macro refresh.
+  // Mercato rows are shaped to match market_intel's expected fields, with an
+  // added `source: "mercato"` flag so the dashboard (if it wants) can
+  // differentiate. Defaults are safe — a frontend treating these as plain
+  // intel rows will render them correctly.
+  const intelRows = db.getActiveIntel() || [];
+
+  let mercatoRows = [];
+  try {
+    const mercatoActive = db.getAllActiveMercatoContexts() || [];
+    mercatoRows = mercatoActive.map(m => {
+      const resLevels = Array.isArray(m.levels_res) ? m.levels_res : [];
+      const supLevels = Array.isArray(m.levels_sup) ? m.levels_sup : [];
+      const allLevels = [
+        ...resLevels.map(v => ({ price: v, type: 'resistance' })),
+        ...supLevels.map(v => ({ price: v, type: 'support' })),
+        ...(m.bull_inv != null ? [{ price: m.bull_inv, type: 'bull_invalidation' }] : []),
+        ...(m.bear_inv != null ? [{ price: m.bear_inv, type: 'bear_invalidation' }] : []),
+        ...(m.catalyst != null ? [{ price: m.catalyst, type: 'catalyst' }] : []),
+      ];
+      const catalystTxt = m.catalyst_note ? ` | catalyst: ${m.catalyst_note}` : '';
+      const notesTxt = m.notes ? ` | ${m.notes}` : '';
+      const content = `Daily macro: ${m.bias}${m.regime ? '/' + m.regime : ''}${catalystTxt}${notesTxt}`;
+      return {
+        id: `m${m.id}`,                   // string prefix to avoid collision with intel integer ids
+        content,
+        summary: `${m.bias}${m.regime ? ' · ' + m.regime : ''}`,
+        symbol: m.symbol,
+        bias: m.bias,
+        affected_symbols: JSON.stringify([m.symbol]),
+        key_levels: JSON.stringify(allLevels),
+        time_horizon: 'SWING',
+        level_types: null,
+        expires_at: m.expires_at,
+        ts: m.created_at,
+        source: 'mercato',
+      };
+    });
+  } catch(e) {
+    console.error('[Intel] Mercato merge error:', e?.message);
+  }
+
+  // Sort combined by ts DESC (newest first)
+  const merged = [...intelRows, ...mercatoRows].sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  res.json(merged);
 });
 
 app.post('/api/market-intel', async (req, res) => {
