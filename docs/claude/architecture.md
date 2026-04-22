@@ -155,8 +155,8 @@ Pushed to `TELEGRAM_SWING_BOT_TOKEN` channel when all met:
 | POST | /api/signal-force-close | Force close ACTIVE signal at current price |
 | POST | /api/signal-ignore | Mark signal as not taken (IGNORED) |
 | POST | /api/trade-feedback | System analysis (no API call) |
-| GET/POST | /api/market-intel | Active intel items / inject intel |
-| DELETE | /api/market-intel/:id | Remove intel item |
+| GET/POST | /api/market-intel | `GET` returns merged feed: market_intel rows + `macro_context` (from /api/macro-inject) + `mercato_context` (from /api/mercato), all shaped with `source:'macro'\|'mercato'\|undefined` and `id:'macro-{sym}'\|'mercato-{n}'` prefixes to avoid collision with integer intel ids. `POST` injects ad-hoc intel into `market_intel` (unchanged). |
+| DELETE | /api/market-intel/:id | Remove intel item (only targets integer ids in `market_intel`; string-prefixed macro/mercato rows have their own delete endpoints) |
 | GET | /api/dxy-status | Latest DXY reference data |
 | GET | /api/macro-context | All macro sentiment data |
 | GET | /api/macro-debug | DB vs in-memory macro state |
@@ -212,7 +212,7 @@ Pushed to `TELEGRAM_SWING_BOT_TOKEN` channel when all met:
 - `atlas_watchlist.pine` — main spot board emitter → `/webhook/pine`
 - `atlas_abc_live.pine` — ABC swing emitter → `/webhook/pine-abc`
 - `atlas_daily_bias.pine` — daily bias indicator → `/webhook/pine-daily-bias`
-- `atlas_pullback.pine` **(added 20260421, priority-symbol replacement for atlas_abc_live, hardcoded 1h)** — trend-pullback-continuation: price in trend + pullback to 4H EMA20 + prior excursion proof + strict rejection candle at bar t + alert at close of t+1. Server-side webhook routing for the pullback payload is pending (see scorer.md roadmap).
+- `atlas_pullback.pine` **(added 20260421, priority-symbol replacement for atlas_abc_live, hardcoded 1h)** — trend-pullback-continuation: price in trend + pullback to 4H EMA20 + prior excursion proof + strict rejection candle at bar t + alert at close of t+1. **Current routing (20260422):** Pine emits ABC-shaped JSON (shim) to the existing `/webhook/pine-abc` endpoint. Grade 2 filters (S/R/V/C) map to class A/B/C via the shim table documented in the Pine file header. A dedicated `/webhook/pine-pullback` endpoint + `pullbackProcessor.js` is a future refactor, not shipping today.
 
 ## FXSSI history collector
 

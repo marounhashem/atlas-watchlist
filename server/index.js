@@ -2762,14 +2762,54 @@ app.get('/api/rate-status', (req, res) => {
 
 // ── Market intel API ──────────────────────────────────────────────────────────
 app.get('/api/market-intel', (req, res) => {
-  // Merge market_intel rows AND active mercato_context rows into one feed so
-  // the Intel tab shows both ad-hoc injections and the daily macro refresh.
-  // Mercato rows are shaped to match market_intel's expected fields, with an
-  // added `source: "mercato"` flag so the dashboard (if it wants) can
-  // differentiate. Defaults are safe — a frontend treating these as plain
-  // intel rows will render them correctly.
+  // Merge three sources into the Intel feed so the dashboard tab shows
+  // everything the user might care about in one place:
+  //   - market_intel — ad-hoc injections (original feed)
+  //   - macro_context — daily per-symbol sentiment/strength refresh (from
+  //     /api/macro-inject). This is the one the daily refresh writes to.
+  //   - mercato_context — Silvia-style structured analysis with price levels
+  //     (from /api/mercato). Present only when the HTML macro tool pushes.
+  //
+  // Macro + mercato rows are shaped to match market_intel schema with a
+  // `source` field ('macro' / 'mercato') so the frontend can differentiate
+  // or color-code if it wants. Ids are string-prefixed to avoid collision
+  // with market_intel integer ids; delete operations on macro/mercato rows
+  // from this endpoint are no-ops (they have their own delete endpoints).
   const intelRows = db.getActiveIntel() || [];
 
+  // --- macro_context rows ---
+  let macroRows = [];
+  try {
+    const macroMap = getMacroContext() || {};
+    const macroEntries = Object.entries(macroMap);
+    macroRows = macroEntries.map(([symbol, m]) => {
+      const risksTxt = Array.isArray(m.key_risks) && m.key_risks.length
+        ? ` | risks: ${m.key_risks.join('; ')}`
+        : '';
+      const dir = m.supports_long ? 'LONG'
+                : m.supports_short ? 'SHORT'
+                : 'NEUTRAL';
+      const content = `${m.sentiment} (strength ${m.strength}/10) — ${m.summary || ''}${risksTxt}`;
+      return {
+        id: `macro-${symbol}`,
+        content,
+        summary: `${m.sentiment} · ${m.strength}/10`,
+        symbol,
+        bias: dir,
+        affected_symbols: JSON.stringify([symbol]),
+        key_levels: '[]',
+        time_horizon: 'SWING',
+        level_types: null,
+        expires_at: (m.ts || Date.now()) + 12 * 3600 * 1000,  // 12h TTL per scorer 20260415.1
+        ts: m.ts || Date.now(),
+        source: 'macro',
+      };
+    });
+  } catch(e) {
+    console.error('[Intel] macro_context merge error:', e?.message);
+  }
+
+  // --- mercato_context rows ---
   let mercatoRows = [];
   try {
     const mercatoActive = db.getAllActiveMercatoContexts() || [];
@@ -2785,9 +2825,9 @@ app.get('/api/market-intel', (req, res) => {
       ];
       const catalystTxt = m.catalyst_note ? ` | catalyst: ${m.catalyst_note}` : '';
       const notesTxt = m.notes ? ` | ${m.notes}` : '';
-      const content = `Daily macro: ${m.bias}${m.regime ? '/' + m.regime : ''}${catalystTxt}${notesTxt}`;
+      const content = `Daily mercato: ${m.bias}${m.regime ? '/' + m.regime : ''}${catalystTxt}${notesTxt}`;
       return {
-        id: `m${m.id}`,                   // string prefix to avoid collision with intel integer ids
+        id: `mercato-${m.id}`,
         content,
         summary: `${m.bias}${m.regime ? ' · ' + m.regime : ''}`,
         symbol: m.symbol,
@@ -2802,11 +2842,12 @@ app.get('/api/market-intel', (req, res) => {
       };
     });
   } catch(e) {
-    console.error('[Intel] Mercato merge error:', e?.message);
+    console.error('[Intel] mercato_context merge error:', e?.message);
   }
 
-  // Sort combined by ts DESC (newest first)
-  const merged = [...intelRows, ...mercatoRows].sort((a, b) => (b.ts || 0) - (a.ts || 0));
+  // Combined, sorted newest first
+  const merged = [...intelRows, ...macroRows, ...mercatoRows]
+    .sort((a, b) => (b.ts || 0) - (a.ts || 0));
   res.json(merged);
 });
 

@@ -2,7 +2,7 @@
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260416.1'`
+`SCORER_VERSION = '20260421.1'`
 
 Changes since 20260401.15:
 - **20260421.1** — ABC noOrderBook one-class demotion (commit 0453abe). Previously any class on a noOrderBook symbol (UK100, US500, DE40, J225, HK50, CN50, COPPER, PLATINUM) was routed to `class_c_signals` as OBSERVE-only — blunt and lost strong A/B setups. Now: **A → B** (written to `abc_signals`, still Telegram swing), **B → C** (class_c OBSERVE), **C → C**. Preserves structural conviction when only FXSSI crowd data is unavailable. Logged to `abc_skips` with `gate='NOORDERBOOK_DEMOTE'`.

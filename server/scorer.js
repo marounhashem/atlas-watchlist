@@ -154,7 +154,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260416.1'; // Structure gate guard for old Pine + ABC burst/stale fixes
+const SCORER_VERSION = '20260421.1'; // ABC noOrderBook one-class demotion (A->B, B->C) per commit 0453abe
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
