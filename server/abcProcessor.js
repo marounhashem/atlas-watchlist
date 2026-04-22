@@ -3,7 +3,7 @@
 // ── ABC Processor — moved from index.js ─────────────────────────────────────
 // Handles Pine ABC webhook signals, daily bias ingestion, and Class C routing.
 
-const ABC_VERSION = '20260416.2';
+const ABC_VERSION = '20260423.1';  // noOrderBook one-class demotion (A->B, B->C) per commit 0453abe; aligned with SCORER_VERSION cadence
 
 const { runAbcGates } = require('./abcGates');
 const { buildAbcScore, buildAbcBreakdown, buildAbcReasoning } = require('./abcReasoning');

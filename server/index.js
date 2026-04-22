@@ -1331,8 +1331,63 @@ app.get('/api/market-status', (req, res) => {
   res.json(getMarketStatus());
 });
 
+// ── /api/agent rate limit + origin defense ──────────────────────────────────
+// The agent endpoint forwards to Anthropic's API using the server's ANTHROPIC_API_KEY.
+// It's called from the browser (client/index.html) so WEBHOOK_SECRET won't work
+// (would leak the secret to client JS). Two-layer defense instead:
+//   1. Origin/Referer match — blocks cross-origin abuse from malicious sites
+//      (the most realistic attack vector — browsers always send Origin on
+//      cross-origin fetch, so this is a strong filter).
+//   2. Per-IP rate limit (20 req / 5 min) — blocks scripted attacks that
+//      forge/omit Origin headers. Normal user session is <10 req, so the
+//      cap is comfortable for legit use but tight for abuse.
+// Both together: a drive-by bot overnight is bounded by the rate limit;
+// a malicious site loading our URL from the user's browser is blocked by
+// the origin check.
+const _agentCalls = new Map();  // ip -> [ts, ts, ...]
+const AGENT_WINDOW_MS = 5 * 60 * 1000;
+const AGENT_MAX_PER_WINDOW = 20;
+const AGENT_ALLOWED_ORIGINS = [
+  'https://atlas-watchlist-production.up.railway.app',
+  'http://localhost:3000',
+  'http://localhost:3001',
+];
+
+function checkAgentAuth(req) {
+  // Origin/Referer must be present AND match. No-origin (curl/bot) rejected.
+  const origin = req.get('Origin') || '';
+  const referer = req.get('Referer') || '';
+  const src = origin || referer;
+  if (!src) return { ok: false, reason: 'missing origin', code: 403 };
+  const allowed = AGENT_ALLOWED_ORIGINS.some(a => src.startsWith(a));
+  if (!allowed) return { ok: false, reason: 'bad origin', code: 403 };
+
+  // Per-IP rate limit with rolling window
+  const ip = req.ip || req.connection?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const recent = (_agentCalls.get(ip) || []).filter(t => now - t < AGENT_WINDOW_MS);
+  if (recent.length >= AGENT_MAX_PER_WINDOW) {
+    return { ok: false, reason: 'rate limit', code: 429 };
+  }
+  recent.push(now);
+  _agentCalls.set(ip, recent);
+
+  // Opportunistic cleanup so the Map doesn't grow unbounded
+  if (_agentCalls.size > 500) {
+    for (const [k, v] of _agentCalls.entries()) {
+      if (v.every(t => now - t > AGENT_WINDOW_MS)) _agentCalls.delete(k);
+    }
+  }
+  return { ok: true };
+}
+
 // Agent endpoint — runs Research, Predict, or Risk agent for a signal
 app.post('/api/agent', async (req, res) => {
+  const auth = checkAgentAuth(req);
+  if (!auth.ok) {
+    console.log(`[Agent] REJECTED (${auth.reason}) from ${req.ip} origin=${req.get('Origin') || req.get('Referer') || 'none'}`);
+    return res.status(auth.code).json({ error: auth.reason });
+  }
   const { type, prompt, symbol, accountSize } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
 
@@ -3759,6 +3814,7 @@ cron.schedule('0 5 * * *', async () => {
 
 // Economic calendar — poll every 5 minutes for new events + detect fired events
 cron.schedule('*/5 * * * *', async () => {
+  if (!dbReady) return;  // race-guard: runCalendarCheck writes to DB; DB init is async in listen callback
   try { await runCalendarCheck(broadcast); }
   catch(e) { console.error('[Cron] Calendar error:', e.message); }
 });
