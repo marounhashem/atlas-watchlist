@@ -15,13 +15,74 @@
 
 const express = require('express');
 const { runScan } = require('../stockScanner');
+const { notify } = require('../stockScanner/notifier');
 const { sendSwingMessage } = require('../telegram');
+
+// ── Watchdog state ──────────────────────────────────────────────────────────
+// The 16:00 Asia/Dubai cron has silently dropped ticks on occasion (2026-04-22
+// is a confirmed case — server logs show the startup registration but no
+// "Scheduled scan triggered" line at 12:00 UTC). Root cause is either a
+// Railway container restart aligned to the scheduled minute or node-cron
+// dropping a tick under load. Either way, we don't want the Stocks tab to
+// sit at "No picks today" waiting for a cron that never fires.
+//
+// Strategy: on every GET /api/stocks/watchlist/today, if it's past scan time
+// on a weekday (Dubai) AND no scan exists for today, kick off runScan
+// fire-and-forget. The UI polls every 120s, so the next refresh picks it up.
+//
+// Guards:
+//   - _watchdogInFlight prevents concurrent requests from double-triggering
+//     a scan that hasn't yet persisted.
+//   - The scheduled cron itself still runs as normal; watchdog is a backup.
+//   - Checking scan presence in the DB (not just the flag) means after a
+//     server restart the watchdog still works — state doesn't need to survive.
+let _watchdogInFlight = false;
+
+function dubaiNowParts() {
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Dubai',
+    weekday: 'short',
+    hour: '2-digit',
+    hour12: false,
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(new Date()).map(p => [p.type, p.value]));
+  return {
+    weekday: parts.weekday,                       // 'Mon'..'Sun'
+    hour: parseInt(parts.hour, 10),               // 0..23
+  };
+}
+
+function isPastScanTimeDubaiWeekday() {
+  const { weekday, hour } = dubaiNowParts();
+  const isWeekday = ['Mon','Tue','Wed','Thu','Fri'].includes(weekday);
+  // Cron fires at 16:00 Dubai. Give it 5 min grace before the watchdog trips.
+  return isWeekday && hour >= 16;
+}
 
 module.exports = function stocksRoutes(db) {
   const router = express.Router();
   router.use(express.json());
 
   // -------------------- watchlist reads --------------------
+
+  function runWatchdogScan() {
+    if (_watchdogInFlight) return;
+    _watchdogInFlight = true;
+    console.log('[scanner][watchdog] Cron missed 16:00 scan today — kicking off fallback');
+    runScan({ db })
+      .then(async (result) => {
+        console.log(`[scanner][watchdog] Fallback scan complete: ${result.watchlist.length} picks`);
+        try { await notify(result); } catch (e) {
+          console.log(`[scanner][watchdog] Notify failed: ${e.message}`);
+        }
+      })
+      .catch((err) => {
+        console.error('[scanner][watchdog] Fallback scan FAILED:', err);
+      })
+      .finally(() => {
+        _watchdogInFlight = false;
+      });
+  }
 
   router.get('/watchlist/today', (req, res) => {
     const latestScan = db.prepare(`
@@ -32,7 +93,22 @@ module.exports = function stocksRoutes(db) {
     `).get();
 
     if (!latestScan) {
-      return res.json({ scan: null, picks: [], message: 'No scan run yet today' });
+      // Self-heal: fire a scan if the cron missed today's window. Response
+      // returns current empty state immediately; the scan runs async and
+      // the next UI refresh (120s interval) picks it up.
+      if (isPastScanTimeDubaiWeekday() && !_watchdogInFlight) {
+        runWatchdogScan();
+        return res.json({
+          scan: null,
+          picks: [],
+          message: 'Cron missed 16:00 scan — running fallback now (refresh in 60s)',
+          watchdog: 'started',
+        });
+      }
+      const reason = _watchdogInFlight
+        ? 'Fallback scan in progress (refresh in 30s)'
+        : 'No scan run yet today';
+      return res.json({ scan: null, picks: [], message: reason, watchdog: _watchdogInFlight ? 'running' : 'idle' });
     }
     const picks = db.prepare(`
       SELECT * FROM stock_watchlist WHERE scan_id = ? ORDER BY rank ASC
