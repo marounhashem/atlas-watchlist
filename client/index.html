@@ -886,6 +886,7 @@
     <div class="mtab" id="mtab-backtest" onclick="switchMainTab('backtest')">🔬 BACKTEST</div>
     <div class="mtab" id="mtab-intel" onclick="switchMainTab('intel')" style="color:var(--amber,var(--watch))">📡 INTEL</div>
     <div class="mtab" id="mtab-abc" onclick="switchMainTab('abc')" style="color:var(--teal)">⭐ ABC</div>
+    <div class="mtab" id="mtab-stocks" onclick="switchMainTab('stocks')">📊 STOCKS</div>
   </div>
 
   <!-- Signals pane -->
@@ -1034,6 +1035,10 @@
       </div>
       <div id="macro-list"></div>
     </div>
+  </div>
+
+  <div class="main-pane" id="pane-stocks">
+    <iframe id="stocks-iframe" src="about:blank" style="width:100%;height:calc(100vh - 120px);border:0;display:block;background:var(--bg);"></iframe>
   </div>
 
   <div class="main-pane" id="pane-settings">
@@ -2644,6 +2649,10 @@ function switchMainTab(tab) {
   if (tab === 'backtest') populateBtSymbols();
   if (tab === 'settings') loadSettings();
   if (tab === 'abc') { renderAbcSignals(); fetchAbcStats(); fetchPrimedSymbols(); }
+  if (tab === 'stocks') {
+    const f = document.getElementById('stocks-iframe');
+    if (f && (!f.src || f.src.endsWith('about:blank'))) f.src = '/stocks.html';
+  }
 }
 
 // ── Forex data ─────────────────────────────────────────────────────────────
