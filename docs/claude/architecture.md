@@ -14,6 +14,9 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 ## Dashboard UI
 
 - **Fonts:** Space Grotesk (body) + JetBrains Mono (monospace values)
+- **Top-level tabs (in order):** SPOT TRADING · ⭐ SWING TRADING · 📊 STOCKS · 📊 BIAS · 💡 IDEA · 📡 INTEL. Settings panel via ⚙ button. **Forex, Global, Stats, Backtest tabs removed 20260422.** Stocks tab lazy-loads `/stocks.html` in an iframe on first click.
+- **Right sidebar panels:** Market hours · Win rate by symbol (combined spot + swing outcomes) · Signal heatmap. **Learning log, Market regime, Watch signals, Correlation risk, Webhook URL panels removed 20260422.**
+- **Win rate by symbol** aggregates `allSignals` (spot) AND `abcSignals` (swing/ABC) outcomes client-side in `fetchStats()`. Switching the source means prior spot-only counts no longer display standalone — combined totals start from whatever rows the two tables contain.
 - **Card layout:** 3-column body — levels (185px) | bars (130px) | reasoning (1fr)
 - **Left accent bar:** 4px `::before` pseudo-element (green=PROCEED, amber=WATCH, blue=ACTIVE)
 - **Level boxes:** vertical stack (Entry/Stop/Target), each row `grid: 40px 1fr`
@@ -26,7 +29,7 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 - **Position sizing:** moved to ANALYSE panel (not shown on card)
 - **Breakdown fallback:** when DB signals have null breakdown, bars show score-based estimates
 - **noOB detection:** hardcoded `NO_OB_SYMBOLS` set + reasoning text fallback
-- **Load order:** WebSocket connects first (before HTTP fetches), skeleton cards shown immediately, signals+past-signals fetched in parallel, secondary data (stats, learning log, market status, regime) deferred 500ms
+- **Load order:** WebSocket connects first (before HTTP fetches), skeleton cards shown immediately, signals+past-signals fetched in parallel, secondary data (stats, market status) deferred 500ms. Removed-tab render functions (`renderForexSignals`, `renderGlobalSignals`, `renderStatsTab`, `populateBtSymbols`) are left defined but never called; null guards added on `webhook-url` / `regime-container` / `learning-container` / `watch-panel` lookups so removed DOM never throws on reconnect.
 
 ## Database tables
 
@@ -49,6 +52,8 @@ ATLAS // WATCHLIST is an autonomous trading signal system. It ingests TradingVie
 | market_data_history | Snapshots of market_data per symbol per scoring run (14-day retention) |
 | fxssi_history | Historical FXSSI order book snapshots for backtesting (UNIQUE symbol+snapshot_time) |
 | mercato_context | Daily macro context (all 30 symbols, one active row per symbol) — bias, regime, levels, invalidation, catalyst |
+
+**Stocks module uses an isolated better-sqlite3 DB** at `data/stocks.sqlite` (separate from atlas's sql.js DB), with tables: `stock_scans` (one row per daily pre-market scan), `stock_watchlist` (picks per scan — symbol, direction, score, gap/rvol/atr, catalyst, levels JSON), `stock_outcome_log` (audit trail on outcome updates).
 
 ### Key columns on signals table
 
@@ -185,6 +190,29 @@ Pushed to `TELEGRAM_SWING_BOT_TOKEN` channel when all met:
 | GET | /api/fxssi-history/stop | Cancel in-progress collection |
 | GET | /api/fxssi-history/sample-full | Raw full_analysis JSON for 3 symbols |
 | POST | /api/backtest-analyze | Correlate trades with FXSSI history (6 alignment dimensions) |
+| GET | /api/stocks/watchlist/today | Today's latest pre-market scan + picks |
+| GET | /api/stocks/watchlist/:scanId | Historical scan by id |
+| GET | /api/stocks/scans | List recent scans (limit ≤ 100) |
+| POST | /api/stocks/scan | Manual scan trigger (auth via `x-scan-secret` if `STOCK_SCAN_SECRET` set) |
+| PUT | /api/stocks/pick/:id/outcome | Mark WIN / LOSS / SKIP (body: `{outcome, pnlPct?, mfePct?, maePct?, entryTaken?, notes?}`) |
+| GET | /api/stocks/stats | Aggregate win rate / profit factor / by-direction / by-score-band |
+| POST | /api/stocks/push-swing | Push today's watchlist to the swing Telegram channel |
+| POST | /api/macro-inject | Pre-analyzed macro context push (bypasses Anthropic — see scorer.md 20260415.1) |
+
+## Stocks pre-market scanner
+
+- Isolated module under `server/stockScanner/` + `server/routes/stocks.js`, separate better-sqlite3 DB at `data/stocks.sqlite` — atlas's sql.js DB untouched.
+- **Data:** yahoo-finance2 (prices) · finnhub + yahoo (news) · VADER (sentiment).
+- **Scan schedule:** 16:00 Asia/Dubai Mon–Fri (see deployment.md), produces one row in `stock_scans` + ranked picks in `stock_watchlist`.
+- **Notifier** (`server/stockScanner/notifier.js`) sends to the **spot** Telegram channel (`TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`) and optionally email. The scheduled notifier only targets spot — the swing channel receives picks only via the manual `POST /api/stocks/push-swing` endpoint, which reuses `sendSwingMessage()` from `server/telegram.js`.
+- **Dashboard surfacing:** `/stocks.html` is rendered standalone AND embedded as an iframe inside the main dashboard's 📊 STOCKS tab (lazy-loaded on first click).
+
+## Pine emitters (production)
+
+- `atlas_watchlist.pine` — main spot board emitter → `/webhook/pine`
+- `atlas_abc_live.pine` — ABC swing emitter → `/webhook/pine-abc`
+- `atlas_daily_bias.pine` — daily bias indicator → `/webhook/pine-daily-bias`
+- `atlas_pullback.pine` **(added 20260421, priority-symbol replacement for atlas_abc_live, hardcoded 1h)** — trend-pullback-continuation: price in trend + pullback to 4H EMA20 + prior excursion proof + strict rejection candle at bar t + alert at close of t+1. Server-side webhook routing for the pullback payload is pending (see scorer.md roadmap).
 
 ## FXSSI history collector
 

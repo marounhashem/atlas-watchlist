@@ -7,14 +7,18 @@
 | ANTHROPIC_API_KEY | Yes | Claude API for learning, macro, consensus |
 | FXSSI_TOKEN | Yes | FXSSI order book API |
 | FXSSI_USER_ID | No | FXSSI user ID (default 118460) |
-| TELEGRAM_BOT_TOKEN | No | Telegram Bot API token (spot channel) |
+| TELEGRAM_BOT_TOKEN | No | Telegram Bot API token (spot channel, also used by stocks notifier) |
 | TELEGRAM_CHAT_ID | No | Telegram chat ID for alerts |
-| TELEGRAM_SWING_BOT_TOKEN | No | Swing channel bot token |
+| TELEGRAM_SWING_BOT_TOKEN | No | Swing channel bot token (ABC swing + manual stocks push-swing) |
 | TELEGRAM_SWING_CHAT_ID | No | Swing channel chat ID |
 | RESEND_API_KEY | No | Resend email for health alerts |
 | ALERT_EMAIL | No | Health alert email |
 | WEBHOOK_SECRET | No | Body secret for webhook auth |
 | DB_PATH | No | SQLite file path (default: ./data/atlas.db) |
+| STOCK_SCAN_CRON | No | Pre-market scan cron (default `0 16 * * 1-5`) |
+| STOCK_SCAN_TZ | No | Pre-market scan timezone (default `Asia/Dubai`) |
+| STOCK_SCAN_SECRET | No | If set, `POST /api/stocks/scan` requires matching `x-scan-secret` header |
+| SMTP_HOST / SMTP_USER / SMTP_PASS / NOTIFY_EMAIL_TO | No | Optional email channel for stocks notifier |
 
 ## Startup sequence
 
@@ -47,3 +51,4 @@
 | Friday 20:45 | COT weekly fetch (CFTC) |
 | 23:30 | Nightly FXSSI history collection (recent, queue-based, non-blocking) |
 | Every 30min | Health check → email + Telegram if degraded |
+| 16:00 Asia/Dubai Mon–Fri | Stocks pre-market scan (`STOCK_SCAN_CRON`/`STOCK_SCAN_TZ`) → `stock_scans` + `stock_watchlist` + spot-channel Telegram notifier. Swing channel only via manual `POST /api/stocks/push-swing`. |
