@@ -45,9 +45,19 @@ The TL;DR flag for `8df19ad` said "ABC_VERSION bump hides pre-bump ABC signals f
 2. **But `getOpenAbcSignals()` at `db.js:1490` was NOT version-filtered** — so 11+ stuck old-version Class C rows still counted against the `BURST` gate (`abcProcessor.js:96`, ≥5 = block non-A) and `ACTIVE_EXISTS` dedup (`abcProcessor.js:337`, same symbol+direction)
 3. Result: Pine alerts arrived, got silently rejected, logged as BURST/ACTIVE_EXISTS in `abc_skips`. User saw dead board.
 
-**Fixed in `cca7d8b`:** `getOpenAbcSignals(version)` now takes optional version filter. Burst + ACTIVE_EXISTS callers pass `ABC_VERSION`. Outcome tracking (`abcManagement.js`) intentionally left version-less so real ACTIVE trades from prior versions keep getting tracked to WIN/LOSS. Immediate unblock was a one-off `POST /api/abc-archive-old` at ~17:30 UAE.
+**End state (both commits on `main`, Railway auto-deploys ~90s):**
 
-**Lesson for future version bumps:** a version filter must be applied *consistently* across all read paths that touch the table. Check every caller of `db.getAbcSignals` / `db.getOpenAbcSignals` before shipping a bump. Or change the write path so old signals auto-ARCHIVE — but beware the DB-restore edge case that killed `expireOldVersionSignals`.
+- **Step A — immediate unblock (one-off, 17:30 UAE):** `POST /api/abc-archive-old` flipped 11+ old-version OPEN/ACTIVE rows to `outcome='ARCHIVED'`. That pulled them out of `getOpenAbcSignals()` right away and freed new Pine alerts to land.
+- **Step B — `cca7d8b`:** `getOpenAbcSignals(version)` now takes an optional version param. Burst gate + ACTIVE_EXISTS callers pass `ABC_VERSION`. Outcome tracking (`abcManagement.js`) intentionally left version-less so real ACTIVE trades written under any prior version keep getting tracked through to WIN/LOSS.
+- **Step C — `6a0ae9b`:** this handover updated with the post-mortem + the earlier wrong claim about `expireOldVersionSignals` (see Correction #2).
+
+**How to verify after Railway redeploy:** post a Class B or C Pine alert on any symbol. It should either accept, or reject for a *legitimate* gate reason (crowd, RR, cooldown) — NOT silently hit `BURST` or `ACTIVE_EXISTS` against invisible old-version rows.
+
+**Lessons — worth reading before the next version bump:**
+
+1. **A version filter must be applied consistently across every SELECT on the table.** My earlier audit hunted for "version filter inconsistent across analytics panels" and missed it because the real failure lived in *gate/block logic* (`getOpenAbcSignals()` feeding burst + dedup). Different surface, same principle. **When a version column is added to a table, every `SELECT` on that table has to be audited for whether it should filter by version or not** — not just the endpoints that render UI.
+2. **Old-row auto-ARCHIVE on version bump would prevent this class of bug at the write path** — but `expireOldVersionSignals` was already killed by the DB-restore edge case (Correction #2), so the simple fix isn't actually simple. Either write-path gating needs to be restore-aware, or every caller of read-path helpers has to be version-aware on its own.
+3. **Process:** `superpowers:systematic-debugging` (invoked by Claude Code under `/remote-control`) found this in a single pass — evidence gathering → hypothesis → verification → proposal. My own earlier audit jumped straight to "obvious unauthenticated endpoints" without that discipline and that's why the ABC silent-rejection path was never looked at. For the next vague-symptom report ("X stopped working after the update"), lead with the systematic-debugging skill rather than eyeballing git log.
 
 ### Deferred to a dedicated session (feature work, not bugs)
 
@@ -70,7 +80,7 @@ The TL;DR flag for `8df19ad` said "ABC_VERSION bump hides pre-bump ABC signals f
 | 1 | `c28f34f` | **(abandoned approach)** Merged `mercato_context` into `/api/market-intel` to populate Intel tab | Superseded by #2, then #7 |
 | 2 | `75cf208` | Also merged `macro_context` + bumped `SCORER_VERSION` 20260416.1 → 20260421.1 | **SCORER bump expired OPEN signals on deploy** — that was intentional |
 | 3 | `cbd1d36` | Stocks watchdog: self-heal 16:00 Dubai cron misses | New code path in `routes/stocks.js` |
-| 4 | `8df19ad` | `/api/agent` auth + `ABC_VERSION` 20260416.2 → 20260423.1 + calendar cron `dbReady` guard | **ABC_VERSION bump hides pre-bump ABC signals from /api/abc-signals** |
+| 4 | `8df19ad` | `/api/agent` auth + `ABC_VERSION` 20260416.2 → 20260423.1 + calendar cron `dbReady` guard | **Caused the 4pm UAE ABC outage — see Correction #3. Fixed by `cca7d8b` + one-off `POST /api/abc-archive-old`.** |
 | 5 | `06beebc` | Intel card shows "fetched X ago" for macro/mercato rows (was misread as age) | Frontend `fmtFetchedAge` helper added |
 | 6 | `bf3ca9e` | **Killed zombie intel seed** that re-injected two hardcoded strings on every restart | Intel table now genuinely starts empty on fresh DB |
 | 7 | `a068bae` | Reverted macro merge from `/api/market-intel` (was double-rendering with dedicated Macro Context section) | Mercato merge KEPT. Macro now served only via `/api/macro-context`. |
@@ -160,7 +170,7 @@ The TL;DR flag for `8df19ad` said "ABC_VERSION bump hides pre-bump ABC signals f
 
 ## Things that might trip you up
 
-1. **`/api/abc-signals` returns fewer rows than you expect.** This is because of the ABC_VERSION bump in `8df19ad`. The filter at `server/index.js:597-598` + `:1086` + `:1096` only returns rows where `abc_version === ABC_VERSION`. Pre-20260423.1 ABC rows are in DB but hidden. To see them, call `POST /api/abc-archive-old` (archives old versions), or lower the filter temporarily.
+1. **`/api/abc-signals` returns fewer rows than you expect.** The endpoint filters by current `ABC_VERSION` (`server/index.js:597-598` + `:1086` + `:1096`). Pre-`20260423.1` rows are in DB but hidden from the default view. Most were flipped to `outcome='ARCHIVED'` by the one-off `POST /api/abc-archive-old` that ran at ~17:30 UAE on 2026-04-23 to unblock the outage — so they're hidden from the dashboard view now for two reasons (version filter + archived outcome), which is fine. Call `/api/abc-signals?version=all` to see everything. **Read Correction #3 above before bumping `ABC_VERSION` again** — the burst/ACTIVE_EXISTS callers now pass the version, but any new call site that reads `abc_signals` needs the same audit.
 
 2. **The 30 macro rows currently in DB are from a manual refresh around 21:15 UTC on 2026-04-23.** They'll expire at 12h TTL (`*/15 * * * *` cron deletes `macro_context` rows older than 12h per `server/index.js:4175-4189`). After that, `/api/macro-refresh` must be called manually. The `0 */6 * * *` watchdog at `:3748` only auto-refreshes if age is >48h, so there's a 12-48h gap where macro can be silently empty. P1 item not shipped yet.
 
