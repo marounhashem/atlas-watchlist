@@ -372,7 +372,7 @@ app.get('/api/signals', (req, res) => {
 });
 
 // EMERGENCY: reset all signal cycles back to 0 so they reappear on main board
-app.post('/api/reset-cycles', (req, res) => {
+app.post('/api/reset-cycles', adminGate, (req, res) => {
   try {
     db.run('UPDATE signals SET cycle=0, retired_at=NULL');
     db.persist();
@@ -1381,6 +1381,48 @@ function checkAgentAuth(req) {
   return { ok: true };
 }
 
+// ── adminGate — shared auth middleware for any admin/costly endpoint ──────
+// Accepts EITHER:
+//   - WEBHOOK_SECRET via x-webhook-secret header, ?secret= query, or body.secret
+//     (for curl/scripts/browser-extensions; the same secret used by Pine webhook)
+//   - Allowed browser Origin/Referer (for user's dashboard UI)
+// Rejects anything else with 403. Used to protect:
+//   - DB-destructive endpoints (reset-*, db-recover, db-verify)
+//   - Paid-API-calling endpoints (macro-*, claude/*, agent, stocks-push-swing)
+//   - External-scraper-triggering endpoints (cot-force, calendar-force, rate-force,
+//     fxssi-fetch/force/test)
+// This matches the pattern that was already in place for /webhook/alert and
+// /api/stocks/scan — now uniformly applied.
+function checkAdminAuth(req) {
+  // 1. Secret match (for curl/scripts/extensions)
+  const secret = process.env.WEBHOOK_SECRET;
+  const provided = req.get('x-webhook-secret') || req.body?.secret || req.query?.secret;
+  if (secret && provided && provided === secret) return { ok: true, via: 'secret' };
+
+  // 2. Origin match (for browser UI) — same allowlist as checkAgentAuth
+  const origin = req.get('Origin') || '';
+  const referer = req.get('Referer') || '';
+  const src = origin || referer;
+  if (src && AGENT_ALLOWED_ORIGINS.some(a => src.startsWith(a))) {
+    return { ok: true, via: 'origin' };
+  }
+
+  return {
+    ok: false,
+    reason: !src ? 'missing origin/secret' : 'bad origin (and no secret)',
+    code: 403,
+  };
+}
+
+function adminGate(req, res, next) {
+  const auth = checkAdminAuth(req);
+  if (!auth.ok) {
+    console.log(`[Auth] ${req.method} ${req.path} REJECTED (${auth.reason}) from ${req.ip} origin=${req.get('Origin') || req.get('Referer') || 'none'}`);
+    return res.status(auth.code).json({ error: auth.reason });
+  }
+  next();
+}
+
 // Agent endpoint — runs Research, Predict, or Risk agent for a signal
 app.post('/api/agent', async (req, res) => {
   const auth = checkAgentAuth(req);
@@ -1430,7 +1472,7 @@ app.post('/api/agent', async (req, res) => {
 });
 
 // Manual FXSSI fetch trigger
-app.get('/api/fxssi-fetch', async (req, res) => {
+app.get('/api/fxssi-fetch', adminGate, async (req, res) => {
   try {
     process.env.FXSSI_FORCE_FETCH = '1';
     await runFXSSIScrape(broadcast);
@@ -1830,7 +1872,7 @@ app.get('/api/mercato', (req, res) => {
   }
 });
 
-app.post('/api/reset-abc', (req, res) => {
+app.post('/api/reset-abc', adminGate, (req, res) => {
   try {
     const db = require('./db');
     db.run('DELETE FROM abc_signals');
@@ -1845,7 +1887,7 @@ app.post('/api/reset-abc', (req, res) => {
   }
 });
 
-app.post('/api/reset-signals', (req, res) => {
+app.post('/api/reset-signals', adminGate, (req, res) => {
   try {
     const db = require('./db');
     db.run('DELETE FROM signals');
@@ -1858,7 +1900,7 @@ app.post('/api/reset-signals', (req, res) => {
   }
 });
 
-app.post('/api/reset-data', (req, res) => {
+app.post('/api/reset-data', adminGate, (req, res) => {
   try {
     const db = require('./db');
     db.run('DELETE FROM signals');
@@ -1873,7 +1915,7 @@ app.post('/api/reset-data', (req, res) => {
 
 // Full reset — wipes everything including weights, reseeds from config defaults
 // Use this when changing weight schema or starting completely fresh
-app.post('/api/reset-all', (req, res) => {
+app.post('/api/reset-all', adminGate, (req, res) => {
   try {
     const db = require('./db');
     const { SYMBOLS } = require('./config');
@@ -2002,7 +2044,7 @@ app.get('/api/extract', async (req, res) => {
 });
 
 // FXSSI force scrape — trigger immediately regardless of schedule
-app.get('/api/fxssi-force', async (req, res) => {
+app.get('/api/fxssi-force', adminGate, async (req, res) => {
   try {
     const { runFXSSIScrape } = require('./fxssiScraper');
     // Temporarily override shouldFetch
@@ -2043,19 +2085,19 @@ app.get('/api/claude/optimisations', (req, res) => {
   const fo = claudeLearner.getAllOptimisations; res.json(typeof fo === 'function' ? fo() : {});
 });
 
-app.post('/api/claude/optimise/:symbol', async (req, res) => {
+app.post('/api/claude/optimise/:symbol', adminGate, async (req, res) => {
   const symbol = req.params.symbol.toUpperCase();
   const result = await claudeLearner.optimiseEntryLevels(symbol);
   res.json(result || { error: 'Not enough data (need 5+ closed trades)' });
 });
 
-app.post('/api/claude/regime-now', async (req, res) => {
+app.post('/api/claude/regime-now', adminGate, async (req, res) => {
   const detectFn = claudeLearner.detectRegime; const regime = typeof detectFn === 'function' ? await detectFn() : null;
   res.json(regime || { error: 'Not enough data' });
 });
 
 // FXSSI direct test — call the API right now and return raw result
-app.get('/api/fxssi-test', async (req, res) => {
+app.get('/api/fxssi-test', adminGate, async (req, res) => {
   const token  = process.env.FXSSI_TOKEN;
   const userId = process.env.FXSSI_USER_ID || '118460';
   if (!token) return res.json({ error: 'No FXSSI_TOKEN set' });
@@ -2100,8 +2142,10 @@ function processFxssiRichWebhook(payload) {
   console.log(`[Webhook] FXSSI-rich ${result.symbol} processed`);
 }
 
-app.post('/webhook/fxssi-rich', (req, res) => {
-  // Fallback if HTTP interceptor misses this route
+app.post('/webhook/fxssi-rich', adminGate, (req, res) => {
+  // Fallback if HTTP interceptor misses this route.
+  // Gated by adminGate because this mutates market_data (feeds the scorer);
+  // anyone who could post here could inject fake crowd data and fire alerts.
   res.status(200).json({ ok: true });
   setImmediate(() => {
     try { processFxssiRichWebhook(req.body || {}); }
@@ -2420,7 +2464,7 @@ app.post('/api/macro-inject', (req, res) => {
 });
 
 // Macro single-symbol test — fetches GOLD only, persists to DB, returns result (1 API call)
-app.get('/api/macro-test', async (req, res) => {
+app.get('/api/macro-test', adminGate, async (req, res) => {
   try {
     const symbol = 'GOLD';
     const query = 'gold XAU price macro outlook DXY Fed rates today';
@@ -2497,8 +2541,8 @@ const macroRefreshHandler = async (req, res) => {
   res.json({ ok: true, message: 'Macro refresh started' });
   runMacroContextFetch(broadcast, 'macro_refresh').catch(e => console.error('[Macro] Manual refresh error:', e.message));
 };
-app.get('/api/macro-refresh', macroRefreshHandler);
-app.post('/api/macro-refresh', macroRefreshHandler);
+app.get('/api/macro-refresh', adminGate, macroRefreshHandler);
+app.post('/api/macro-refresh', adminGate, macroRefreshHandler);
 // macro-force: waits and returns result (for debugging)
 const macroForceHandler = async (req, res) => {
   try {
@@ -2509,8 +2553,8 @@ const macroForceHandler = async (req, res) => {
     res.json({ ok: false, error: e.message });
   }
 };
-app.get('/api/macro-force', macroForceHandler);
-app.post('/api/macro-force', macroForceHandler);
+app.get('/api/macro-force', adminGate, macroForceHandler);
+app.post('/api/macro-force', adminGate, macroForceHandler);
 
 // ── Morning brief builder ─────────────────────────────────────────────────────
 async function buildMorningBrief() {
@@ -2741,7 +2785,7 @@ app.get('/api/cot-status', (req, res) => {
 });
 
 // Force COT fetch — waits for completion and returns results with per-currency errors
-app.post('/api/cot-force', async (req, res) => {
+app.post('/api/cot-force', adminGate, async (req, res) => {
   try {
     const result = await runCOTFetch();
     const { getAllCOTData } = require('./db');
@@ -2752,7 +2796,7 @@ app.post('/api/cot-force', async (req, res) => {
     res.json({ ok: false, error: e.message });
   }
 });
-app.get('/api/cot-force', async (req, res) => {
+app.get('/api/cot-force', adminGate, async (req, res) => {
   try {
     const result = await runCOTFetch();
     const { getAllCOTData } = require('./db');
@@ -2764,7 +2808,7 @@ app.get('/api/cot-force', async (req, res) => {
 });
 
 // Raw CFTC API test — pass ?currency=GBP to test one, or omit for EUR+GOLD+OIL
-app.get('/api/cot-test', async (req, res) => {
+app.get('/api/cot-test', adminGate, async (req, res) => {
   const allCurrencies = getCOTCurrencies();
   const qCurrency = req.query.currency?.toUpperCase();
   let tests;
@@ -3054,7 +3098,7 @@ app.get('/api/calendar-debug', (req, res) => {
 });
 
 // DB recovery — restore from .bak file if signals were lost
-app.get('/api/db-recover', async (req, res) => {
+app.get('/api/db-recover', adminGate, async (req, res) => {
   try {
     const dbPath = process.env.DB_PATH || path.join(__dirname, '../data/atlas.db');
     const dataDir = path.dirname(dbPath);
@@ -3473,7 +3517,7 @@ app.get('/api/rate-test', async (req, res) => {
 });
 
 // Force rate scrape from Myfxbook
-app.get('/api/rate-force', async (req, res) => {
+app.get('/api/rate-force', adminGate, async (req, res) => {
   try {
     const result = await runRateFetch();
     res.json({ ok: true, ...result });
@@ -3516,7 +3560,7 @@ app.get('/api/calendar-status', (req, res) => {
   res.json({ totalEvents: events.length, highImpactCount: events.filter(e => e.impact === 'High').length, events, _debug: { now, nowISO: new Date(now).toISOString() } });
 });
 
-app.get('/api/calendar-force', async (req, res) => {
+app.get('/api/calendar-force', adminGate, async (req, res) => {
   try {
     const result = await runCalendarFetch();
     const events = getUpcomingHighImpactEvents(14);

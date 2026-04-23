@@ -144,7 +144,13 @@ module.exports = function stocksRoutes(db) {
   // POST /api/stocks/push-swing — fetch today's latest scan + picks and push
   // to the swing channel (TELEGRAM_SWING_BOT_TOKEN / TELEGRAM_SWING_CHAT_ID).
   // Manual one-shot — stocks notifier still targets the spot channel on scan.
+  // Gated by STOCK_SCAN_SECRET (same pattern as /scan below) to prevent
+  // anyone from spamming the swing Telegram channel.
   router.post('/push-swing', async (req, res) => {
+    const secret = process.env.STOCK_SCAN_SECRET;
+    if (secret && req.headers['x-scan-secret'] !== secret) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
     try {
       const latestScan = db.prepare(`
         SELECT * FROM stock_scans
