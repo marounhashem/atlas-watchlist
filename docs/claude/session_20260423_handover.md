@@ -25,6 +25,30 @@ After the primary session, Claude Code (`claude --dangerously-skip-permissions`)
 
 I wrote that `abcProcessor.js` had ~10 silent `catch(e){}` blocks swallowing errors on `broadcast()` calls. **That was wrong.** Claude Code checked the actual lines (102, 105, 170, 300, 330, 345, 471, 499, 514) and found those catches wrap `db.insertAbcSkip()` analytics inserts, NOT broadcast calls. The real broadcasts at lines 444/569 are unwrapped, and the outer `/webhook/pine-abc` handler at `server/index.js:70-71` already catches at the top level — so the exposure is defense-in-depth at most, not a real silent-swallow bug. P1 #3 downgraded to "nice to have, not urgent". If future-me does a pass here, log inside the analytics catches so we can see when skip-log inserts fail, but the alert-path itself is covered.
 
+### Correction #2: SCORER_VERSION bump does NOT auto-expire (my TL;DR table was wrong)
+
+The table above said `75cf208` "SCORER bump expired OPEN signals on deploy — that was intentional." **Not true.** `db.expireOldVersionSignals(currentVersion)` at `server/db.js:775` is actually DISABLED:
+```js
+function expireOldVersionSignals(currentVersion) {
+  // DISABLED — was expiring all signals after DB restores because restored
+  // signals have old scorer versions.
+  return 0;
+}
+```
+So the SCORER_VERSION bump did NOT clean up old signals. The cleanup has to be done manually (or through natural `expires_at` TTL). Kept in mind for next version-bump protocol.
+
+### Correction #3: ABC_VERSION bump caused a live outage (`cca7d8b` fix)
+
+The TL;DR flag for `8df19ad` said "ABC_VERSION bump hides pre-bump ABC signals from /api/abc-signals". That description was too narrow. The real impact (discovered ~4pm UAE when user reported "ABC not working"):
+
+1. Dashboard hid old-version rows (expected)
+2. **But `getOpenAbcSignals()` at `db.js:1490` was NOT version-filtered** — so 11+ stuck old-version Class C rows still counted against the `BURST` gate (`abcProcessor.js:96`, ≥5 = block non-A) and `ACTIVE_EXISTS` dedup (`abcProcessor.js:337`, same symbol+direction)
+3. Result: Pine alerts arrived, got silently rejected, logged as BURST/ACTIVE_EXISTS in `abc_skips`. User saw dead board.
+
+**Fixed in `cca7d8b`:** `getOpenAbcSignals(version)` now takes optional version filter. Burst + ACTIVE_EXISTS callers pass `ABC_VERSION`. Outcome tracking (`abcManagement.js`) intentionally left version-less so real ACTIVE trades from prior versions keep getting tracked to WIN/LOSS. Immediate unblock was a one-off `POST /api/abc-archive-old` at ~17:30 UAE.
+
+**Lesson for future version bumps:** a version filter must be applied *consistently* across all read paths that touch the table. Check every caller of `db.getAbcSignals` / `db.getOpenAbcSignals` before shipping a bump. Or change the write path so old signals auto-ARCHIVE — but beware the DB-restore edge case that killed `expireOldVersionSignals`.
+
 ### Deferred to a dedicated session (feature work, not bugs)
 
 - **P1 #2** — Pine version header constants across `atlas_abc_live.pine`, `atlas_watchlist.pine`, `atlas_daily_bias.pine`, `atlas_pullback.pine`. Meaningful work — touches TradingView-side + server-side version cross-check.
