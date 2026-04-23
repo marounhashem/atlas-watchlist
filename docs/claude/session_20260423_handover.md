@@ -3,7 +3,39 @@
 > **For the next Claude (or Claude Code) working in this repo.** If you're debugging something and see changes you don't recognize, read this first.
 
 Session window: 2026-04-22 afternoon Dubai → 2026-04-23 early AM Dubai.
-8 commits shipped. All on `main`, auto-deployed to Railway.
+**9 commits total** — 8 from the primary session + 1 second-pass via Claude Code (`2d5765a`).
+All on `main`, auto-deployed to Railway.
+
+---
+
+## Update: Second pass via Claude Code (commit `2d5765a`)
+
+After the primary session, Claude Code (`claude --dangerously-skip-permissions`) read this handover and did a second pass. What changed:
+
+### Shipped in `2d5765a`
+
+- **`adminGate` extended to 21 more endpoints → 42 total gated.** The first pass (`2d0afca`) covered the obvious ones; the second pass found DELETEs, db-prune, settings writes, calendar/rate mutations, lifecycle mutations, and a Telegram-spam trigger that were still exposed.
+- **`STOCK_SCORER_VERSION` format unified**: `'20260421.01'` → `'20260421.1'` (was P1 #1). All three version strings now use the same `YYYYMMDD.N` format.
+- **`global.atlasGetActiveIntel` corrupt-JSON default flipped** (was P1 #4). At `server/index.js:4304-4311`, a `JSON.parse` failure on `affected_symbols` used to default to `return true` (treat as global intel, returned for every symbol). Now defaults to `return false` + a warn log. Corrupt rows stop silently polluting the scorer context.
+
+### Intentionally NOT gated (legitimate exceptions)
+- `POST /api/macro-inject` and `POST /api/mercato` are called from the file:// macro tool per internal docs. Gating would break that workflow. Left open by design.
+
+### Correction to this handover doc's P1 #3 claim
+
+I wrote that `abcProcessor.js` had ~10 silent `catch(e){}` blocks swallowing errors on `broadcast()` calls. **That was wrong.** Claude Code checked the actual lines (102, 105, 170, 300, 330, 345, 471, 499, 514) and found those catches wrap `db.insertAbcSkip()` analytics inserts, NOT broadcast calls. The real broadcasts at lines 444/569 are unwrapped, and the outer `/webhook/pine-abc` handler at `server/index.js:70-71` already catches at the top level — so the exposure is defense-in-depth at most, not a real silent-swallow bug. P1 #3 downgraded to "nice to have, not urgent". If future-me does a pass here, log inside the analytics catches so we can see when skip-log inserts fail, but the alert-path itself is covered.
+
+### Deferred to a dedicated session (feature work, not bugs)
+
+- **P1 #2** — Pine version header constants across `atlas_abc_live.pine`, `atlas_watchlist.pine`, `atlas_daily_bias.pine`, `atlas_pullback.pine`. Meaningful work — touches TradingView-side + server-side version cross-check.
+- **P1 #5** — Macro staleness Telegram alert for the 12-48h silent-starvation gap. Needs a design decision on the alert channel (spot vs swing vs new admin channel) + quiet-hours logic so it doesn't ping overnight.
+- **P1 #6** — Mercato dedicated UI section. Mirror of the Macro Context section pattern but with price-level rendering (resistance/support levels in Silvia-style data).
+
+### Left alone (exploratory / not yet tracked)
+- `atlas_abc_logger.pine`, `atlas_abc_logger_strategy.pine`, `atlas_abc_sanity.pine` — untracked Pine scratch files
+- `failed_breakout_study/` — untracked Python research folder
+
+---
 
 ---
 
@@ -118,12 +150,14 @@ Session window: 2026-04-22 afternoon Dubai → 2026-04-23 early AM Dubai.
 
 ## P1 items NOT shipped yet (carry over)
 
-- **Version format inconsistency:** `STOCK_SCORER_VERSION = '20260421.01'` vs `SCORER_VERSION = '20260421.1'` vs `ABC_VERSION = '20260423.1'`. Cosmetic, but any string comparison will break. Unify format.
-- **Pine scripts have no version header constant.** `atlas_abc_live.pine`, `atlas_pullback.pine`, etc. carry no version string. If Pine logic changes on TradingView without bumping `ABC_VERSION` server-side, old Pine signals keep the new tag silently.
-- **Silent `catch(e){}` swallows in `abcProcessor.js`** at lines 102, 105, 170, 300, 330, 345, 471, 499, 514. These swallow errors on `broadcast()` calls that tell the UI an ABC signal just fired. If broadcast throws, the Pine alert happened and DB wrote it, but UI never refreshes.
-- **`global.atlasGetActiveIntel` at `server/index.js:4304-4311`** defaults corrupt JSON to "global intel" (returns true on parse catch). Flip to "skip" with logging.
-- **Macro staleness alert**: Telegram ping when `macroContext` is empty for >2h during market hours. Closes the 12-48h silent-starvation window.
-- **Mercato has no dedicated UI section.** It only surfaces in the intel list merge. Should eventually get its own section similar to Macro Context since the price-levels data is richer than generic intel.
+**Status after `2d5765a` second pass: P1 #1 and P1 #4 shipped, P1 #3 downgraded. Remaining:**
+
+- ~~P1 #1 Version format inconsistency~~ — **done in `2d5765a`** (STOCK_SCORER_VERSION now `.1` format).
+- **P1 #2 — Pine scripts have no version header constant.** `atlas_abc_live.pine`, `atlas_pullback.pine`, `atlas_watchlist.pine`, `atlas_daily_bias.pine` carry no version string. If Pine logic changes on TradingView without bumping `ABC_VERSION` server-side, old Pine signals keep the new tag silently. Needs coordinated change on TradingView charts.
+- ~~P1 #3 Silent catches in abcProcessor~~ — **downgraded to "nice to have"**. Original claim was wrong (see Second-pass correction above). Defense-in-depth only.
+- ~~P1 #4 `global.atlasGetActiveIntel` corrupt-JSON default~~ — **done in `2d5765a`** (flipped to `return false` + warn).
+- **P1 #5 — Macro staleness Telegram alert** for the 12-48h silent-starvation gap. Telegram ping when `macroContext` is empty for >2h during market hours. Needs design: which channel, quiet hours, dedupe.
+- **P1 #6 — Mercato dedicated UI section.** Mirror the Macro Context section pattern but render price-levels (resistance/support) for the Silvia-style data. Would let us drop the mercato merge from `/api/market-intel` and leave the intel list purely for user-injected rows.
 
 ---
 
