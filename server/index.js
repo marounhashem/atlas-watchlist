@@ -4340,22 +4340,12 @@ server.listen(PORT, () => {
         try { return JSON.parse(item.affected_symbols || '[]').includes(sym); } catch(e) { return true; }
       }).map(i => i.summary || i.content);
     };
-    // One-time intel seed if table is empty (restore after DB wipe)
-    try {
-      const intel = db.getActiveIntel();
-      if (intel.length === 0) {
-        console.log('[Startup] Intel table empty — seeding known context');
-        const seed = [
-          { content: 'Geopolitical tensions and elevated ISM inflation readings. Tariff war escalation risks. Bearish for risk assets, supportive for safe havens.', symbol: null, expiresInHours: 72 },
-          { content: 'Nikkei Futures at critical technical juncture. Watch for BOJ policy signals.', symbol: 'J225', expiresInHours: 48 },
-        ];
-        for (const item of seed) {
-          db.insertMarketIntel(item.content, item.symbol, null, item.expiresInHours);
-        }
-        db.persist();
-        console.log(`[Startup] Seeded ${seed.length} intel items`);
-      }
-    } catch(e) {}
+    // Intel seed block REMOVED (20260423) — it was re-injecting two hardcoded
+    // stale intel strings ("Geopolitical tensions...", "Nikkei at critical
+    // juncture...") on every Railway restart whenever the table happened to
+    // be empty (after user delete or TTL expiry). The seed was originally
+    // intended as DB-wipe recovery but became undead zombie intel that
+    // resisted every delete. Table now stays empty unless the user injects.
     // Macro fetch runs on schedule (07:00 UTC) only — not on startup to save API costs
   }).catch(e => {
     console.error('[DB] Init failed:', e.message);
