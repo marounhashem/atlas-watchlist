@@ -2817,52 +2817,21 @@ app.get('/api/rate-status', (req, res) => {
 
 // ── Market intel API ──────────────────────────────────────────────────────────
 app.get('/api/market-intel', (req, res) => {
-  // Merge three sources into the Intel feed so the dashboard tab shows
-  // everything the user might care about in one place:
-  //   - market_intel — ad-hoc injections (original feed)
-  //   - macro_context — daily per-symbol sentiment/strength refresh (from
-  //     /api/macro-inject). This is the one the daily refresh writes to.
-  //   - mercato_context — Silvia-style structured analysis with price levels
-  //     (from /api/mercato). Present only when the HTML macro tool pushes.
+  // Merges ad-hoc intel + mercato_context into the Intel feed.
   //
-  // Macro + mercato rows are shaped to match market_intel schema with a
-  // `source` field ('macro' / 'mercato') so the frontend can differentiate
-  // or color-code if it wants. Ids are string-prefixed to avoid collision
-  // with market_intel integer ids; delete operations on macro/mercato rows
-  // from this endpoint are no-ops (they have their own delete endpoints).
+  // Note on what's NOT here: macro_context is deliberately excluded. Macro
+  // has its own dedicated section in the frontend ("MACRO CONTEXT", rendered
+  // by fetchAndRenderMacroContext() against /api/macro-context directly).
+  // Merging macro here caused it to render twice on the Intel tab — once as
+  // intel-style cards at top, once in the clean dedicated section below.
+  // Ugly and confusing. Kept mercato because mercato has NO dedicated UI
+  // section today, so merging it here is the only way it surfaces.
+  //
+  // Mercato rows shaped to match market_intel schema with source:'mercato'
+  // and string-prefixed ids ('mercato-{n}') to avoid collision with the
+  // integer ids in market_intel. DELETE on mercato rows from this endpoint
+  // is a no-op — they have their own delete path.
   const intelRows = db.getActiveIntel() || [];
-
-  // --- macro_context rows ---
-  let macroRows = [];
-  try {
-    const macroMap = getMacroContext() || {};
-    const macroEntries = Object.entries(macroMap);
-    macroRows = macroEntries.map(([symbol, m]) => {
-      const risksTxt = Array.isArray(m.key_risks) && m.key_risks.length
-        ? ` | risks: ${m.key_risks.join('; ')}`
-        : '';
-      const dir = m.supports_long ? 'LONG'
-                : m.supports_short ? 'SHORT'
-                : 'NEUTRAL';
-      const content = `${m.sentiment} (strength ${m.strength}/10) — ${m.summary || ''}${risksTxt}`;
-      return {
-        id: `macro-${symbol}`,
-        content,
-        summary: `${m.sentiment} · ${m.strength}/10`,
-        symbol,
-        bias: dir,
-        affected_symbols: JSON.stringify([symbol]),
-        key_levels: '[]',
-        time_horizon: 'SWING',
-        level_types: null,
-        expires_at: (m.ts || Date.now()) + 12 * 3600 * 1000,  // 12h TTL per scorer 20260415.1
-        ts: m.ts || Date.now(),
-        source: 'macro',
-      };
-    });
-  } catch(e) {
-    console.error('[Intel] macro_context merge error:', e?.message);
-  }
 
   // --- mercato_context rows ---
   let mercatoRows = [];
@@ -2901,7 +2870,7 @@ app.get('/api/market-intel', (req, res) => {
   }
 
   // Combined, sorted newest first
-  const merged = [...intelRows, ...macroRows, ...mercatoRows]
+  const merged = [...intelRows, ...mercatoRows]
     .sort((a, b) => (b.ts || 0) - (a.ts || 0));
   res.json(merged);
 });
