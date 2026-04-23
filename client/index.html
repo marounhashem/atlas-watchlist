@@ -2732,6 +2732,18 @@ function fmtIntelExpiry(ea) {
   if (h >= 1) return { text: `${h}h ${m}m`, cls: h <= 4 ? 'warning' : 'normal' };
   return { text: `${m}m`, cls: 'urgent' };
 }
+// For macro/mercato rows the user cares about "how fresh is this data" not
+// "when does the 12h TTL fire". Show "fetched Xm/Xh ago" instead of countdown.
+function fmtFetchedAge(ts) {
+  if (!ts) return { text: '', cls: 'normal' };
+  const a = Date.now() - ts;
+  if (a < 0) return { text: 'just now', cls: 'normal' };
+  const h = Math.floor(a/3600000), m = Math.floor((a%3600000)/60000);
+  if (h >= 24) return { text: `${Math.floor(h/24)}d ago`, cls: 'urgent' };   // stale
+  if (h >= 6)  return { text: `${h}h ago`, cls: 'warning' };                 // aging
+  if (h >= 1)  return { text: `${h}h ${m}m ago`, cls: 'normal' };
+  return { text: m <= 1 ? 'just now' : `${m}m ago`, cls: 'normal' };
+}
 const symBadgeColors = { index: 'var(--teal)', forex: 'var(--blue,var(--accent))', commodity: 'var(--amber,var(--watch))', crypto: 'var(--accent,#8866ff)' };
 const biasColors = { BULLISH: 'var(--green,var(--proceed))', BEARISH: 'var(--red,var(--short))', NEUTRAL: 'var(--dim)', MIXED: 'var(--amber,var(--watch))' };
 const horizColors = { INTRADAY: 'var(--blue,var(--accent))', SWING: 'var(--teal)', LONG_TERM: 'var(--accent,#8866ff)' };
@@ -2749,7 +2761,10 @@ async function loadIntel() {
     }
     if (badge) badge.textContent = `Active: ${data.length}`;
     if (list) list.innerHTML = data.map(i => {
-      const exp = fmtIntelExpiry(i.expires_at);
+      // macro/mercato rows: show "fetched Xm ago" (data freshness matters, not TTL countdown).
+      // ad-hoc intel rows: keep "expires in Xh" (user set the expiry themselves).
+      const isAutoSource = i.source === 'macro' || i.source === 'mercato';
+      const exp = isAutoSource ? fmtFetchedAge(i.ts) : fmtIntelExpiry(i.expires_at);
       const biasC = biasColors[i.bias] || 'var(--dim)';
       const horizC = horizColors[i.time_horizon] || 'var(--dim)';
       const expColor = exp.cls === 'urgent' ? 'var(--red,var(--short))' : exp.cls === 'warning' ? 'var(--amber,var(--watch))' : exp.cls === 'week' ? 'var(--accent,#8866ff)' : 'var(--dim)';
