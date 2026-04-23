@@ -601,7 +601,7 @@ app.get('/api/abc-signals', (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/abc-outcome', (req, res) => {
+app.post('/api/abc-outcome', adminGate, (req, res) => {
   const { id, outcome, pnl_pct, notes } = req.body || {};
   if (!id || !['WIN','LOSS'].includes(outcome)) return res.status(400).json({ error: 'Missing id or invalid outcome' });
   db.updateAbcOutcome(id, outcome, pnl_pct || null, notes || null);
@@ -632,7 +632,7 @@ app.get('/api/abc-stats', (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/abc-ignore', (req, res) => {
+app.post('/api/abc-ignore', adminGate, (req, res) => {
   const { id, reason } = req.body || {};
   if (!id) return res.status(400).json({ error: 'Missing id' });
   db.updateAbcOutcome(id, 'IGNORED', null, 'Not taken by trader' + (reason ? ' — ' + reason : ''));
@@ -640,7 +640,7 @@ app.post('/api/abc-ignore', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/abc-archive-old', (req, res) => {
+app.post('/api/abc-archive-old', adminGate, (req, res) => {
   try {
     const ver = ABC_VERSION;
     // 1. Version mismatch — pre-rebuild signals
@@ -660,7 +660,7 @@ app.post('/api/abc-archive-old', (req, res) => {
 });
 
 // Expire stuck ACTIVE signals that are past their expires_at
-app.post('/api/abc-expire-stuck', (req, res) => {
+app.post('/api/abc-expire-stuck', adminGate, (req, res) => {
   try {
     const now = Date.now();
     const stuck = db.all("SELECT id, symbol, direction, expires_at FROM abc_signals WHERE outcome='ACTIVE' AND expires_at IS NOT NULL AND expires_at < ?", [now]);
@@ -1268,7 +1268,7 @@ app.get('/api/abc-extract', (req, res) => {
 });
 
 // Manual retirement trigger
-app.post('/api/retire-now', async (req, res) => {
+app.post('/api/retire-now', adminGate, async (req, res) => {
   await runRetirementCycle(broadcast);
   res.json({ ok: true, message: 'Retirement cycle complete' });
 });
@@ -1285,7 +1285,7 @@ app.get('/api/learning-log', (req, res) => {
   res.json(getLearningLog(30));
 });
 
-app.post('/api/outcome', (req, res) => {
+app.post('/api/outcome', adminGate, (req, res) => {
   const { signalId, outcome } = req.body;
   if (!signalId || !outcome) return res.status(400).json({ error: 'Missing signalId or outcome' });
   updateOutcome(signalId, outcome, req.body.pnlPct || 0);
@@ -1294,7 +1294,7 @@ app.post('/api/outcome', (req, res) => {
 });
 
 // Force close signal at current price — calculates real P&L
-app.post('/api/signal-force-close', (req, res) => {
+app.post('/api/signal-force-close', adminGate, (req, res) => {
   const { id, reason } = req.body || {};
   if (!id) return res.status(400).json({ error: 'Missing id' });
   const sig = db.getAllSignals(500).find(s => s.id === id);
@@ -1316,7 +1316,7 @@ app.post('/api/signal-force-close', (req, res) => {
 });
 
 // Ignore signal — not taken by trader, remove from dashboard
-app.post('/api/signal-ignore', (req, res) => {
+app.post('/api/signal-ignore', adminGate, (req, res) => {
   const { id, reason } = req.body || {};
   if (!id) return res.status(400).json({ error: 'Missing id' });
   const notes = 'Not taken by trader' + (reason ? ' — ' + reason : '');
@@ -2058,7 +2058,7 @@ app.get('/api/fxssi-force', adminGate, async (req, res) => {
 });
 
 // Trade monitor — dismiss a recommendation
-app.post('/api/signals/:id/dismiss-rec/:recId', (req, res) => {
+app.post('/api/signals/:id/dismiss-rec/:recId', adminGate, (req, res) => {
   try {
     const { dismissRecommendation } = require('./db');
     dismissRecommendation(parseInt(req.params.id), req.params.recId);
@@ -2411,7 +2411,7 @@ app.get('/api/macro-context', (req, res) => {
 
 // Delete macro context for a symbol — cascades to in-memory map so scoring
 // stops applying any macro multiplier until a fresh entry is fetched.
-app.delete('/api/macro-context/:symbol', (req, res) => {
+app.delete('/api/macro-context/:symbol', adminGate, (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
     db.run('DELETE FROM macro_context WHERE symbol=?', [symbol]);
@@ -2754,7 +2754,7 @@ app.get('/api/morning-brief', async (req, res) => {
 });
 
 // Send morning brief via Telegram
-app.post('/api/morning-brief-send', async (req, res) => {
+app.post('/api/morning-brief-send', adminGate, async (req, res) => {
   const brief = await buildMorningBrief();
   const ok = await sendMorningBrief(brief);
   res.json({ ok, brief });
@@ -3011,7 +3011,7 @@ app.post('/api/market-intel', async (req, res) => {
   });
 });
 
-app.delete('/api/market-intel/:id', (req, res) => {
+app.delete('/api/market-intel/:id', adminGate, (req, res) => {
   const id = parseInt(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid id' });
   try {
@@ -3035,7 +3035,7 @@ app.delete('/api/market-intel/:id', (req, res) => {
   }
 });
 
-app.delete('/api/market-intel', (req, res) => {
+app.delete('/api/market-intel', adminGate, (req, res) => {
   db.clearExpiredIntel(); // clear expired
   db.run('DELETE FROM market_intel'); // clear all
   db.persist();
@@ -3216,8 +3216,8 @@ function handleDbPrune(req, res) {
     res.status(500).json({ ok: false, error: e.message });
   }
 }
-app.post('/api/db-prune', handleDbPrune);
-app.get('/api/db-prune', handleDbPrune);
+app.post('/api/db-prune', adminGate, handleDbPrune);
+app.get('/api/db-prune', adminGate, handleDbPrune);
 
 // DXY reference
 app.get('/api/dxy-status', (req, res) => {
@@ -3471,14 +3471,14 @@ app.get('/api/settings', (req, res) => {
   res.json(result);
 });
 
-app.post('/api/settings', (req, res) => {
+app.post('/api/settings', adminGate, (req, res) => {
   const { key, value } = req.body;
   if (!key || value == null) return res.status(400).json({ error: 'Need key and value' });
   db.setSetting(key, String(value));
   res.json({ ok: true, key, value: String(value) });
 });
 
-app.post('/api/settings/bulk', (req, res) => {
+app.post('/api/settings/bulk', adminGate, (req, res) => {
   const updates = req.body;
   if (!updates || typeof updates !== 'object') return res.status(400).json({ error: 'Need object' });
   for (const [key, value] of Object.entries(updates)) {
@@ -3571,7 +3571,7 @@ app.get('/api/calendar-force', adminGate, async (req, res) => {
 });
 
 // Force-mark past unfired events as fired — clears stale pre-event warnings
-app.post('/api/calendar-force-fired', (req, res) => {
+app.post('/api/calendar-force-fired', adminGate, (req, res) => {
   try {
     const now = Date.now();
     const events = db.getAllEconomicEvents() || [];
@@ -3590,7 +3590,7 @@ app.post('/api/calendar-force-fired', (req, res) => {
 });
 
 // Manual calendar time fix — correct Eastern→UTC when auto-detection fails
-app.post('/api/calendar-fix', (req, res) => {
+app.post('/api/calendar-fix', adminGate, (req, res) => {
   const { from_time, to_time, date } = req.body;
   if (!from_time || !to_time || !date) return res.status(400).json({ error: 'Need from_time, to_time, date' });
   try {
@@ -3602,7 +3602,7 @@ app.post('/api/calendar-fix', (req, res) => {
 
 // Manual rate override — for BOJ/ECB announcements before next API fetch
 // POST /api/rate-update { currency: "JPY", ratePct: 0.75 }
-app.post('/api/rate-update', (req, res) => {
+app.post('/api/rate-update', adminGate, (req, res) => {
   const { currency, ratePct } = req.body;
   if (!currency || ratePct == null) return res.status(400).json({ error: 'Need currency and ratePct' });
   const cur = currency.toUpperCase();
@@ -3620,7 +3620,7 @@ app.post('/api/rate-update', (req, res) => {
 });
 
 // Mark a WATCH signal paper outcome manually (if auto-detection missed it)
-app.post('/api/paper-outcome', (req, res) => {
+app.post('/api/paper-outcome', adminGate, (req, res) => {
   const { signalId, paperOutcome } = req.body;
   if (!signalId || !['WIN', 'LOSS'].includes(paperOutcome)) {
     return res.status(400).json({ error: 'signalId and paperOutcome (WIN|LOSS) required' });
@@ -4350,7 +4350,8 @@ server.listen(PORT, () => {
       return items.filter(item => {
         if (!item.affected_symbols && !item.symbol) return true; // global
         if (item.symbol === sym) return true;
-        try { return JSON.parse(item.affected_symbols || '[]').includes(sym); } catch(e) { return true; }
+        try { return JSON.parse(item.affected_symbols || '[]').includes(sym); }
+        catch(e) { console.warn(`[Intel] Corrupt affected_symbols JSON for id:${item.id} — skipping (was defaulting to global)`); return false; }
       }).map(i => i.summary || i.content);
     };
     // Intel seed block REMOVED (20260423) — it was re-injecting two hardcoded

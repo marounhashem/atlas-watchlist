@@ -16,7 +16,7 @@
 // Scoring version is bumped when weights change — same pattern as the
 // main ATLAS scorer. Keep a changelog in CLAUDE.md.
 
-const STOCK_SCORER_VERSION = '20260421.01';
+const STOCK_SCORER_VERSION = '20260421.1';
 
 // --- Hard gates (absolute minimums) ---
 const GATES = {
