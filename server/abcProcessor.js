@@ -91,9 +91,11 @@ function processAbcWebhook(data, deps) {
   // ── Cross-symbol burst gate ───────────────────────────────────────────────
   // Prevents 5-6 signals flooding all symbol slots simultaneously in one bar window.
   // Class A always passes. Class B/C gated when >=3 signals already OPEN or ACTIVE.
+  // VERSION-FILTERED so an ABC_VERSION bump doesn't silently block new signals
+  // via old-version OPEN rows (incident post-8df19ad, fixed per db.js getOpenAbcSignals).
   if (pineClass !== 'A') {
     try {
-      const openCount = db.getOpenAbcSignals().length;
+      const openCount = db.getOpenAbcSignals(ABC_VERSION).length;
       if (openCount >= 5) {
         console.log(`[ABC] ${sym} Class${pineClass} — burst gate: ${openCount} signals already open, skipping non-A`);
         try { db.insertAbcSkip({ symbol: sym, direction, pineClass, gate: 'BURST',
@@ -333,8 +335,13 @@ function processAbcWebhook(data, deps) {
   } catch(e) {}
 
   // ACTIVE/OPEN guard — never save a new signal if one is already OPEN or ACTIVE for this symbol+direction
+  // VERSION-FILTERED — see burst gate above + db.js getOpenAbcSignals comment.
+  // If an old-version OPEN signal exists for the same symbol+direction, a new
+  // signal under the current version should still be allowed (old ones are
+  // either real ACTIVE trades tracked by abcManagement, or stale OPENs that
+  // should have been archived via /api/abc-archive-old).
   try {
-    const activeExists = db.getOpenAbcSignals().find(s =>
+    const activeExists = db.getOpenAbcSignals(ABC_VERSION).find(s =>
       s.symbol === sym && s.direction === direction &&
       (s.outcome === 'ACTIVE' || s.outcome === 'OPEN')
     );

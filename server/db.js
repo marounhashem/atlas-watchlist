@@ -1487,7 +1487,25 @@ function getAbcSignals(limit = 100) {
   return all('SELECT * FROM abc_signals ORDER BY ts DESC LIMIT ?', [limit]);
 }
 
-function getOpenAbcSignals() {
+// Returns OPEN/ACTIVE abc_signals rows.
+//
+// Optional `version` filter — when provided, only returns rows matching that
+// ABC_VERSION (or legacy null version). Use this for blocking-gate checks
+// (burst gate, ACTIVE_EXISTS) so an ABC_VERSION bump doesn't silently block
+// new signals due to old-version OPEN rows still counting. See commit history
+// after 8df19ad for the incident that motivated this — bump left 11+ old
+// Class C rows OPEN, which the BURST gate at abcProcessor.js:96 counted
+// against the 5-signal cap, silently rejecting every non-A new signal.
+//
+// Outcome tracking (abcManagement.js) still uses the version-less overload so
+// real ACTIVE trades from old versions keep getting tracked to WIN/LOSS.
+function getOpenAbcSignals(version = null) {
+  if (version) {
+    return all(
+      "SELECT * FROM abc_signals WHERE outcome IN ('OPEN','ACTIVE') AND (abc_version = ? OR abc_version IS NULL)",
+      [version]
+    );
+  }
   return all("SELECT * FROM abc_signals WHERE outcome IN ('OPEN','ACTIVE')");
 }
 
