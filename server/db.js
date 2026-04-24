@@ -1525,6 +1525,7 @@ function updateAbcActive(id, fields) {
     const sets = keys.map(k => `${k}=?`).join(',');
     const vals = keys.map(k => fields[k]);
     run(`UPDATE abc_signals SET ${sets} WHERE id=?`, [...vals, id]);
+    persist();
   } catch(e) { console.error('[DB] updateAbcActive error:', e?.message); }
 }
 
@@ -1656,7 +1657,7 @@ function getClassCSignals(limit = 100) {
   return all('SELECT * FROM class_c_signals ORDER BY ts DESC LIMIT ?', [limit]);
 }
 
-function activateClassCSignal(id, tp1, tp2, tp3) {
+function activateClassCSignal(id) {
   try {
     run("UPDATE class_c_signals SET outcome='ACTIVE', active_ts=? WHERE id=? AND outcome='OPEN'",
       [Date.now(), id]);
@@ -1672,6 +1673,7 @@ function updateClassCActive(id, fields) {
     const sets = keys.map(k => `${k}=?`).join(',');
     const vals = keys.map(k => fields[k]);
     run(`UPDATE class_c_signals SET ${sets} WHERE id=?`, [...vals, id]);
+    persist();
   } catch(e) { console.error('[DB] updateClassCActive error:', e?.message); }
 }
 

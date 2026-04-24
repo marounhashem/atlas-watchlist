@@ -286,7 +286,7 @@ function checkAbcOutcomes(broadcast) {
         ? barLow <= entry + tolerance
         : barHigh >= entry - tolerance;
       if (touched) {
-        db.activateClassCSignal(id, sig.tp1, sig.tp2, sig.tp3);
+        db.activateClassCSignal(id);
         console.log(`[Class C] ${sig.symbol} ${direction} id:${id} → ACTIVE`);
       }
       continue;

@@ -1789,10 +1789,10 @@ function scoreSymbol(symbol) {
   // ── Event risk tags ──────────────────────────────────────────────────────────
   let eventRiskNote = '';
 
-  // R:R < 2.0 forces WATCH regardless of score
+  // R:R < 2.5 forces WATCH regardless of score
   if (rrForcedWatch && macroVerdict === 'PROCEED') {
     macroVerdict = 'WATCH';
-    eventRiskNote += `⚠ R:R ${rr} below 2.0 — reduced to WATCH`;
+    eventRiskNote += `⚠ R:R ${rr} below 2.5 — reduced to WATCH`;
   }
 
   // Post-event 3-phase system: VOLATILITY (5min block) → OPPORTUNITY (2h boost) → NORMAL
