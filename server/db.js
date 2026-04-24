@@ -1490,12 +1490,12 @@ function getAbcSignals(limit = 100) {
 // Returns OPEN/ACTIVE abc_signals rows.
 //
 // Optional `version` filter — when provided, only returns rows matching that
-// ABC_VERSION (or legacy null version). Use this for blocking-gate checks
-// (burst gate, ACTIVE_EXISTS) so an ABC_VERSION bump doesn't silently block
-// new signals due to old-version OPEN rows still counting. See commit history
-// after 8df19ad for the incident that motivated this — bump left 11+ old
-// Class C rows OPEN, which the BURST gate at abcProcessor.js:96 counted
-// against the 5-signal cap, silently rejecting every non-A new signal.
+// ABC_VERSION (or legacy null version). Current only caller is the
+// ACTIVE_EXISTS guard in abcProcessor; keep this signature so an ABC_VERSION
+// bump doesn't silently block new signals via old-version OPEN rows. Commit
+// history after 8df19ad has the incident that motivated the version param.
+// The cross-symbol burst gate that shared this signature was removed in
+// 20260424.1.
 //
 // Outcome tracking (abcManagement.js) still uses the version-less overload so
 // real ACTIVE trades from old versions keep getting tracked to WIN/LOSS.

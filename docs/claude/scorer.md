@@ -2,9 +2,10 @@
 
 ## Current scorer version
 
-`SCORER_VERSION = '20260421.1'`
+`SCORER_VERSION = '20260424.1'`
 
 Changes since 20260401.15:
+- **20260424.1** — Burst gate removed from ABC pipeline (no more cross-symbol throttling on Class B/C). Scorer RR PROCEED threshold lowered 2.5 → 2.0; user-visible message reverted to "below 2.0" to match. ABC class-aware RR sliding scale unchanged.
 - **20260421.1** — ABC noOrderBook one-class demotion (commit 0453abe). Previously any class on a noOrderBook symbol (UK100, US500, DE40, J225, HK50, CN50, COPPER, PLATINUM) was routed to `class_c_signals` as OBSERVE-only — blunt and lost strong A/B setups. Now: **A → B** (written to `abc_signals`, still Telegram swing), **B → C** (class_c OBSERVE), **C → C**. Preserves structural conviction when only FXSSI crowd data is unavailable. Logged to `abc_skips` with `gate='NOORDERBOOK_DEMOTE'`.
 - **20260417.1** — Audit fix pack (10 changes, 5 files): (1) `persist()` added to `markAbcRecSent` and `insertAbcSkip` in db.js — rec dedup and skip analytics were lost on restart within 30s debounce window. (2) `toBool` helper in abcProcessor — Pine `'True'`/`'TRUE'` flags now parsed correctly (was silently downgrading Class A signals). (3) Dedup catch logs + fails closed instead of silently swallowing. (4) fxssi_analysis parse error now logged with warning. (5) Null guard on atp2/atp3 fallback in abcManagement — old schema rows with null tp produced TP at price 0. (6) Spread fxssiData in abcGates instead of mutating caller's object. (7) Session logic cleanup in config.js — removed dead `< 25` check, London window explicitly capped at 17 (NY takes priority).
 - **20260416.2** — Fix pack: ABC_VERSION bumped to 20260416.2. (1) Gravity gate fix: `fetchedAt` now passed through fxssiData object in abcProcessor — gravity proximity gate in abcGates.js was silently disabled because fetchedAt was never included, causing fxssiAge=Infinity → always "stale, skipped". (2) Reverse thesis invalidation: OPEN signals now expire after 4h when price moves >3% against entry direction (structure broken), not just when price runs >5% past entry. (3) FXSSI 10s fetch timeout via AbortController — prevents hung TCP connections from blocking the entire scrape loop indefinitely. (4) Scrape-in-progress guard (`_scrapeInProgress`) prevents concurrent scrape pile-up when a scrape runs slow.

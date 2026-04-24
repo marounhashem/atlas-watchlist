@@ -154,7 +154,7 @@ const SYMBOL_CURRENCIES = {
 // Bump this when scoring logic changes significantly
 // Signals saved with an older version get auto-expired on startup
 // Format: YYYYMMDD.N (date + daily increment)
-const SCORER_VERSION = '20260421.1'; // ABC noOrderBook one-class demotion (A->B, B->C) per commit 0453abe
+const SCORER_VERSION = '20260424.1'; // Burst gate removed + RR PROCEED threshold 2.5 -> 2.0
 
 // ── Minimum SL enforcement ──────────────────────────────────────────────────
 // Catches identical entry/SL (Pine sends same price for both) and suspiciously
@@ -1709,8 +1709,8 @@ function scoreSymbol(symbol) {
   // Below 1.5 R:R is not worth taking regardless of score
   // Recalculate after all level adjustments are done
   rr = calcRR(entry, sl, tp, direction);
-  // Minimum R:R: 2.5 for PROCEED, 1.5 for WATCH (below 1.5 = skip entirely)
-  const MIN_RR_PROCEED = 2.5;
+  // Minimum R:R: 2.0 for PROCEED, 1.5 for WATCH (below 1.5 = skip entirely)
+  const MIN_RR_PROCEED = 2.0;
   const MIN_RR_WATCH = 1.5;
   if (!rr || rr < MIN_RR_WATCH) {
     console.log(`[Scorer] ${symbol} ${direction} — R:R ${rr} below ${MIN_RR_WATCH}, skipping`);
@@ -1789,10 +1789,10 @@ function scoreSymbol(symbol) {
   // ── Event risk tags ──────────────────────────────────────────────────────────
   let eventRiskNote = '';
 
-  // R:R < 2.5 forces WATCH regardless of score
+  // R:R < 2.0 forces WATCH regardless of score
   if (rrForcedWatch && macroVerdict === 'PROCEED') {
     macroVerdict = 'WATCH';
-    eventRiskNote += `⚠ R:R ${rr} below 2.5 — reduced to WATCH`;
+    eventRiskNote += `⚠ R:R ${rr} below 2.0 — reduced to WATCH`;
   }
 
   // Post-event 3-phase system: VOLATILITY (5min block) → OPPORTUNITY (2h boost) → NORMAL
