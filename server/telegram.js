@@ -53,7 +53,7 @@ async function sendSignalAlert(signal) {
       `SL: ${signal.sl}`,
       `TP1: ${signal.tp1} | TP2: ${signal.tp2} | TP3: ${signal.tp3}`,
       `━━━━━━━━━━━━━━━━━`,
-      signal.reasoning || ''
+      escHtml(signal.reasoning || '')
     ].join('\n');
     return sendMessage(text);
   }
@@ -73,7 +73,7 @@ async function sendSignalAlert(signal) {
     `R:R: ${signal.rr}`,
     `Session: ${signal.session}`,
     ``,
-    `${(signal.reasoning || '').split(' · ').slice(0, 4).join('\n')}`,
+    `${escHtml(signal.reasoning || '').split(' · ').slice(0, 4).join('\n')}`,
   ].join('\n');
   return sendMessage(text);
 }
@@ -189,8 +189,8 @@ async function sendEventFiredAlert(event, sentiment, affectedSymbols) {
   } catch(e) {}
 
   const text = [
-    `📊 <b>${event.title}</b>`,
-    `Actual: <b>${event.actual || 'Released'}</b> | Forecast: ${event.forecast || '—'} | Prev: ${event.previous || '—'}`,
+    `📊 <b>${escHtml(event.title)}</b>`,
+    `Actual: <b>${escHtml(event.actual || 'Released')}</b> | Forecast: ${escHtml(event.forecast || '—')} | Prev: ${escHtml(event.previous || '—')}`,
     `${biasIcon} ${biasLabel}`,
     arrows,
     special,
@@ -231,7 +231,7 @@ async function sendSwingSignalAlert(signal) {
     `💰 Target: ${signal.tp}`,
     `⏰ Session: ${signal.session}`,
     ``,
-    `${(signal.reasoning || '').split(' · ').slice(0, 4).join('\n')}`,
+    `${escHtml(signal.reasoning || '').split(' · ').slice(0, 4).join('\n')}`,
   ].filter(Boolean).join('\n');
   return sendSwingMessage(text);
 }
@@ -251,7 +251,7 @@ async function sendAbcSignalAlert(sig) {
     sig.tp3 ? `TP3 🚀 ${sig.tp3}  (runner)` : '',
     '',
     `RR: ${sig.rr}R | Session: ${sig.session}`,
-    sig.reasoning ? sig.reasoning.split('. ').slice(0, 2).join('. ') : ''
+    sig.reasoning ? escHtml(sig.reasoning).split('. ').slice(0, 2).join('. ') : ''
   ].filter(Boolean).join('\n');
 
   return sendSwingMessage(msg);
@@ -304,4 +304,4 @@ async function sendTest() {
   return sendMessage('✅ <b>ATLAS // WATCHLIST</b>\nTelegram connected successfully.');
 }
 
-module.exports = { sendMessage, sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendEventFiredAlert, sendSwingMessage, sendSwingSignalAlert, sendAbcSignalAlert, sendEntryTouchAlert, sendAbcEntryTouchAlert, sendTest };
+module.exports = { sendMessage, sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendEventFiredAlert, sendSwingMessage, sendSwingSignalAlert, sendAbcSignalAlert, sendEntryTouchAlert, sendAbcEntryTouchAlert, sendTest, escHtml };

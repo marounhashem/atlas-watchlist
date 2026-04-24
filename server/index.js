@@ -20,7 +20,7 @@ const { runFXSSIScrape, processBridgePayload, getFxssiCacheAge } = require('./fx
 const { runCOTFetch, getLatestCOT, getCOTSummary, getCOTCurrencies } = require('./cotFetcher');
 const { runRateFetch, loadRatesFromDB, getLatestRates, getRateDifferential } = require('./rateFetcher');
 const { getUpcomingMeetings, isPairEventRisk, getMeetingContext } = require('./centralBankCalendar');
-const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTest, sendAbcSignalAlert } = require('./telegram');
+const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTest, sendAbcSignalAlert, escHtml } = require('./telegram');
 const { runCalendarCheck, runCalendarFetch, isPreEventRisk, isPostEventSuppressed, getUpcomingHighImpactEvents } = require('./forexCalendar');
 const { collectFullHistory, collectRecentHistory, querySnapshot, cancelCollection, isCollecting } = require('./fxssi-history-collector');
 const { runAbcGates } = require('./abcGates');
@@ -2592,7 +2592,7 @@ async function buildMorningBrief() {
     else if (m.supports_long && !m.supports_short) bias = 'LONG (cautious)';
     else if (m.supports_short && !m.supports_long) bias = 'SHORT (cautious)';
     else bias = 'AVOID (no edge)';
-    lines.push(`${icon} <b>${sym}</b> — ${m.sentiment} (${m.strength}/10) → ${bias}`);
+    lines.push(`${icon} <b>${sym}</b> — ${escHtml(m.sentiment)} (${m.strength}/10) → ${bias}`);
   }
   lines.push('');
 
@@ -2673,7 +2673,7 @@ async function buildMorningBrief() {
       const timeStr = e.time ? ' ' + e.time.slice(0, 5) : '';
       const srcTag = e.sources ? ` [${e.sources}]` : '';
       const note = e.daysUntil <= 1 ? ' ← event risk' : '';
-      lines.push(`${icon} ${e.label} — ${e.date}${timeStr} (${e.daysUntil}d)${srcTag}${note}`);
+      lines.push(`${icon} ${escHtml(e.label)} — ${e.date}${timeStr} (${e.daysUntil}d)${srcTag}${note}`);
     }
     lines.push('');
   }
@@ -2686,7 +2686,7 @@ async function buildMorningBrief() {
       lines.push('<b>📊 RECENT EVENT OUTCOMES</b>');
       for (const e of recentFired.slice(0, 5)) {
         const icon = e.sentiment > 0 ? '📈' : e.sentiment < 0 ? '📉' : '➡️';
-        lines.push(`${icon} ${e.sentiment_summary || e.title}`);
+        lines.push(`${icon} ${escHtml(e.sentiment_summary || e.title)}`);
       }
       lines.push('');
     }
@@ -2699,8 +2699,8 @@ async function buildMorningBrief() {
       lines.push('<b>📡 ACTIVE MARKET INTEL</b>');
       for (const item of activeIntel.slice(0, 4)) {
         const biasIcon = item.bias === 'BULLISH' ? '📈' : item.bias === 'BEARISH' ? '📉' : '➡️';
-        lines.push(`${biasIcon} ${item.summary || item.content?.slice(0, 80)}`);
-        try { const syms = JSON.parse(item.affected_symbols || '[]'); if (syms.length) lines.push(`   Affects: ${syms.join(', ')}`); } catch(e) {}
+        lines.push(`${biasIcon} ${escHtml(item.summary || item.content?.slice(0, 80))}`);
+        try { const syms = JSON.parse(item.affected_symbols || '[]'); if (syms.length) lines.push(`   Affects: ${escHtml(syms.join(', '))}`); } catch(e) {}
       }
       lines.push('');
     }
@@ -2721,7 +2721,7 @@ async function buildMorningBrief() {
       try {
         const recs = JSON.parse(s.recommendations || '[]');
         const pending = recs.find(r => !r.resolved);
-        if (pending) lines.push(`   ⚠ ${pending.type} — ${(pending.reason || '').slice(0, 60)}`);
+        if (pending) lines.push(`   ⚠ ${pending.type} — ${escHtml((pending.reason || '').slice(0, 60))}`);
       } catch(e) {}
     }
   } else {
@@ -2748,8 +2748,8 @@ async function buildMorningBrief() {
           if (fb?.bias > 0) icon = '📈';
           else if (fb?.bias < 0) icon = '📉';
         } catch(fe) {}
-        lines.push(`${icon} ${uaeTime} — <b>${e.title}</b>`);
-        if (e.forecast && e.previous) lines.push(`   Forecast: ${e.forecast} | Prev: ${e.previous}`);
+        lines.push(`${icon} ${uaeTime} — <b>${escHtml(e.title)}</b>`);
+        if (e.forecast && e.previous) lines.push(`   Forecast: ${escHtml(e.forecast)} | Prev: ${escHtml(e.previous)}`);
       }
     }
   } catch(e) {}

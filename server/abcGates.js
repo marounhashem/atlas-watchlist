@@ -171,7 +171,7 @@ function runAbcGates(symbol, payload, fxssiData, db) {
 
   // 3. Post-event volatility window (<5min after event)
   if (isPostEventSuppressed && isPostEventSuppressed(symbol)) {
-    return { verdict: 'SKIP', blocked: true, gate: 'PREEVENT', reason: 'Post-event volatility block' };
+    return { verdict: 'SKIP', blocked: true, gate: 'POSTEVENT', reason: 'Post-event volatility block' };
   }
 
   // 4. RR sanity check
