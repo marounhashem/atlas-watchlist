@@ -121,11 +121,27 @@ app.use((req, res, next) => {
 // This is the original working parser. express.json() cannot handle NaN literals.
 // Parses body for ALL POST routes including webhooks. Webhook handlers respond
 // 200 OK immediately after parsing completes (~5ms), then process async.
+// 1MB cap — any Pine/FXSSI/intel payload we actually receive is kilobytes; cap
+// exists to stop a malicious POST from OOMing the process.
+const MAX_BODY_BYTES = 1024 * 1024;
 app.use((req, res, next) => {
   if (req.method !== 'POST') return next();
   let body = '';
-  req.on('data', chunk => body += chunk.toString());
+  let bytes = 0;
+  let rejected = false;
+  req.on('data', chunk => {
+    if (rejected) return;
+    bytes += chunk.length;
+    if (bytes > MAX_BODY_BYTES) {
+      rejected = true;
+      try { res.status(413).json({ error: 'payload too large' }); } catch(e) {}
+      req.destroy();
+      return;
+    }
+    body += chunk.toString();
+  });
   req.on('end', () => {
+    if (rejected) return;
     try {
       const sanitized = body
         .replace(/:NaN([,}\]])/g, ':null$1')
@@ -4369,3 +4385,17 @@ server.listen(PORT, () => {
 // Graceful shutdown — flush DB to disk before exit
 process.on('SIGTERM', () => { console.log('[Shutdown] SIGTERM — flushing DB...'); db.persistNow(); setTimeout(() => process.exit(0), 2000); });
 process.on('SIGINT',  () => { console.log('[Shutdown] SIGINT — flushing DB...');  db.persistNow(); setTimeout(() => process.exit(0), 2000); });
+
+// Crash handlers — flush DB before dying so we don't silently lose the 30s
+// persist debounce window. Railway will restart us either way; this just keeps
+// the last batch of writes.
+process.on('uncaughtException', (err) => {
+  console.error('[Crash] uncaughtException:', err && err.stack || err);
+  try { db.persistNow(); } catch(e) { console.error('[Crash] persistNow failed:', e?.message); }
+  setTimeout(() => process.exit(1), 2000);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Crash] unhandledRejection:', reason && reason.stack || reason);
+  try { db.persistNow(); } catch(e) { console.error('[Crash] persistNow failed:', e?.message); }
+  setTimeout(() => process.exit(1), 2000);
+});
