@@ -4,6 +4,15 @@
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
+// Escape untrusted content for Telegram HTML parse_mode. Only needed on
+// interpolated content (DB fields, req.body, scraped event titles), NOT on
+// template structure tags (<b>, <i>, <code>) which are intentional.
+// Helper added without call-site changes — see handover audit, Commit 3.
+function escHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 async function sendMessage(text, parseMode = 'HTML', retries = 2) {
   if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) return false;
   for (let attempt = 0; attempt <= retries; attempt++) {
