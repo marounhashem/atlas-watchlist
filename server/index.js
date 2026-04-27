@@ -4121,8 +4121,17 @@ async function runHealthCheck() {
 
   const problems = [];
 
+  // 30-min reopen grace window. After a weekend/daily-break/holiday close,
+  // the absolute "last Pine alert" age can read 50-70+ hours even though Pine
+  // is fine — it just hasn't fired since reopen. Suppress PINE_STALE if the
+  // market wasn't continuously open during the staleness window. Real Pine
+  // outages on a weekday-open symbol still fire because the market WAS open
+  // 30 min ago and the genuine staleness shows.
+  const REOPEN_GRACE_MS = 30 * 60 * 1000;
   for (const sym of Object.keys(SYMBOLS)) {
     if (!isMarketOpen(sym)) continue;
+    const wasOpenBefore = isMarketOpen(sym, new Date(now - REOPEN_GRACE_MS));
+    if (!wasOpenBefore) continue;  // recently reopened — Pine hasn't fired yet
     const data     = db2.getLatestMarketData(sym);
     const lastSeen = data?.ts || null;
     const age      = lastSeen ? (now - lastSeen) : null;

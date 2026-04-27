@@ -106,13 +106,19 @@ function getBankHolidayName() {
   return names[today] || null;
 }
 
-function isMarketOpen(symbol) {
+// `at` is optional — if provided, evaluates whether the market would have been
+// open at that timestamp instead of right now. Used by the health check to
+// distinguish "market was closed during the staleness window" from "market is
+// open now and Pine genuinely silent". isBankHoliday is still evaluated for
+// today only — fine in practice because the staleness window is hours, not
+// days.
+function isMarketOpen(symbol, at) {
   if (isBankHoliday(symbol)) return false;
   const cfg = MARKET_HOURS[symbol];
   if (!cfg) return true;
   if (cfg.alwaysOpen) return true;
 
-  const now = new Date();
+  const now = at instanceof Date ? at : new Date();
   const utcDay  = now.getUTCDay();
   const utcHour = now.getUTCHours();
   const utcMin  = now.getUTCMinutes();

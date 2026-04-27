@@ -512,15 +512,16 @@ function generateRecommendations(sig, data, price) {
       mfe_pct: mfePct,
       progress_pct: progressPct
     });
-    // 95%+ to SL — immediate Telegram push
-    if (maeProgress > 95 && _sendRecAlert) {
-      try {
-        _sendRecAlert(sig, {
-          type: 'CLOSE', urgency: 'HIGH',
-          reason: `🚨 ${sig.symbol} ${direction} — price ${maeProgress}% to SL · Entry: ${entry} · SL: ${sl} · Current: ${price}`
-        }).catch(() => {});
-      } catch(e) {}
-    }
+    // NOTE: previously had a 95%+ "immediate" Telegram push here that bypassed
+    // addRecommendation() dedup → fired every minute (3 alerts in 3 min in
+    // production) and rendered "Price: undefined" because the rec object it
+    // built was missing price/mfe_pct/progress_pct fields. Removed because the
+    // regular checkOutcomes flow at outcome.js:~211-234 already pushes HIGH
+    // urgency CLOSE recs to Telegram with the full rec object, AND
+    // addRecommendation in db.js:976-991 dedups same-urgency CLOSE/SLP recs
+    // within a 6h window. The "immediate" framing was misleading — both code
+    // paths run inside the same scoring cron tick, so there's no urgency
+    // difference. The single push now wins.
   } else if (maeProgress > 70) {
     recs.push({
       type: 'CLOSE',
