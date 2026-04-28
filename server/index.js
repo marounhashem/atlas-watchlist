@@ -3750,22 +3750,34 @@ setTimeout(() => {
   }
 }, 60000);
 
-// FXSSI watchdog — every 15min, force a rescrape if >10 symbols are stale >60min
+// FXSSI watchdog — every 15 min, force a rescrape if many symbols are stale.
+//
+// Threshold tightened 2026-04-28: was ">10 stale and >60 min", now ">10 stale
+// and >30 min". Today's incident: node-cron silently dropped 2 ticks at
+// :42/:02; 21 symbols hit 40 min stale; old 60-min threshold didn't trigger;
+// /api/health flipped to DEGRADED before the watchdog noticed. New threshold
+// matches the FXSSI_STALE_MS used by /api/health (30 min) so the watchdog
+// catches mass-cron-drop scenarios before user-visible alerts fire.
+//
+// The 30-min boundary is also the natural FXSSI cache TTL — data older than
+// that is stale for scoring purposes anyway, so a forced rescrape doesn't
+// waste an upstream call.
 cron.schedule('*/15 * * * *', async () => {
   if (!dbReady) return;
   try {
     const { SYMBOLS } = require('./config');
     const now = Date.now();
+    const STALE_MS = 30 * 60 * 1000;  // matches health-check FXSSI_STALE_MS
     let staleCount = 0;
     for (const sym of Object.keys(SYMBOLS)) {
       try {
         const md = db.getLatestMarketData(sym);
         const fetchedAt = md?.fxssi_fetched_at || md?.ts || 0;
-        if (md && (now - fetchedAt) > 60 * 60 * 1000) staleCount++;
+        if (md && (now - fetchedAt) > STALE_MS) staleCount++;
       } catch(e) {}
     }
     if (staleCount > 10) {
-      console.log(`[FXSSI Watchdog] ${staleCount} symbols stale >60min — forcing rescrape`);
+      console.log(`[FXSSI Watchdog] ${staleCount} symbols stale >30min — forcing rescrape (caught cron drop)`);
       await runFXSSIScrape(broadcast);
     }
   } catch(e) {
