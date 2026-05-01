@@ -18,6 +18,7 @@ const { runLearningCycle } = require('./learner');
 const claudeLearner = require('./claudeLearner');
 const { runFXSSIScrape, processBridgePayload, getFxssiCacheAge } = require('./fxssiScraper');
 const { runCOTFetch, getLatestCOT, getCOTSummary, getCOTCurrencies } = require('./cotFetcher');
+const heartbeat = require('./cronHeartbeat');
 const { runRateFetch, loadRatesFromDB, getLatestRates, getRateDifferential } = require('./rateFetcher');
 const { getUpcomingMeetings, isPairEventRisk, getMeetingContext } = require('./centralBankCalendar');
 const { sendSignalAlert, sendRecAlert, sendMorningBrief, sendHealthAlert, sendTest, sendAbcSignalAlert, escHtml } = require('./telegram');
@@ -2357,6 +2358,14 @@ app.get('/api/journal', (req, res) => {
   catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// Heartbeat scheduler status — shows registered catch-up tasks, their cadence,
+// last run, last success, overdue status, and how many catch-ups have fired
+// (i.e. how many times node-cron silently dropped a tick this process lifetime).
+// Public read — same as /api/health.
+app.get('/api/heartbeat-status', (req, res) => {
+  res.json({ tasks: heartbeat.getStatus(), now: Date.now() });
+});
+
 app.get('/api/health', (req, res) => {
   const { isMarketOpen } = require('./marketHours');
   const db2 = require('./db');
@@ -3719,6 +3728,7 @@ cron.schedule('2,22,42 * * * *', async () => {
   if (!dbReady) return;
   try {
     await runFXSSIScrape(broadcast, true);
+    heartbeat.markRan('fxssi-scrape');  // ack so the heartbeat catch-up doesn't re-fire
   } catch(e) {
     console.error('[FXSSI Cron] Error:', e.message);
   }
@@ -3875,6 +3885,7 @@ cron.schedule('45 20 * * 5', async () => {
   try {
     console.log('[Cron] Running weekly COT data fetch...');
     await runCOTFetch();
+    heartbeat.markRan('cot-fetch');  // ack so heartbeat catch-up doesn't fire over weekend
   } catch(e) { console.error('[Cron] COT fetch error:', e.message); }
 });
 
@@ -4287,6 +4298,35 @@ server.listen(PORT, () => {
   db.init().then(() => {
     dbReady = true;
     console.log('[Startup] 6 — DB loaded', Date.now());
+
+    // ── Heartbeat scheduler — catch-up safety net for node-cron drops ───────
+    // node-cron has silent-dropped ticks under load on Railway across FXSSI
+    // (2026-04-22, 2026-04-28), stocks 16:00 (2026-04-22), and COT Friday
+    // (2026-04-25 missed → 5.8d stale data on 2026-04-28). The heartbeat
+    // runs every 30s and re-fires any registered task whose lastRunAt is
+    // older than its cadence. Existing cron.schedule calls still fire
+    // primary; on success they call heartbeat.markRan() to keep state in
+    // sync. If cron drops, heartbeat catches up within 30s.
+    heartbeat.register('fxssi-scrape', {
+      cadenceMs: 22 * 60 * 1000,                     // primary cron is :02/:22/:42 = 20m; 22m gives 2m grace
+      run: () => runFXSSIScrape(broadcast, true),
+      skipIf: () => !dbReady,
+    });
+    heartbeat.register('cot-fetch', {
+      cadenceMs: 7 * 24 * 60 * 60 * 1000,            // weekly — primary cron is Fri 20:45 UTC
+      run: () => runCOTFetch(),
+      skipIf: () => !dbReady,
+    });
+    // Mark each task as having "just run" at startup so the heartbeat doesn't
+    // immediately fire (the existing startup blocks at lines below already
+    // handle the initial scrape/seed). After the first cron tick fires
+    // successfully, markRan() called from inside the cron callback keeps the
+    // heartbeat in sync indefinitely.
+    heartbeat.markRan('fxssi-scrape');
+    heartbeat.markRan('cot-fetch');
+    heartbeat.start(30 * 1000);
+    console.log('[Startup] 7 — Heartbeat scheduler started (30s tick)');
+
     // Force immediate FXSSI scrape on startup — ensures order book data before first scoring cycle
     // Without this, signals fired in first 20min after deploy/restart have no order book
     setTimeout(() => {
