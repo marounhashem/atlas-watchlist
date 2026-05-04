@@ -13,6 +13,23 @@ function escHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Format scorer.macroState into a one-line tag for Telegram / dashboard cards.
+// Macro is informational only (multiplier disabled 20260504). This makes it
+// scannable so the trader can read context without it skewing the score.
+function fmtMacroLine(macroState) {
+  if (!macroState || !macroState.available) {
+    if (macroState && macroState.stale) return `📰 Macro stale (${macroState.ageHours}h old) — info only`;
+    return null;
+  }
+  const sent = macroState.sentiment || 'unknown';
+  const strength = macroState.strength != null ? ` ${macroState.strength}/10` : '';
+  const align = macroState.alignsWith === 'neutral' ? 'neutral'
+    : macroState.alignsWith ? `aligns ${macroState.alignsWith}` : '';
+  const sumShort = (macroState.summary || '').slice(0, 110).trim();
+  const tail = sumShort ? ` — ${sumShort}` : '';
+  return `📰 Macro: ${sent}${strength}${align ? ` · ${align}` : ''}${tail} <i>(info only)</i>`;
+}
+
 async function sendMessage(text, parseMode = 'HTML', retries = 2) {
   if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) return false;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -63,6 +80,7 @@ async function sendSignalAlert(signal) {
     : tag === 'PRE_EVENT' ? `⚠️ ${signal.verdict}/EVENT-RISK`
     : tag === 'CARRY_RISK' ? `⚠️ ${signal.verdict}/CARRY-RISK`
     : signal.verdict === 'PROCEED' ? '✅ PROCEED' : '👀 WATCH';
+  const macroLine = fmtMacroLine(signal.macroState);
   const text = [
     `<b>ATLAS // ${signal.symbol} ${dir}</b>`,
     `${verdict} — Score: ${signal.score}%`,
@@ -74,7 +92,8 @@ async function sendSignalAlert(signal) {
     `Session: ${signal.session}`,
     ``,
     `${escHtml(signal.reasoning || '').split(' · ').slice(0, 4).join('\n')}`,
-  ].join('\n');
+    macroLine ? `\n${macroLine}` : '',
+  ].filter(Boolean).join('\n');
   return sendMessage(text);
 }
 
@@ -221,6 +240,7 @@ async function sendSwingMessage(text, parseMode = 'HTML') {
 async function sendSwingSignalAlert(signal) {
   const dir = signal.direction === 'LONG' ? '🟢 LONG' : '🔴 SHORT';
   const slPct = Math.round(Math.abs(signal.entry - signal.sl) / signal.entry * 1000) / 10;
+  const macroLine = fmtMacroLine(signal.macroState);
   const text = [
     `📈 <b>ATLAS SWING // ${signal.symbol} ${dir}</b>`,
     `✅ PROCEED — Score: ${signal.score}% | R:R: ${signal.rr}`,
@@ -232,6 +252,7 @@ async function sendSwingSignalAlert(signal) {
     `⏰ Session: ${signal.session}`,
     ``,
     `${escHtml(signal.reasoning || '').split(' · ').slice(0, 4).join('\n')}`,
+    macroLine ? `\n${macroLine}` : '',
   ].filter(Boolean).join('\n');
   return sendSwingMessage(text);
 }

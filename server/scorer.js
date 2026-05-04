@@ -966,22 +966,27 @@ function scoreSymbol(symbol) {
   if (direction === 'SHORT' && rsi < 45) conflictMultiplier *= 1.05;
   if (direction === 'LONG'  && rsi > 55) conflictMultiplier *= 1.05;
 
-  // ── Macro context alignment ───────────────────────────────────────────────
-  // Daily macro fetch (07:00 UTC) provides directional bias per symbol.
-  // If macro contradicts signal direction, apply penalty.
-  // If macro confirms, apply small bonus.
+  // ── Macro context — INFORMATIONAL ONLY (20260504) ─────────────────────────
+  // Score multiplier DISABLED per forensic on n=50 closed spot signals:
+  //   "macro aligned" → 6% WR (1W/15L), "macro misaligned" → 40% WR (2W/3L)
+  //   high-score (>=85) signals: macro_avail=True → 17% WR, macro_avail=False → 60% WR
+  // Hypothesis: by the time daily macro is fetched, the news is already priced in,
+  // so the multiplier was systematically rewarding chase-the-news entries.
+  // Macro state is still surfaced in reasoning + alerts so the trader can read
+  // the context and apply discretion. To restore the multiplier, revert this hunk
+  // and re-measure WR over the next 50 closed signals.
   let macroNote = '';
+  let macroState = null; // structured macro snapshot for dashboard / Telegram
   let macroContextAvailable = false;
   let eventRiskTag = null; // PRE_EVENT | SUPPRESSED | CARRY_RISK | null
   try {
-    // getMacroContext is in-process via index.js — access via global if available
     const macroCtx = global.atlasGetMacroContext ? global.atlasGetMacroContext() : null;
     const macro = macroCtx ? macroCtx[symbol] : null;
     if (!macro) {
-      console.log(`[Scorer] ${symbol} — no macro context, skipping macro multiplier`);
+      console.log(`[Scorer] ${symbol} — no macro context (informational only since 20260504)`);
     }
-    if (macro && macro.ts && (Date.now() - macro.ts) < 12 * 3600000) macroContextAvailable = true;
-    if (macro && macro.ts && (Date.now() - macro.ts) < 12 * 3600000) { // use if <12h old
+    if (macro && macro.ts && (Date.now() - macro.ts) < 12 * 3600000) {
+      macroContextAvailable = true;
       const macroConflict =
         (direction === 'LONG'  && macro.supports_short && !macro.supports_long) ||
         (direction === 'SHORT' && macro.supports_long  && !macro.supports_short);
@@ -989,15 +994,39 @@ function scoreSymbol(symbol) {
         (direction === 'LONG'  && macro.supports_long  && !macro.supports_short) ||
         (direction === 'SHORT' && macro.supports_short && !macro.supports_long);
 
-      if (macroConflict) {
-        conflictMultiplier *= 0.90;
-        macroNote = `⚠ Macro ${macro.sentiment} (${macro.strength}/10) conflicts — ${macro.summary}`;
-      } else if (macroConfirm) {
-        conflictMultiplier *= 1.10;
-        macroNote = `✓ Macro ${macro.sentiment} confirms — ${macro.summary}`;
+      const alignsWith = macroConfirm ? direction
+        : macroConflict ? (direction === 'LONG' ? 'SHORT' : 'LONG')
+        : 'neutral';
+      const ageHours = Math.round((Date.now() - macro.ts) / 3600000 * 10) / 10;
+
+      // Surface macro state on every signal (no score effect)
+      macroState = {
+        available: true,
+        sentiment: macro.sentiment || null,
+        strength: macro.strength != null ? macro.strength : null,
+        summary: macro.summary || '',
+        alignsWith, // 'LONG' | 'SHORT' | 'neutral'
+        ageHours,
+        scoreEffect: 0 // explicit: macro does not move score
+      };
+
+      // Reasoning text — informational tone, no warning/check icons (those imply gating)
+      const sLabel = macro.sentiment ? `${macro.sentiment}${macro.strength != null ? ` ${macro.strength}/10` : ''}` : 'unknown';
+      const sumShort = (macro.summary || '').slice(0, 90).trim();
+      if (macroConfirm) {
+        macroNote = `ℹ Macro ${sLabel} aligns ${direction}${sumShort ? ` — ${sumShort}` : ''} (info only)`;
+      } else if (macroConflict) {
+        macroNote = `ℹ Macro ${sLabel} conflicts ${direction}${sumShort ? ` — ${sumShort}` : ''} (info only)`;
+      } else {
+        macroNote = `ℹ Macro ${sLabel} neutral${sumShort ? ` — ${sumShort}` : ''} (info only)`;
       }
+    } else if (macro) {
+      // Macro present but stale (>12h) — note the staleness without surfacing as decision input
+      macroState = { available: false, stale: true, ageHours: Math.round((Date.now() - macro.ts) / 3600000 * 10) / 10, scoreEffect: 0 };
+    } else {
+      macroState = { available: false, scoreEffect: 0 };
     }
-  } catch(e) {}
+  } catch(e) { macroState = { available: false, scoreEffect: 0, error: true }; }
 
   // ── No order book penalty ─────────────────────────────────────────────────
   if (noOB) {
@@ -1976,7 +2005,9 @@ function scoreSymbol(symbol) {
   }
 
   // ── Quality tier A/B/C ──────────────────────────────────────────────────────
-  const bd = { bias: biasSc, fxssi: fxssiSc, ob: obSc, session: sessionSc };
+  // breakdown is JSON-stored; including macroState here makes it survive restart
+  // for dashboard rendering. Macro is informational only — no score effect.
+  const bd = { bias: biasSc, fxssi: fxssiSc, ob: obSc, session: sessionSc, macro: macroState };
   let qPos = 0, qNeg = 0;
   if (bd.fxssi > 0.75) qPos++; if (bd.bias > 0.80) qPos++; if (bd.ob > 0.80) qPos++;
   if (macroContextAvailable) qPos++;
@@ -2003,6 +2034,7 @@ function scoreSymbol(symbol) {
     fxssiStale: fxssiStale || false,
     regimeAdj: regimeMultiplier !== 1.0 ? { multiplier: regimeMultiplier, note: regimeNote } : null,
     macroContextAvailable,
+    macroState, // {available, sentiment, strength, summary, alignsWith, ageHours, scoreEffect:0}
     eventRiskTag,
     weightedStructScore: Math.round(absWeightedStruct * 10) / 10,
     isSwing: isSwingSignal({ verdict: macroVerdict, session: getSessionNow(), rr, score: macroAdjustedScore, eventRiskTag }, absWeightedStruct),
