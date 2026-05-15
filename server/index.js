@@ -2534,7 +2534,10 @@ app.get('/api/macro-test', adminGate, async (req, res) => {
       persisted,
       dbCount: Object.keys(dbCheck).length,
       dbSymbols: Object.keys(dbCheck),
-      inMemoryCount: Object.keys(getMacroContext()).length
+      inMemoryCount: Object.keys(getMacroContext()).length,
+      // Diagnostic: surface Anthropic's error body when present so we can see WHY a 400 hit
+      anthropicError: data.error || null,
+      anthropicType: data.type || null
     });
   } catch(e) {
     res.json({ error: e.message });
