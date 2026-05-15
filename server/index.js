@@ -1452,12 +1452,12 @@ app.post('/api/agent', async (req, res) => {
 
   try {
     const tools = type === 'research' ? [{
-      type: 'web_search_20250305',
+      type: 'web_search_20260209',
       name: 'web_search'
     }] : undefined;
 
     const body = {
-      model: 'claude-haiku-4-5-20251001', // Haiku — 20x cheaper for agents
+      model: 'claude-haiku-4-5', // Haiku — 20x cheaper for agents
       max_tokens: 1000,
       messages: [{ role: 'user', content: prompt }]
     };
@@ -2501,9 +2501,9 @@ app.get('/api/macro-test', adminGate, async (req, res) => {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-haiku-4-5',
         max_tokens: 400,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+        tools: [{ type: 'web_search_20260209', name: 'web_search' }],
         system: 'You are a macro analyst. Search for current market conditions and return ONLY a JSON object. No markdown, no explanation.',
         messages: [{ role: 'user', content: `Search: "${query}". Return ONLY this JSON:
 {"sentiment":"BULLISH|BEARISH|NEUTRAL","strength":5,"summary":"one sentence","key_risks":["risk1"],"supports_long":true,"supports_short":false,"avoid_until":"none"}` }]
@@ -3013,7 +3013,7 @@ app.post('/api/market-intel', async (req, res) => {
       const userPrompt = `Analyse this market research. Return ONLY this JSON:\n{"summary":"<2 sentences max — key trading insight only>","bias":"BULLISH|BEARISH|NEUTRAL|MIXED","affected_symbols":["SYMBOL"],"key_levels":["level"],"time_horizon":"INTRADAY|SWING|LONG_TERM"}\n\nValid symbols: GOLD,SILVER,OILWTI,BTCUSD,ETHUSD,US30,US100,US500,DE40,UK100,J225,HK50,CN50,COPPER,PLATINUM,EURUSD,GBPUSD,USDJPY,USDCHF,USDCAD,AUDUSD,NZDUSD,EURJPY,EURGBP,EURAUD,EURCHF,GBPJPY,GBPCHF,AUDJPY\nAliases: NKD/Nikkei=J225, WTI/Crude=OILWTI, Dow=US30, Nasdaq=US100, S&P=US500, DAX=DE40, FTSE=UK100, BTC=BTCUSD\n\nResearch:\n${cleaned}`;
       const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-        body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 300, system: sysPrompt, messages: [{ role: 'user', content: userPrompt }] })
+        body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 300, system: sysPrompt, messages: [{ role: 'user', content: userPrompt }] })
       });
       const apiData = await apiRes.json();
       const text = apiData.content?.[0]?.text || '{}';
@@ -3924,13 +3924,13 @@ const macroContext = {};
 async function callClaudeWithSearch(prompt) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   const headers = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
-  const tools = [{ type: 'web_search_20250305', name: 'web_search' }];
+  const tools = [{ type: 'web_search_20260209', name: 'web_search' }];
   const sysPrompt = 'You are a macro analyst. Search for current market conditions and return ONLY a JSON object. No markdown, no explanation.';
 
   // Turn 1
   const res1 = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST', headers,
-    body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 1000, tools, system: sysPrompt, messages: [{ role: 'user', content: prompt }] })
+    body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 1000, tools, system: sysPrompt, messages: [{ role: 'user', content: prompt }] })
   });
   const data1 = await res1.json();
 
@@ -3945,7 +3945,7 @@ async function callClaudeWithSearch(prompt) {
     const toolResults = toolUseBlocks.map(tu => ({ type: 'tool_result', tool_use_id: tu.id, content: 'Search completed. Use the information you have to answer.' }));
     const res2 = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST', headers,
-      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 400, tools, system: sysPrompt,
+      body: JSON.stringify({ model: 'claude-haiku-4-5', max_tokens: 400, tools, system: sysPrompt,
         messages: [{ role: 'user', content: prompt }, { role: 'assistant', content: data1.content }, { role: 'user', content: toolResults }] })
     });
     const data2 = await res2.json();
@@ -4103,9 +4103,9 @@ async function runMacroContextFetch(broadcast, caller) {
             'anthropic-version': '2023-06-01'
           },
           body: JSON.stringify({
-            model: 'claude-haiku-4-5-20251001',
+            model: 'claude-haiku-4-5',
             max_tokens: 300,
-            tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+            tools: [{ type: 'web_search_20260209', name: 'web_search' }],
             system: 'You are a rates analyst. Search for the market consensus and return ONLY a JSON object. No markdown.',
             messages: [{ role: 'user', content: `Search: "${query}". Return ONLY this JSON:
 {"expected_decision":"HIKE|CUT|HOLD","expected_bps":25,"confidence":"HIGH|MEDIUM|LOW","summary":"one sentence max 20 words"}` }]
