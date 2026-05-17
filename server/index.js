@@ -1,5 +1,22 @@
 console.log('[Startup] 1 — process started', Date.now());
 require('dotenv').config();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ANTHROPIC API KILL SWITCH — 2026-05-17
+// Per user directive: zero Anthropic API spend. All paid Claude calls are
+// short-circuited regardless of ANTHROPIC_API_KEY presence. Affected paths:
+//   - /api/agent (dashboard "ask Claude" buttons)
+//   - /api/macro-test, /api/macro-refresh, /api/macro-force (macro fetch)
+//   - /api/regime-now (claudeLearner.detectRegime)
+//   - /api/optimise-entry/:symbol (claudeLearner.optimiseEntryLevels)
+//   - Nightly claudeLearner.dailySessionSummary (23:00 UTC cron)
+//   - Weekly claudeLearner.optimiseEntryLevels (Sun 22:00 UTC cron)
+// Mercato, Pine, FXSSI, FF calendar, COT, scorer, dashboard, Telegram —
+// all unaffected (none of them call Anthropic).
+// To re-enable: set ANTHROPIC_DISABLED = false and consider a per-feature
+// flag set rather than the global kill switch.
+const ANTHROPIC_DISABLED = true;
+const ANTHROPIC_DISABLED_REASON = 'Anthropic API disabled by operator directive (2026-05-17). All paid Claude calls return null/stub.';
 const express = require('express');
 const compression = require('compression');
 const http = require('http');
@@ -1450,6 +1467,11 @@ app.post('/api/agent', async (req, res) => {
   const { type, prompt, symbol, accountSize } = req.body;
   if (!prompt) return res.status(400).json({ error: 'Missing prompt' });
 
+  if (ANTHROPIC_DISABLED) {
+    console.log(`[Agent] DISABLED — ${type} for ${symbol} short-circuited`);
+    return res.json({ ok: false, disabled: true, error: ANTHROPIC_DISABLED_REASON, result: '' });
+  }
+
   try {
     const tools = type === 'research' ? [{
       type: 'web_search_20260209',
@@ -2490,6 +2512,10 @@ app.post('/api/macro-inject', (req, res) => {
 
 // Macro single-symbol test — fetches GOLD only, persists to DB, returns result (1 API call)
 app.get('/api/macro-test', adminGate, async (req, res) => {
+  if (ANTHROPIC_DISABLED) {
+    console.log('[Macro-test] DISABLED — no Anthropic call fired');
+    return res.json({ disabled: true, reason: ANTHROPIC_DISABLED_REASON, apiStatus: null, persisted: false });
+  }
   try {
     const symbol = 'GOLD';
     const query = 'gold XAU price macro outlook DXY Fed rates today';
@@ -3011,7 +3037,7 @@ app.post('/api/market-intel', async (req, res) => {
   // Analyse with Haiku (system + user message for better instruction following)
   let analysis = null;
   try {
-    if (process.env.ANTHROPIC_API_KEY) {
+    if (process.env.ANTHROPIC_API_KEY && !ANTHROPIC_DISABLED) {
       const sysPrompt = 'You are a market research analyser for a trading system. Extract the key trading insight from research notes. Ignore timestamps, disclaimers, source attribution. Focus only on: market direction, affected assets, key price levels, and time horizon. Return ONLY valid JSON. No markdown. No explanation.';
       const userPrompt = `Analyse this market research. Return ONLY this JSON:\n{"summary":"<2 sentences max — key trading insight only>","bias":"BULLISH|BEARISH|NEUTRAL|MIXED","affected_symbols":["SYMBOL"],"key_levels":["level"],"time_horizon":"INTRADAY|SWING|LONG_TERM"}\n\nValid symbols: GOLD,SILVER,OILWTI,BTCUSD,ETHUSD,US30,US100,US500,DE40,UK100,J225,HK50,CN50,COPPER,PLATINUM,EURUSD,GBPUSD,USDJPY,USDCHF,USDCAD,AUDUSD,NZDUSD,EURJPY,EURGBP,EURAUD,EURCHF,GBPJPY,GBPCHF,AUDJPY\nAliases: NKD/Nikkei=J225, WTI/Crude=OILWTI, Dow=US30, Nasdaq=US100, S&P=US500, DAX=DE40, FTSE=UK100, BTC=BTCUSD\n\nResearch:\n${cleaned}`;
       const apiRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -3821,11 +3847,16 @@ cron.schedule('2,22,42 * * * *', async () => {
 });
 
 // Nightly review — 23:00 UTC: weight learning + daily summary
+// claudeLearner.dailySessionSummary REMOVED 2026-05-17 — Anthropic killswitch (was the biggest daily spender)
 cron.schedule('0 23 * * *', async () => {
   try {
-    console.log('[Cron] Nightly review starting — learning + summary...');
+    console.log('[Cron] Nightly review starting — learning only (Claude summary disabled)...');
     await runLearningCycle(broadcast);
-    await claudeLearner.dailySessionSummary(broadcast);
+    if (!ANTHROPIC_DISABLED) {
+      await claudeLearner.dailySessionSummary(broadcast);
+    } else {
+      console.log('[Cron] claudeLearner.dailySessionSummary skipped — ANTHROPIC_DISABLED');
+    }
     console.log('[Cron] Nightly review complete');
   } catch(e) { console.error('[Cron] Nightly review error:', e.message); }
 });
@@ -3840,7 +3871,12 @@ cron.schedule('30 23 * * *', async () => {
 });
 
 // Weekly entry optimisation — Sunday 22:00 UTC (before Monday open)
+// DISABLED 2026-05-17 — Anthropic killswitch (fires ~29 Claude calls per run)
 cron.schedule('0 22 * * 0', async () => {
+  if (ANTHROPIC_DISABLED) {
+    console.log('[Cron] Weekly entry optimisation skipped — ANTHROPIC_DISABLED');
+    return;
+  }
   try {
     console.log('[Cron] Weekly entry optimisation starting...');
     for (const symbol of Object.keys(SYMBOLS)) {
@@ -3925,6 +3961,10 @@ const macroContext = {};
 
 // ── Claude web search helper (handles multi-turn tool_use pattern) ───────────
 async function callClaudeWithSearch(prompt) {
+  if (ANTHROPIC_DISABLED) {
+    console.log('[Macro] callClaudeWithSearch DISABLED — returning null');
+    return null;
+  }
   const apiKey = process.env.ANTHROPIC_API_KEY;
   const headers = { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' };
   const tools = [{ type: 'web_search_20260209', name: 'web_search' }];
@@ -3967,6 +4007,10 @@ async function callClaudeWithSearch(prompt) {
 // This guard exists because startup macro fetches have regressed 3+ times.
 const MACRO_ALLOWED_CALLERS = new Set(['cron_0700', 'cron_macro_watchdog', 'macro_force', 'macro_refresh']);
 async function runMacroContextFetch(broadcast, caller) {
+  if (ANTHROPIC_DISABLED) {
+    console.log(`[Macro] runMacroContextFetch DISABLED — caller=${caller || 'unknown'}; no Anthropic calls fired`);
+    return;
+  }
   if (!MACRO_ALLOWED_CALLERS.has(caller)) {
     const msg = `[MACRO GUARD] BLOCKED — runMacroContextFetch called by "${caller || 'unknown'}". Only allowed: ${[...MACRO_ALLOWED_CALLERS].join(', ')}`;
     console.error(msg);
@@ -4091,6 +4135,10 @@ async function runMacroContextFetch(broadcast, caller) {
 
   // ── Consensus fetch for upcoming meetings (within 21 days) ────────────────
   // Only fires when meetings are near — typically 0-2 calls per day
+  if (ANTHROPIC_DISABLED) {
+    console.log('[Macro] Consensus fetch DISABLED — no Anthropic calls');
+    return;
+  }
   if (!process.env.ANTHROPIC_API_KEY) return;
   try {
     const cbUpcoming = getUpcomingMeetings(21);

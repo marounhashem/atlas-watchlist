@@ -3,8 +3,14 @@
 // Fires: after every WIN/LOSS + daily at 17:00 UTC (end London) + every 20 outcomes
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const MODEL_HAIKU  = 'claude-haiku-4-5-20251001';  // all calls use Haiku
+const MODEL_HAIKU  = 'claude-haiku-4-5';  // all calls use Haiku (alias form per skill guidance)
 const MODEL = MODEL_HAIKU;
+
+// Kill switch — set true to disable every Anthropic call this module makes.
+// Matches the index.js ANTHROPIC_DISABLED flag. 2026-05-17: enabled per
+// operator directive (zero spend). detectRegime, dailySessionSummary,
+// calculateExactLevels, optimiseEntryLevels all short-circuit to null/no-op.
+const ANTHROPIC_DISABLED = true;
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let outcomesSinceLastRegime = 0;
@@ -16,6 +22,7 @@ let regimeCache            = null; // current market regime
 
 // ── Market regime detection ──────────────────────────────────────────────────
 async function detectRegime() {
+  if (ANTHROPIC_DISABLED) return null;
   if (!ANTHROPIC_API_KEY) return null;
 
   try {
@@ -86,6 +93,7 @@ Classify the current market regime and return ONLY this JSON (no markdown):
 
 // ── Daily session summary ─────────────────────────────────────────────────────
 async function dailySessionSummary(broadcast) {
+  if (ANTHROPIC_DISABLED) return;
   const today = new Date().toDateString();
   if (lastDailySummaryDate === today) return; // already ran today
   lastDailySummaryDate = today;
@@ -341,6 +349,7 @@ Return ONLY this JSON (no markdown):
 }
 
 async function optimiseEntryLevels(symbol) {
+  if (ANTHROPIC_DISABLED) return null;
   if (!ANTHROPIC_API_KEY) return null;
 
   try {
